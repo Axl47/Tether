@@ -2,12 +2,14 @@
 import "../index.css";
 
 import {
+  type EventId,
   ORCHESTRATION_WS_METHODS,
   type MessageId,
   type OrchestrationReadModel,
   type ProjectId,
   type ServerConfig,
   type ThreadId,
+  type TurnId,
   type WsWelcomePayload,
   WS_CHANNELS,
   WS_METHODS,
@@ -69,6 +71,7 @@ const TEXT_VIEWPORT_MATRIX = [
   { name: "mobile", width: 430, height: 932, textTolerancePx: 56, attachmentTolerancePx: 56 },
   { name: "narrow", width: 320, height: 700, textTolerancePx: 84, attachmentTolerancePx: 56 },
 ] as const satisfies readonly ViewportSpec[];
+const MOBILE_VIEWPORT = TEXT_VIEWPORT_MATRIX[2];
 const ATTACHMENT_VIEWPORT_MATRIX = [
   DEFAULT_VIEWPORT,
   { name: "mobile", width: 430, height: 932, textTolerancePx: 56, attachmentTolerancePx: 56 },
@@ -256,6 +259,61 @@ function createDraftOnlySnapshot(): OrchestrationReadModel {
   };
 }
 
+function createSnapshotWithExecutingPlan(): OrchestrationReadModel {
+  const snapshot = createSnapshotForTargetUser({
+    targetMessageId: "msg-user-plan-target" as MessageId,
+    targetText: "plan target",
+  });
+  const turnId = "turn-browser-plan-1" as TurnId;
+  const thread = snapshot.threads[0];
+
+  if (!thread?.session) {
+    throw new Error("Expected browser test snapshot to include a thread session.");
+  }
+
+  return {
+    ...snapshot,
+    threads: [
+      {
+        ...thread,
+        latestTurn: {
+          turnId,
+          state: "running",
+          requestedAt: isoAt(120),
+          startedAt: isoAt(121),
+          completedAt: null,
+          assistantMessageId: null,
+        },
+        activities: [
+          {
+            id: "event-plan-browser-1" as EventId,
+            tone: "info",
+            kind: "turn.plan.updated",
+            summary: "Plan updated",
+            payload: {
+              explanation: "Implement a minimize control for the active plan card.",
+              plan: [
+                { step: "Inspect the active thread plan UI", status: "completed" },
+                { step: "Add a minimize toggle", status: "inProgress" },
+                { step: "Verify thread behavior in browser tests", status: "pending" },
+              ],
+            },
+            turnId,
+            sequence: 1,
+            createdAt: isoAt(122),
+          },
+        ],
+        session: {
+          ...thread.session,
+          status: "running",
+          activeTurnId: turnId,
+          updatedAt: isoAt(123),
+        },
+      },
+    ],
+  };
+}
+
 function resolveWsRpc(tag: string): unknown {
   if (tag === ORCHESTRATION_WS_METHODS.getSnapshot) {
     return fixture.snapshot;
@@ -399,6 +457,20 @@ async function waitForComposerEditor(): Promise<HTMLElement> {
   );
 }
 
+async function waitForComposerImagePickerButton(): Promise<HTMLButtonElement> {
+  return waitForElement(
+    () => document.querySelector<HTMLButtonElement>("[data-composer-image-picker='true']"),
+    "Unable to find composer image picker button.",
+  );
+}
+
+async function waitForComposerImageInput(): Promise<HTMLInputElement> {
+  return waitForElement(
+    () => document.querySelector<HTMLInputElement>("[data-composer-image-input='true']"),
+    "Unable to find composer image input.",
+  );
+}
+
 async function waitForInteractionModeButton(expectedLabel: "Chat" | "Plan"): Promise<HTMLButtonElement> {
   return waitForElement(
     () =>
@@ -409,10 +481,34 @@ async function waitForInteractionModeButton(expectedLabel: "Chat" | "Plan"): Pro
   );
 }
 
+async function waitForInteractionModeToggle(mode: "chat" | "plan"): Promise<HTMLButtonElement> {
+  return waitForElement(
+    () =>
+      document.querySelector<HTMLButtonElement>(`button[data-interaction-mode="${mode}"]`),
+    `Unable to find ${mode} interaction mode toggle.`,
+  );
+}
+
 async function waitForThreadContextJumpButton(): Promise<HTMLButtonElement> {
   return waitForElement(
     () => document.querySelector<HTMLButtonElement>("[data-thread-context-jump='true']"),
     "Unable to find thread context jump button.",
+  );
+}
+
+async function waitForThreadContextToggle(mode: "original" | "last"): Promise<HTMLButtonElement> {
+  const ariaLabel =
+    mode === "original" ? "Show original thread context" : "Show latest thread context";
+  return waitForElement(
+    () => document.querySelector<HTMLButtonElement>(`button[aria-label="${ariaLabel}"]`),
+    `Unable to find ${mode} thread context toggle.`,
+  );
+}
+
+async function waitForPlanModePanelToggle(): Promise<HTMLButtonElement> {
+  return waitForElement(
+    () => document.querySelector<HTMLButtonElement>("[data-plan-mode-panel-toggle='true']"),
+    "Unable to find plan mode panel toggle.",
   );
 }
 
@@ -794,6 +890,33 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("uses the latest user message for last thread context", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-target-context-last" as MessageId,
+        targetText: "context jump target",
+      }),
+    });
+
+    try {
+      const latestContextToggle = await waitForThreadContextToggle("last");
+      const contextJumpButton = await waitForThreadContextJumpButton();
+
+      latestContextToggle.click();
+
+      await vi.waitFor(
+        () => {
+          expect(contextJumpButton.textContent).toContain("filler user message 21");
+          expect(contextJumpButton.textContent).not.toContain("assistant filler 21");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("opens the project cwd for draft threads without a worktree path", async () => {
     useComposerDraftStore.setState({
       draftThreadsByThreadId: {
@@ -841,6 +964,77 @@ describe("ChatView timeline estimator parity (full app)", () => {
             cwd: "/repo/project",
             editor: "vscode",
           });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("renders distinct interaction mode icons on mobile", async () => {
+    const mounted = await mountChatView({
+      viewport: MOBILE_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-target-mobile-toggle" as MessageId,
+        targetText: "mobile toggle target",
+      }),
+    });
+
+    try {
+      const chatModeButton = await waitForInteractionModeButton("Chat");
+      expect(chatModeButton.dataset.interactionMode).toBe("chat");
+      expect(
+        chatModeButton.querySelector("[data-interaction-mode-icon='chat']"),
+      ).toBeTruthy();
+
+      chatModeButton.click();
+
+      await vi.waitFor(
+        async () => {
+          const planModeButton = await waitForInteractionModeToggle("plan");
+          expect(planModeButton.textContent?.trim()).toBe("Plan");
+          expect(
+            planModeButton.querySelector("[data-interaction-mode-icon='plan']"),
+          ).toBeTruthy();
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("supports multi-image upload from the mobile composer toolbar button", async () => {
+    const mounted = await mountChatView({
+      viewport: MOBILE_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-target-mobile-upload" as MessageId,
+        targetText: "mobile upload target",
+      }),
+    });
+
+    try {
+      const uploadButton = await waitForComposerImagePickerButton();
+      const imageInput = await waitForComposerImageInput();
+
+      expect(uploadButton.getAttribute("aria-label")).toBe("Upload images");
+      expect(imageInput.accept).toBe("image/*");
+      expect(imageInput.multiple).toBe(true);
+
+      const transfer = new DataTransfer();
+      transfer.items.add(new File(["first"], "first.png", { type: "image/png" }));
+      transfer.items.add(new File(["second"], "second.png", { type: "image/png" }));
+
+      Object.defineProperty(imageInput, "files", {
+        configurable: true,
+        value: transfer.files,
+      });
+      imageInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+      await vi.waitFor(
+        () => {
+          expect(document.querySelectorAll("[data-composer-image-chip='true']").length).toBe(2);
         },
         { timeout: 8_000, interval: 16 },
       );
@@ -906,6 +1100,50 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await vi.waitFor(
         async () => {
           expect((await waitForInteractionModeButton("Chat")).title).toContain("enter plan mode");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("minimizes and restores the active plan card in the thread view", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotWithExecutingPlan(),
+    });
+
+    try {
+      await vi.waitFor(
+        () => {
+          expect(document.querySelector("[data-plan-mode-panel-body='true']")).toBeTruthy();
+          expect(document.body.textContent).toContain("Add a minimize toggle");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const toggle = await waitForPlanModePanelToggle();
+      expect(toggle.textContent?.trim()).toContain("Minimize");
+      toggle.click();
+
+      await vi.waitFor(
+        () => {
+          expect(document.querySelector("[data-plan-mode-panel-body='true']")).toBeNull();
+          expect(document.body.textContent).not.toContain("Add a minimize toggle");
+          expect(document.body.textContent).toContain("3 steps, 1 in progress, 1 done, 1 pending");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const expandToggle = await waitForPlanModePanelToggle();
+      expect(expandToggle.textContent?.trim()).toContain("Expand");
+      expandToggle.click();
+
+      await vi.waitFor(
+        () => {
+          expect(document.querySelector("[data-plan-mode-panel-body='true']")).toBeTruthy();
+          expect(document.body.textContent).toContain("Add a minimize toggle");
         },
         { timeout: 8_000, interval: 16 },
       );

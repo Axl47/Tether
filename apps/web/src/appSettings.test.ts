@@ -47,6 +47,12 @@ describe("getAppModelOptions", () => {
       isCustom: true,
     });
   });
+
+  it("supports provider-specific Claude custom models", () => {
+    const options = getAppModelOptions("claudeCode", ["claude-sonnet-5-0"]);
+
+    expect(options.map((option) => option.slug)).toContain("claude-sonnet-5-0");
+  });
 });
 
 describe("resolveAppModelSelection", () => {

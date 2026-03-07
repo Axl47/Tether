@@ -22,6 +22,10 @@ import { useAppSettings } from "../appSettings";
 import { isElectron } from "../env";
 import { APP_STAGE_LABEL } from "../branding";
 import { newCommandId, newProjectId, newThreadId } from "../lib/utils";
+import {
+  DEFAULT_SIDEBAR_THREAD_SORT,
+  SIDEBAR_THREAD_SORT_OPTIONS,
+} from "../sidebarThreadSort";
 import { useStore } from "../store";
 import { isChatNewLocalShortcut, isChatNewShortcut, shortcutLabelForCommand } from "../keybindings";
 import { derivePendingApprovals, derivePendingUserInputs } from "../session-logic";
@@ -57,7 +61,8 @@ import {
   SidebarSeparator,
   SidebarTrigger,
 } from "./ui/sidebar";
-import { deriveThreadStatusPill } from "./Sidebar.logic";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
+import { deriveThreadStatusPill, getThreadLatestActivityAt, sortSidebarThreads } from "./Sidebar.logic";
 import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
 import { isNonEmpty as isNonEmptyString } from "effect/String";
 
@@ -220,7 +225,7 @@ export default function Sidebar() {
     (store) => store.clearProjectDraftThreadById,
   );
   const navigate = useNavigate();
-  const { settings: appSettings } = useAppSettings();
+  const { settings: appSettings, updateSettings } = useAppSettings();
   const routeThreadId = useParams({
     strict: false,
     select: (params) => (params.threadId ? ThreadId.makeUnsafe(params.threadId) : null),
@@ -841,6 +846,7 @@ export default function Sidebar() {
       shortcutLabelForCommand(keybindings, "chat.new"),
     [keybindings],
   );
+  const threadSort = appSettings.sidebarThreadSort ?? DEFAULT_SIDEBAR_THREAD_SORT;
 
   const handleDesktopUpdateButtonClick = useCallback(() => {
     const bridge = window.desktopBridge;
@@ -968,15 +974,56 @@ export default function Sidebar() {
 
       <SidebarContent className="gap-0">
         <SidebarGroup className="px-2 py-2">
+          {projects.length > 0 && (
+            <div className="px-1 pb-2">
+              <label className="block space-y-1">
+                <span className="px-1 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60">
+                  Thread sort
+                </span>
+                <Select
+                  items={SIDEBAR_THREAD_SORT_OPTIONS.map((option) => ({
+                    label: option.label,
+                    value: option.value,
+                  }))}
+                  value={threadSort}
+                  onValueChange={(value) => {
+                    if (!value) return;
+                    updateSettings({ sidebarThreadSort: value });
+                  }}
+                >
+                  <SelectTrigger
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 w-full rounded-md px-2 text-xs text-muted-foreground/80 hover:text-foreground"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectPopup alignItemWithTrigger={false}>
+                    {SIDEBAR_THREAD_SORT_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        <div className="flex min-w-0 flex-col">
+                          <span className="truncate">{option.label}</span>
+                          <span className="truncate text-[10px] text-muted-foreground/70">
+                            {option.description}
+                          </span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
+              </label>
+            </div>
+          )}
           <SidebarMenu>
             {projects.map((project) => {
-              const projectThreads = threads
-                .filter((thread) => thread.projectId === project.id)
-                .toSorted((a, b) => {
-                  const byDate = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-                  if (byDate !== 0) return byDate;
-                  return b.id.localeCompare(a.id);
-                });
+              const projectThreads = sortSidebarThreads(
+                threads.filter((thread) => thread.projectId === project.id),
+                {
+                  sortBy: threadSort,
+                  hasPendingApprovalsByThreadId: pendingApprovalByThreadId,
+                  hasPendingUserInputByThreadId: pendingUserInputByThreadId,
+                },
+              );
               const isThreadListExpanded = expandedThreadListsByProject.has(project.id);
               const hasHiddenThreads = projectThreads.length > THREAD_PREVIEW_LIMIT;
               const visibleThreads =
@@ -1065,6 +1112,12 @@ export default function Sidebar() {
                             selectThreadTerminalState(terminalStateByThreadId, thread.id)
                               .runningTerminalIds,
                           );
+                          const threadTimestamp =
+                            threadSort === "activity"
+                              ? getThreadLatestActivityAt(thread)
+                              : thread.createdAt;
+                          const threadTimestampTitle =
+                            threadSort === "activity" ? "Last activity" : "Created";
 
                           return (
                             <SidebarMenuSubItem key={thread.id} className="w-full">
@@ -1185,8 +1238,9 @@ export default function Sidebar() {
                                     className={`text-[10px] ${
                                       isActive ? "text-foreground/65" : "text-muted-foreground/40"
                                     }`}
+                                    title={`${threadTimestampTitle} ${formatRelativeTime(threadTimestamp)}`}
                                   >
-                                    {formatRelativeTime(thread.createdAt)}
+                                    {formatRelativeTime(threadTimestamp)}
                                   </span>
                                 </div>
                               </SidebarMenuSubButton>

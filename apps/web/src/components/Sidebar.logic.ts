@@ -1,3 +1,4 @@
+import type { SidebarThreadSort } from "../sidebarThreadSort";
 import type { Thread } from "../types";
 
 export interface ThreadStatusPill {
@@ -5,6 +6,12 @@ export interface ThreadStatusPill {
   colorClass: string;
   dotClass: string;
   pulse: boolean;
+}
+
+export interface SortSidebarThreadsOptions {
+  readonly sortBy: SidebarThreadSort;
+  readonly hasPendingApprovalsByThreadId: ReadonlyMap<Thread["id"], boolean>;
+  readonly hasPendingUserInputByThreadId: ReadonlyMap<Thread["id"], boolean>;
 }
 
 type ThreadStatusSource = {
@@ -77,4 +84,124 @@ export function deriveThreadStatusPill(input: {
   }
 
   return null;
+}
+
+function parseIsoMs(value: string | null | undefined): number {
+  if (!value) return Number.NEGATIVE_INFINITY;
+  const timestamp = Date.parse(value);
+  return Number.isNaN(timestamp) ? Number.NEGATIVE_INFINITY : timestamp;
+}
+
+export function getThreadLatestActivityAt(thread: Thread): string {
+  let latestMs = parseIsoMs(thread.createdAt);
+  let latestIso = thread.createdAt;
+
+  const updateLatest = (candidate: string | null | undefined) => {
+    const candidateMs = parseIsoMs(candidate);
+    if (candidateMs <= latestMs) return;
+    latestMs = candidateMs;
+    latestIso = candidate!;
+  };
+
+  updateLatest(thread.session?.updatedAt);
+  updateLatest(thread.latestTurn?.requestedAt);
+  updateLatest(thread.latestTurn?.startedAt);
+  updateLatest(thread.latestTurn?.completedAt);
+
+  for (const message of thread.messages) {
+    updateLatest(message.completedAt);
+    updateLatest(message.createdAt);
+  }
+  for (const proposedPlan of thread.proposedPlans) {
+    updateLatest(proposedPlan.updatedAt);
+    updateLatest(proposedPlan.createdAt);
+  }
+  for (const activity of thread.activities) {
+    updateLatest(activity.createdAt);
+  }
+
+  return latestIso;
+}
+
+function getThreadStatusRank(input: {
+  readonly thread: Thread;
+  readonly hasPendingApprovals: boolean;
+  readonly hasPendingUserInput: boolean;
+}): number {
+  const pill = deriveThreadStatusPill(input);
+  switch (pill?.label) {
+    case "Pending Approval":
+      return 0;
+    case "Paused":
+      return 1;
+    case "Working":
+      return 2;
+    case "Connecting":
+      return 3;
+    case "Completed":
+      return 4;
+    default:
+      return 5;
+  }
+}
+
+function compareNames(left: Thread, right: Thread): number {
+  return left.title.localeCompare(right.title, undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
+export function sortSidebarThreads(
+  threads: readonly Thread[],
+  options: SortSidebarThreadsOptions,
+): Thread[] {
+  const entries = threads.map((thread) => ({
+    thread,
+    createdAtMs: parseIsoMs(thread.createdAt),
+    latestActivityAtMs: parseIsoMs(getThreadLatestActivityAt(thread)),
+    statusRank: getThreadStatusRank({
+      thread,
+      hasPendingApprovals: options.hasPendingApprovalsByThreadId.get(thread.id) === true,
+      hasPendingUserInput: options.hasPendingUserInputByThreadId.get(thread.id) === true,
+    }),
+  }));
+
+  entries.sort((left, right) => {
+    if (options.sortBy === "name") {
+      const byName = compareNames(left.thread, right.thread);
+      if (byName !== 0) return byName;
+      const byActivity = right.latestActivityAtMs - left.latestActivityAtMs;
+      if (byActivity !== 0) return byActivity;
+      return left.thread.id.localeCompare(right.thread.id);
+    }
+
+    if (options.sortBy === "status") {
+      const byStatus = left.statusRank - right.statusRank;
+      if (byStatus !== 0) return byStatus;
+      const byActivity = right.latestActivityAtMs - left.latestActivityAtMs;
+      if (byActivity !== 0) return byActivity;
+      const byName = compareNames(left.thread, right.thread);
+      if (byName !== 0) return byName;
+      return left.thread.id.localeCompare(right.thread.id);
+    }
+
+    if (options.sortBy === "created") {
+      const byCreatedAt = right.createdAtMs - left.createdAtMs;
+      if (byCreatedAt !== 0) return byCreatedAt;
+      const byName = compareNames(left.thread, right.thread);
+      if (byName !== 0) return byName;
+      return left.thread.id.localeCompare(right.thread.id);
+    }
+
+    const byActivity = right.latestActivityAtMs - left.latestActivityAtMs;
+    if (byActivity !== 0) return byActivity;
+    const byCreatedAt = right.createdAtMs - left.createdAtMs;
+    if (byCreatedAt !== 0) return byCreatedAt;
+    const byName = compareNames(left.thread, right.thread);
+    if (byName !== 0) return byName;
+    return left.thread.id.localeCompare(right.thread.id);
+  });
+
+  return entries.map((entry) => entry.thread);
 }

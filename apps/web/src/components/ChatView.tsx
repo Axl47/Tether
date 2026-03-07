@@ -134,8 +134,11 @@ import {
   DiffIcon,
   EllipsisIcon,
   FolderClosedIcon,
+  ImagePlusIcon,
   LockIcon,
   LockOpenIcon,
+  ListTodoIcon,
+  MessageSquareIcon,
   Undo2Icon,
   XIcon,
   CopyIcon,
@@ -250,6 +253,21 @@ function resolveThreadContextMessage(
 ): ChatMessage | null {
   return messages.find((message) => message.role === "user") ?? messages[0] ?? null;
 }
+
+function resolveLatestThreadContextMessage(
+  messages: ReadonlyArray<ChatMessage>,
+): ChatMessage | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role === "user") {
+      return message;
+    }
+  }
+
+  return messages.at(-1) ?? null;
+}
+
+type ThreadContextMode = "original" | "last";
 
 const LAST_EDITOR_KEY = "t3code:last-editor";
 const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY = "t3code:last-invoked-script-by-project";
@@ -686,6 +704,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   } | null>(null);
   const pendingInteractionAnchorFrameRef = useRef<number | null>(null);
   const composerEditorRef = useRef<ComposerPromptEditorHandle>(null);
+  const composerImageInputRef = useRef<HTMLInputElement>(null);
   const composerFormRef = useRef<HTMLFormElement>(null);
   const composerFormHeightRef = useRef(0);
   const composerImagesRef = useRef<ComposerImageAttachment[]>([]);
@@ -758,6 +777,24 @@ export default function ChatView({ threadId }: ChatViewProps) {
     composerDraft.runtimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
   const interactionMode =
     composerDraft.interactionMode ?? activeThread?.interactionMode ?? DEFAULT_INTERACTION_MODE;
+  const interactionModeToggle = useMemo(
+    () =>
+      interactionMode === "plan"
+        ? {
+            mode: "plan" as const,
+            label: "Plan",
+            title: "Plan mode — click to return to normal chat mode",
+            icon: ListTodoIcon,
+          }
+        : {
+            mode: "chat" as const,
+            label: "Chat",
+            title: "Default mode — click to enter plan mode",
+            icon: MessageSquareIcon,
+          },
+    [interactionMode],
+  );
+  const InteractionModeIcon = interactionModeToggle.icon;
   const isServerThread = serverThread !== undefined;
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
   const diffSearch = useMemo(
@@ -806,7 +843,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
     selectedProvider,
     activeThread?.model ?? activeProject?.model ?? getDefaultModel(selectedProvider),
   );
-  const customModelsForSelectedProvider = settings.customCodexModels;
+  const customModelsForSelectedProvider =
+    selectedProvider === "claudeCode" ? settings.customClaudeModels : settings.customCodexModels;
   const selectedModel = useMemo(() => {
     const draftModel = composerDraft.model;
     if (!draftModel) {
@@ -1074,10 +1112,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
     return [...serverMessagesWithPreviewHandoff, ...pendingMessages];
   }, [serverMessages, attachmentPreviewHandoffByMessageId, optimisticUserMessages]);
-  const threadContextMessage = useMemo(
+  const originalThreadContextMessage = useMemo(
     () => resolveThreadContextMessage(timelineMessages),
     [timelineMessages],
   );
+  const latestThreadContextMessage = useMemo(
+    () => resolveLatestThreadContextMessage(timelineMessages),
+    [timelineMessages],
+  );
+  const [threadContextMode, setThreadContextMode] = useState<ThreadContextMode>("original");
+  const threadContextMessage =
+    threadContextMode === "last" ? latestThreadContextMessage : originalThreadContextMessage;
+  useEffect(() => {
+    setThreadContextMode("original");
+  }, [threadId]);
   const [threadContextJumpRequestKey, setThreadContextJumpRequestKey] = useState(0);
   const onJumpToThreadContext = useCallback(() => {
     if (!threadContextMessage) {
@@ -1085,12 +1133,19 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
     const scrollContainer = messagesScrollRef.current;
     if (scrollContainer) {
-      scrollContainer.scrollTo({ top: 0, behavior: "smooth" });
-      lastKnownScrollTopRef.current = 0;
-      shouldAutoScrollRef.current = false;
+      if (threadContextMode === "last") {
+        const nextTop = scrollContainer.scrollHeight;
+        scrollContainer.scrollTo({ top: nextTop, behavior: "smooth" });
+        lastKnownScrollTopRef.current = nextTop;
+        shouldAutoScrollRef.current = true;
+      } else {
+        scrollContainer.scrollTo({ top: 0, behavior: "smooth" });
+        lastKnownScrollTopRef.current = 0;
+        shouldAutoScrollRef.current = false;
+      }
     }
     setThreadContextJumpRequestKey((value) => value + 1);
-  }, [threadContextMessage]);
+  }, [threadContextMessage, threadContextMode]);
   const timelineEntries = useMemo(
     () =>
       deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], workLogEntries),
@@ -2275,8 +2330,21 @@ export default function ChatView({ threadId }: ChatViewProps) {
     setThreadError(activeThreadId, error);
   };
 
+  const openComposerImagePicker = () => {
+    composerImageInputRef.current?.click();
+  };
+
   const removeComposerImage = (imageId: string) => {
     removeComposerImageFromDraft(imageId);
+  };
+
+  const onComposerImageInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.currentTarget.files ?? []);
+    if (files.length > 0) {
+      addComposerImages(files);
+      scheduleComposerFocus();
+    }
+    event.currentTarget.value = "";
   };
 
   const onComposerPaste = (event: React.ClipboardEvent<HTMLElement>) => {
@@ -3045,7 +3113,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
       setComposerDraftProvider(activeThread.id, provider);
       setComposerDraftModel(
         activeThread.id,
-        resolveAppModelSelection(provider, settings.customCodexModels, model),
+        resolveAppModelSelection(
+          provider,
+          provider === "claudeCode" ? settings.customClaudeModels : settings.customCodexModels,
+          model,
+        ),
       );
       scheduleComposerFocus();
     },
@@ -3055,6 +3127,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       scheduleComposerFocus,
       setComposerDraftModel,
       setComposerDraftProvider,
+      settings.customClaudeModels,
       settings.customCodexModels,
     ],
   );
@@ -3392,6 +3465,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
       <ThreadErrorBanner error={activeThread.error} />
       <ThreadContextPanel
         contextMessage={threadContextMessage}
+        contextMode={threadContextMode}
+        onContextModeChange={setThreadContextMode}
         onJumpToMessage={onJumpToThreadContext}
       />
       <PlanModePanel activePlan={activePlan} />
@@ -3507,6 +3582,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                   {composerImages.map((image) => (
                     <div
                       key={image.id}
+                      data-composer-image-chip="true"
                       className="relative h-16 w-16 overflow-hidden rounded-lg border border-border/80 bg-background"
                     >
                       {image.previewUrl ? (
@@ -3639,15 +3715,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
                     size="sm"
                     type="button"
                     onClick={toggleInteractionMode}
-                    title={
-                      interactionMode === "plan"
-                        ? "Plan mode — click to return to normal chat mode"
-                        : "Default mode — click to enter plan mode"
-                    }
+                    data-interaction-mode={interactionModeToggle.mode}
+                    title={interactionModeToggle.title}
                   >
-                    <BotIcon />
+                    <InteractionModeIcon data-interaction-mode-icon={interactionModeToggle.mode} />
                     <span className="sr-only sm:not-sr-only">
-                      {interactionMode === "plan" ? "Plan" : "Chat"}
+                      {interactionModeToggle.label}
                     </span>
                   </Button>
 
@@ -3676,6 +3749,34 @@ export default function ChatView({ threadId }: ChatViewProps) {
                       {runtimeMode === "full-access" ? "Full access" : "Supervised"}
                     </span>
                   </Button>
+                  {!isComposerApprovalState && pendingUserInputs.length === 0 ? (
+                    <>
+                      <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
+                      <input
+                        ref={composerImageInputRef}
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        className="hidden"
+                        tabIndex={-1}
+                        data-composer-image-input="true"
+                        onChange={onComposerImageInputChange}
+                      />
+                      <Button
+                        variant="ghost"
+                        className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
+                        size="sm"
+                        type="button"
+                        title="Upload images"
+                        aria-label="Upload images"
+                        data-composer-image-picker="true"
+                        onClick={openComposerImagePicker}
+                      >
+                        <ImagePlusIcon />
+                        <span className="sr-only sm:not-sr-only">Upload images</span>
+                      </Button>
+                    </>
+                  ) : null}
                 </div>
 
                 {/* Right side: send / stop button */}
@@ -4174,83 +4275,179 @@ interface PlanModePanelProps {
   activePlan: ReturnType<typeof deriveActivePlanState>;
 }
 
+function summarizeActivePlanSteps(
+  steps: NonNullable<ReturnType<typeof deriveActivePlanState>>["steps"],
+): string {
+  const inProgressCount = steps.filter((step) => step.status === "inProgress").length;
+  const completedCount = steps.filter((step) => step.status === "completed").length;
+  const pendingCount = steps.length - inProgressCount - completedCount;
+  const parts = [`${steps.length} ${steps.length === 1 ? "step" : "steps"}`];
+
+  if (inProgressCount > 0) {
+    parts.push(`${inProgressCount} in progress`);
+  }
+  if (completedCount > 0) {
+    parts.push(`${completedCount} done`);
+  }
+  if (pendingCount > 0) {
+    parts.push(`${pendingCount} pending`);
+  }
+
+  return parts.join(", ");
+}
+
 const ThreadContextPanel = memo(function ThreadContextPanel(props: {
   contextMessage: ChatMessage | null;
+  contextMode: ThreadContextMode;
+  onContextModeChange: (mode: ThreadContextMode) => void;
   onJumpToMessage: () => void;
 }) {
-  const { contextMessage, onJumpToMessage } = props;
+  const { contextMessage, contextMode, onContextModeChange, onJumpToMessage } = props;
   if (!contextMessage) {
     return null;
   }
 
   return (
     <div className="mx-auto max-w-3xl pt-3">
-      <button
-        type="button"
-        data-thread-context-jump="true"
-        data-thread-context-message-id={contextMessage.id}
-        className="group w-full rounded-xl border border-border/70 bg-card/70 px-4 py-3 text-left transition-colors duration-150 hover:border-border hover:bg-card"
-        onClick={onJumpToMessage}
-      >
-        <div className="flex items-center gap-2">
-          <Badge variant="outline">Context</Badge>
-          <span className="text-xs text-muted-foreground">
-            Started {formatTimestamp(contextMessage.createdAt)}
-          </span>
+      <div className="w-full rounded-xl border border-border/70 bg-accent/40 px-4 py-3 transition-colors duration-150">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <Badge variant="outline">Context</Badge>
+            <span className="text-xs text-muted-foreground">
+              {contextMode === "last" ? "Updated" : "Started"}{" "}
+              {formatTimestamp(contextMessage.createdAt)}
+            </span>
+          </div>
+          <Group aria-label="Context message range">
+            <Toggle
+              size="xs"
+              variant="outline"
+              pressed={contextMode === "original"}
+              onPressedChange={(pressed) => {
+                if (pressed) {
+                  onContextModeChange("original");
+                }
+              }}
+              aria-label="Show original thread context"
+            >
+              Original
+            </Toggle>
+            <Toggle
+              size="xs"
+              variant="outline"
+              pressed={contextMode === "last"}
+              onPressedChange={(pressed) => {
+                if (pressed) {
+                  onContextModeChange("last");
+                }
+              }}
+              aria-label="Show latest thread context"
+            >
+              Last
+            </Toggle>
+          </Group>
         </div>
-        <div className="mt-2 flex items-center justify-between gap-3">
-          <p className="min-w-0 flex-1 truncate text-sm text-foreground/90">
+        <button
+          type="button"
+          data-thread-context-jump="true"
+          data-thread-context-message-id={contextMessage.id}
+          className="group mt-2 flex w-full items-start justify-between gap-3 rounded-lg px-1 py-1 text-left transition-colors duration-150 hover:text-foreground"
+          onClick={onJumpToMessage}
+        >
+          <p className="min-w-0 flex-1 line-clamp-2 text-sm leading-6 text-foreground/90">
             {describeThreadContextMessage(contextMessage)}
           </p>
           <span className="shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted-foreground/70 transition-colors duration-150 group-hover:text-foreground/80">
             Jump
           </span>
-        </div>
-      </button>
+        </button>
+      </div>
     </div>
   );
 });
 
 const PlanModePanel = memo(function PlanModePanel({ activePlan }: PlanModePanelProps) {
+  const [isMinimized, setIsMinimized] = useState(false);
+  const activePlanTurnId = activePlan?.turnId ?? null;
+
+  useEffect(() => {
+    if (activePlanTurnId) {
+      setIsMinimized(false);
+    }
+  }, [activePlanTurnId]);
+
   if (!activePlan) return null;
+
+  const planSummary = summarizeActivePlanSteps(activePlan.steps);
 
   return (
     <div className="pt-3 mx-auto max-w-3xl">
-      <div className="rounded-xl border border-border/70 bg-muted/30 p-4">
-        <div className="flex items-center gap-2">
-          <Badge variant="secondary">Plan</Badge>
-          <span className="text-xs text-muted-foreground">
-            Updated {formatTimestamp(activePlan.createdAt)}
-          </span>
-        </div>
-        {activePlan.explanation ? (
-          <p className="mt-2 text-sm text-muted-foreground">{activePlan.explanation}</p>
-        ) : null}
-        <div className="mt-3 space-y-2">
-          {activePlan.steps.map((step) => (
-            <div
-              key={`${step.status}:${step.step}`}
-              className="flex items-start gap-3 rounded-lg border border-border/60 bg-background/80 px-3 py-2"
-            >
-              <Badge
-                variant={
-                  step.status === "completed"
-                    ? "default"
-                    : step.status === "inProgress"
-                      ? "secondary"
-                      : "outline"
-                }
-              >
-                {step.status === "inProgress"
-                  ? "In progress"
-                  : step.status === "completed"
-                    ? "Done"
-                    : "Pending"}
-              </Badge>
-              <div className="min-w-0 flex-1 text-sm">{step.step}</div>
+      <div
+        data-plan-mode-panel="true"
+        className="rounded-xl border border-border/70 bg-muted/30 p-4"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary">Plan</Badge>
+              <span className="text-xs text-muted-foreground">
+                Updated {formatTimestamp(activePlan.createdAt)}
+              </span>
             </div>
-          ))}
+            {isMinimized ? (
+              <p className="mt-2 text-sm text-muted-foreground">{planSummary}</p>
+            ) : null}
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            data-plan-mode-panel-toggle="true"
+            aria-expanded={!isMinimized}
+            aria-label={isMinimized ? "Expand plan card" : "Minimize plan card"}
+            className="shrink-0"
+            onClick={() => {
+              setIsMinimized((current) => !current);
+            }}
+          >
+            <ChevronDownIcon
+              className={cn("size-4 transition-transform", isMinimized ? "-rotate-90" : "rotate-0")}
+            />
+            {isMinimized ? "Expand" : "Minimize"}
+          </Button>
         </div>
+        {!isMinimized ? (
+          <div data-plan-mode-panel-body="true">
+            {activePlan.explanation ? (
+              <p className="mt-2 text-sm text-muted-foreground">{activePlan.explanation}</p>
+            ) : null}
+            <div className="mt-3 space-y-2">
+              {activePlan.steps.map((step) => (
+                <div
+                  key={`${step.status}:${step.step}`}
+                  className="flex items-start gap-3 rounded-lg border border-border/60 bg-background/80 px-3 py-2"
+                >
+                  <Badge
+                    variant={
+                      step.status === "completed"
+                        ? "default"
+                        : step.status === "inProgress"
+                          ? "secondary"
+                          : "outline"
+                    }
+                  >
+                    {step.status === "inProgress"
+                      ? "In progress"
+                      : step.status === "completed"
+                        ? "Done"
+                        : "Pending"}
+                  </Badge>
+                  <div className="min-w-0 flex-1 text-sm">{step.step}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -5378,7 +5575,7 @@ function isAvailableProviderOption(option: (typeof PROVIDER_OPTIONS)[number]): o
   label: string;
   available: true;
 } {
-  return option.available && option.value !== "claudeCode";
+  return option.available;
 }
 
 const AVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter(isAvailableProviderOption);
@@ -5390,8 +5587,10 @@ const COMING_SOON_PROVIDER_OPTIONS = [
 
 function getCustomModelOptionsByProvider(settings: {
   customCodexModels: readonly string[];
+  customClaudeModels: readonly string[];
 }): Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>> {
   return {
+    claudeCode: getAppModelOptions("claudeCode", settings.customClaudeModels),
     codex: getAppModelOptions("codex", settings.customCodexModels),
   };
 }
@@ -5536,13 +5735,7 @@ const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           const OptionIcon = PROVIDER_ICON_BY_PROVIDER[option.value];
           return (
             <MenuItem key={option.value} disabled>
-              <OptionIcon
-                aria-hidden="true"
-                className={cn(
-                  "size-4 shrink-0 opacity-80",
-                  option.value === "claudeCode" ? "" : "text-muted-foreground/85",
-                )}
-              />
+              <OptionIcon aria-hidden="true" className="size-4 shrink-0 opacity-80" />
               <span>{option.label}</span>
               <span className="ms-auto text-[11px] text-muted-foreground/80 uppercase tracking-[0.08em]">
                 Coming soon
