@@ -7,8 +7,7 @@ import {
   type OrchestrationSessionStatus,
 } from "@t3tools/contracts";
 import {
-  getModelOptions,
-  normalizeModelSlug,
+  resolveProviderForModel,
   resolveModelSlug,
   resolveModelSlugForProvider,
 } from "@t3tools/shared/model";
@@ -143,33 +142,31 @@ function toLegacySessionStatus(
 }
 
 function toLegacyProvider(providerName: string | null): ProviderKind {
-  if (providerName === "codex" || providerName === "claudeCode") {
+  if (providerName === "codex" || providerName === "claudeCode" || providerName === "gemini") {
     return providerName;
   }
   return "codex";
 }
 
-const CODEX_MODEL_SLUGS = new Set<string>(getModelOptions("codex").map((option) => option.slug));
-const CLAUDE_MODEL_SLUGS = new Set<string>(
-  getModelOptions("claudeCode").map((option) => option.slug),
-);
-
 function inferProviderForThreadModel(input: {
   readonly model: string;
   readonly sessionProviderName: string | null;
 }): ProviderKind {
-  if (input.sessionProviderName === "codex" || input.sessionProviderName === "claudeCode") {
+  if (
+    input.sessionProviderName === "codex" ||
+    input.sessionProviderName === "claudeCode" ||
+    input.sessionProviderName === "gemini"
+  ) {
     return input.sessionProviderName;
   }
-  const normalizedClaude = normalizeModelSlug(input.model, "claudeCode");
-  if (normalizedClaude && CLAUDE_MODEL_SLUGS.has(normalizedClaude)) {
-    return "claudeCode";
-  }
-  const normalizedCodex = normalizeModelSlug(input.model, "codex");
-  if (normalizedCodex && CODEX_MODEL_SLUGS.has(normalizedCodex)) {
-    return "codex";
-  }
-  return input.model.trim().startsWith("claude-") ? "claudeCode" : "codex";
+  const trimmedModel = input.model.trim().toLowerCase();
+  const fallbackProvider =
+    trimmedModel.startsWith("claude-")
+      ? "claudeCode"
+      : trimmedModel.startsWith("gemini")
+        ? "gemini"
+        : "codex";
+  return resolveProviderForModel(input.model, fallbackProvider);
 }
 
 function resolveWsHttpOrigin(): string {

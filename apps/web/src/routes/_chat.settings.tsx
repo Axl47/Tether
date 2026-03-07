@@ -8,6 +8,8 @@ import { ZapIcon } from "lucide-react";
 import {
   APP_SERVICE_TIER_OPTIONS,
   MAX_CUSTOM_MODEL_LENGTH,
+  getCustomModelsForProvider,
+  patchCustomModelsForProvider,
   shouldShowFastTierIcon,
   useAppSettings,
 } from "../appSettings";
@@ -61,43 +63,14 @@ const MODEL_PROVIDER_SETTINGS: Array<{
     placeholder: "your-claude-model-slug",
     example: "claude-sonnet-5-0",
   },
+  {
+    provider: "gemini",
+    title: "Gemini",
+    description: "Save additional Gemini model slugs for the picker and `/model` command.",
+    placeholder: "your-gemini-model-slug",
+    example: "gemini-3.1-pro-preview-customtools",
+  },
 ] as const;
-
-function getCustomModelsForProvider(
-  settings: ReturnType<typeof useAppSettings>["settings"],
-  provider: ProviderKind,
-) {
-  switch (provider) {
-    case "claudeCode":
-      return settings.customClaudeModels;
-    case "codex":
-    default:
-      return settings.customCodexModels;
-  }
-}
-
-function getDefaultCustomModelsForProvider(
-  defaults: ReturnType<typeof useAppSettings>["defaults"],
-  provider: ProviderKind,
-) {
-  switch (provider) {
-    case "claudeCode":
-      return defaults.customClaudeModels;
-    case "codex":
-    default:
-      return defaults.customCodexModels;
-  }
-}
-
-function patchCustomModels(provider: ProviderKind, models: string[]) {
-  switch (provider) {
-    case "claudeCode":
-      return { customClaudeModels: models };
-    case "codex":
-    default:
-      return { customCodexModels: models };
-  }
-}
 
 function SettingsRouteView() {
   const { theme, setTheme, resolvedTheme } = useTheme();
@@ -110,6 +83,7 @@ function SettingsRouteView() {
   >({
     codex: "",
     claudeCode: "",
+    gemini: "",
   });
   const [customModelErrorByProvider, setCustomModelErrorByProvider] = useState<
     Partial<Record<ProviderKind, string | null>>
@@ -170,7 +144,7 @@ function SettingsRouteView() {
       return;
     }
 
-    updateSettings(patchCustomModels(provider, [...customModels, normalized]));
+    updateSettings(patchCustomModelsForProvider(provider, [...customModels, normalized]));
     setCustomModelInputByProvider((existing) => ({
       ...existing,
       [provider]: "",
@@ -184,7 +158,9 @@ function SettingsRouteView() {
   const removeCustomModel = useCallback(
     (provider: ProviderKind, slug: string) => {
       const customModels = getCustomModelsForProvider(settings, provider);
-      updateSettings(patchCustomModels(provider, customModels.filter((model) => model !== slug)));
+      updateSettings(
+        patchCustomModelsForProvider(provider, customModels.filter((model) => model !== slug)),
+      );
       setCustomModelErrorByProvider((existing) => ({
         ...existing,
         [provider]: null,
@@ -440,9 +416,9 @@ function SettingsRouteView() {
                                 variant="outline"
                                 onClick={() =>
                                   updateSettings(
-                                    patchCustomModels(
+                                    patchCustomModelsForProvider(
                                       provider,
-                                      [...getDefaultCustomModelsForProvider(defaults, provider)],
+                                      [...getCustomModelsForProvider(defaults, provider)],
                                     ),
                                   )
                                 }

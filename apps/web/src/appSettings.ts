@@ -30,6 +30,7 @@ const MODELS_WITH_FAST_SUPPORT = new Set(["gpt-5.4"]);
 const BUILT_IN_MODEL_SLUGS_BY_PROVIDER: Record<ProviderKind, ReadonlySet<string>> = {
   codex: new Set(getModelOptions("codex").map((option) => option.slug)),
   claudeCode: new Set(getModelOptions("claudeCode").map((option) => option.slug)),
+  gemini: new Set(getModelOptions("gemini").map((option) => option.slug)),
 };
 
 const AppSettingsSchema = Schema.Struct({
@@ -48,6 +49,10 @@ const AppSettingsSchema = Schema.Struct({
   ),
   codexServiceTier: AppServiceTierSchema.pipe(Schema.withConstructorDefault(() => Option.some("auto"))),
   customCodexModels: Schema.Array(Schema.String).pipe(
+    Schema.withConstructorDefault(() => Option.some([])),
+  ),
+  customClaudeModels: Schema.Array(Schema.String).pipe(
+  customGeminiModels: Schema.Array(Schema.String).pipe(
     Schema.withConstructorDefault(() => Option.some([])),
   ),
   customClaudeModels: Schema.Array(Schema.String).pipe(
@@ -117,7 +122,36 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
     ...settings,
     customCodexModels: normalizeCustomModelSlugs(settings.customCodexModels, "codex"),
     customClaudeModels: normalizeCustomModelSlugs(settings.customClaudeModels, "claudeCode"),
+    customGeminiModels: normalizeCustomModelSlugs(settings.customGeminiModels, "gemini"),
+    customClaudeModels: normalizeCustomModelSlugs(settings.customClaudeModels, "claudeCode"),
   };
+}
+
+export function getCustomModelsForProvider(
+  settings: Pick<AppSettings, "customCodexModels" | "customGeminiModels" | "customClaudeModels">,
+  provider: ProviderKind,
+): readonly string[] {
+  switch (provider) {
+    case "claudeCode":
+      return settings.customClaudeModels;
+    case "gemini":
+      return settings.customGeminiModels;
+    case "codex":
+    default:
+      return settings.customCodexModels;
+  }
+}
+
+export function patchCustomModelsForProvider(provider: ProviderKind, models: string[]) {
+  switch (provider) {
+    case "claudeCode":
+      return { customClaudeModels: models } satisfies Partial<AppSettings>;
+    case "gemini":
+      return { customGeminiModels: models } satisfies Partial<AppSettings>;
+    case "codex":
+    default:
+      return { customCodexModels: models } satisfies Partial<AppSettings>;
+  }
 }
 
 export function getAppModelOptions(

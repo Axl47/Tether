@@ -208,7 +208,7 @@ function shouldRemoveDraft(draft: ComposerThreadDraftState): boolean {
 }
 
 function normalizeProviderKind(value: unknown): ProviderKind | null {
-  return value === "codex" || value === "claudeCode" ? value : null;
+  return value === "codex" || value === "claudeCode" || value === "gemini" ? value : null;
 }
 
 function revokeObjectPreviewUrl(previewUrl: string): void {
@@ -766,8 +766,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
         }
         set((state) => {
           const existing = state.draftsByThreadId[threadId];
-          const provider = existing?.provider ?? "codex";
-          const normalizedModel = normalizeModelSlug(model, provider) ?? null;
+          const normalizedModel = normalizeModelSlug(model, existing?.provider ?? "codex") ?? null;
           if (!existing && normalizedModel === null) {
             return state;
           }

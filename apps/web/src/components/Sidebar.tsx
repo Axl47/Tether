@@ -40,6 +40,7 @@ import {
   type DraftThreadState,
   useComposerDraftStore,
 } from "../composerDraftStore";
+import { useThreadRunStateStore } from "../threadRunStateStore";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { toastManager } from "./ui/toast";
 import {
@@ -226,6 +227,7 @@ export default function Sidebar() {
   const draftThreadsByThreadId = useComposerDraftStore((store) => store.draftThreadsByThreadId);
   const getDraftThread = useComposerDraftStore((store) => store.getDraftThread);
   const terminalStateByThreadId = useTerminalStateStore((state) => state.terminalStateByThreadId);
+  const pendingRunByThreadId = useThreadRunStateStore((state) => state.pendingRunByThreadId);
   const clearTerminalState = useTerminalStateStore((state) => state.clearTerminalState);
   const setProjectDraftThreadId = useComposerDraftStore((store) => store.setProjectDraftThreadId);
   const clearProjectDraftThreadId = useComposerDraftStore(
@@ -1298,10 +1300,12 @@ export default function Sidebar() {
                         )}
                         {visibleThreads.map((thread) => {
                           const isActive = routeThreadId === thread.id;
+                          const pendingRun = pendingRunByThreadId[thread.id] ?? null;
                           const threadStatus = deriveThreadStatusPill({
                             thread,
                             hasPendingApprovals: pendingApprovalByThreadId.get(thread.id) === true,
                             hasPendingUserInput: pendingUserInputByThreadId.get(thread.id) === true,
+                            pendingRunPhase: pendingRun?.phase ?? null,
                           });
                           const prStatus = prStatusIndicator(prByThreadId.get(thread.id) ?? null);
                           const terminalStatus = terminalStatusFromRunningIds(

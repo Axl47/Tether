@@ -640,14 +640,21 @@ describe("deriveActiveWorkStartedAt", () => {
 });
 
 describe("PROVIDER_OPTIONS", () => {
-  it("keeps Claude Code available and Cursor visible as an unavailable placeholder", () => {
+  it("keeps Gemini and Claude Code available while Cursor remains a placeholder", () => {
     const claude = PROVIDER_OPTIONS.find((option) => option.value === "claudeCode");
+    const gemini = PROVIDER_OPTIONS.find((option) => option.value === "gemini");
     const cursor = PROVIDER_OPTIONS.find((option) => option.value === "cursor");
     expect(PROVIDER_OPTIONS).toEqual([
       { value: "codex", label: "Codex", available: true },
+      { value: "gemini", label: "Gemini", available: true },
       { value: "claudeCode", label: "Claude Code", available: true },
       { value: "cursor", label: "Cursor", available: false },
     ]);
+    expect(gemini).toEqual({
+      value: "gemini",
+      label: "Gemini",
+      available: true,
+    });
     expect(claude).toEqual({
       value: "claudeCode",
       label: "Claude Code",
