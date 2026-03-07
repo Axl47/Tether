@@ -57,12 +57,13 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
             stateDir: undefined,
             authToken: undefined,
             noBrowser: undefined,
-            autoBootstrapProjectFromCwd: undefined,
-            logWebSocketEvents: undefined,
-            host: undefined,
-            port: undefined,
-            devUrl: undefined,
-          }),
+          autoBootstrapProjectFromCwd: undefined,
+          logWebSocketEvents: undefined,
+          host: undefined,
+          publicHost: undefined,
+          port: undefined,
+          devUrl: undefined,
+        }),
           DEFAULT_DEV_STATE_DIR,
         ]);
 
@@ -83,17 +84,19 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           autoBootstrapProjectFromCwd: false,
           logWebSocketEvents: true,
           host: "0.0.0.0",
+          publicHost: "192.168.1.42",
           port: 4222,
           devUrl: new URL("http://localhost:7331"),
         });
 
         assert.equal(env.T3CODE_STATE_DIR, resolve("/tmp/override-state"));
         assert.equal(env.T3CODE_PORT, "4222");
-        assert.equal(env.VITE_WS_URL, "ws://localhost:4222");
+        assert.equal(env.VITE_WS_URL, "ws://192.168.1.42:4222");
         assert.equal(env.T3CODE_NO_BROWSER, "1");
         assert.equal(env.T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD, "0");
         assert.equal(env.T3CODE_LOG_WS_EVENTS, "1");
         assert.equal(env.T3CODE_HOST, "0.0.0.0");
+        assert.equal(env.T3CODE_PUBLIC_HOST, "192.168.1.42");
         assert.equal(env.VITE_DEV_SERVER_URL, "http://localhost:7331/");
       }),
     );
@@ -113,6 +116,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: undefined,
           host: undefined,
+          publicHost: undefined,
           port: undefined,
           devUrl: undefined,
         });
@@ -135,11 +139,35 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: false,
           host: undefined,
+          publicHost: undefined,
           port: undefined,
           devUrl: undefined,
         });
 
         assert.equal(env.T3CODE_LOG_WS_EVENTS, "0");
+      }),
+    );
+
+    it.effect("uses a non-wildcard bind host for public dev urls by default", () =>
+      Effect.gen(function* () {
+        const env = yield* createDevRunnerEnv({
+          mode: "dev",
+          baseEnv: {},
+          serverOffset: 0,
+          webOffset: 0,
+          stateDir: undefined,
+          authToken: undefined,
+          noBrowser: undefined,
+          autoBootstrapProjectFromCwd: undefined,
+          logWebSocketEvents: undefined,
+          host: "100.88.10.4",
+          publicHost: undefined,
+          port: undefined,
+          devUrl: undefined,
+        });
+
+        assert.equal(env.VITE_WS_URL, "ws://100.88.10.4:3773");
+        assert.equal(env.VITE_DEV_SERVER_URL, "http://100.88.10.4:5733");
       }),
     );
   });
