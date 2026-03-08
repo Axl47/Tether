@@ -14,7 +14,7 @@ const URL_PATTERN = /https?:\/\/[^\s"'`<>]+/g;
 const FILE_PATH_PATTERN =
   /(?:~\/|\.{1,2}\/|\/|[A-Za-z]:\\|\\\\)[^\s"'`<>]+|[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+(?::\d+){0,2}/g;
 const TRAILING_PUNCTUATION_PATTERN = /[.,;!?]+$/;
-const LAST_EDITOR_KEY = "t3code:last-editor";
+const LAST_EDITOR_KEY = "tether:last-editor";
 
 function trimClosingDelimiters(value: string): string {
   let output = value.replace(TRAILING_PUNCTUATION_PATTERN, "");
@@ -35,7 +35,10 @@ function trimClosingDelimiters(value: string): string {
   return output;
 }
 
-function overlaps(a: { start: number; end: number }, b: { start: number; end: number }): boolean {
+function overlaps(
+  a: { start: number; end: number },
+  b: { start: number; end: number },
+): boolean {
   return a.start < b.end && b.start < a.end;
 }
 
@@ -64,7 +67,9 @@ function collectMatches(
       end: start + trimmed.length,
     };
 
-    const collides = [...existing, ...matches].some((other) => overlaps(candidate, other));
+    const collides = [...existing, ...matches].some((other) =>
+      overlaps(candidate, other),
+    );
     if (collides) continue;
 
     matches.push(candidate);
@@ -143,7 +148,12 @@ function splitPathAndPosition(value: string): {
 
 export function extractTerminalLinks(line: string): TerminalLinkMatch[] {
   const urlMatches = collectMatches(line, "url", URL_PATTERN, []);
-  const pathMatches = collectMatches(line, "path", FILE_PATH_PATTERN, urlMatches);
+  const pathMatches = collectMatches(
+    line,
+    "path",
+    FILE_PATH_PATTERN,
+    urlMatches,
+  );
   return [...urlMatches, ...pathMatches].toSorted((a, b) => a.start - b.start);
 }
 
@@ -177,7 +187,8 @@ export function resolvePathLinkTarget(rawPath: string, cwd: string): string {
 }
 
 export function preferredTerminalEditor(): EditorId {
-  const fallback = EDITORS.find((editor) => editor.command)?.id ?? EDITORS[0]?.id ?? "cursor";
+  const fallback =
+    EDITORS.find((editor) => editor.command)?.id ?? EDITORS[0]?.id ?? "cursor";
 
   if (typeof window === "undefined") {
     return fallback;

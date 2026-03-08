@@ -5,7 +5,17 @@ import { homedir } from "node:os";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { NetService } from "@t3tools/shared/Net";
-import { Config, Data, Effect, Hash, Layer, Logger, Option, Path, Schema } from "effect";
+import {
+  Config,
+  Data,
+  Effect,
+  Hash,
+  Layer,
+  Logger,
+  Option,
+  Path,
+  Schema,
+} from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { ChildProcess } from "effect/unstable/process";
 
@@ -14,8 +24,9 @@ const BASE_WEB_PORT = 5733;
 const MAX_HASH_OFFSET = 3000;
 const MAX_PORT = 65535;
 
-export const DEFAULT_DEV_STATE_DIR = Effect.map(Effect.service(Path.Path), (path) =>
-  path.join(homedir(), ".t3", "dev"),
+export const DEFAULT_DEV_STATE_DIR = Effect.map(
+  Effect.service(Path.Path),
+  (path) => path.join(homedir(), ".t3", "dev"),
 );
 
 const MODE_ARGS = {
@@ -30,11 +41,19 @@ const MODE_ARGS = {
   ],
   "dev:server": ["run", "dev", "--filter=t3"],
   "dev:web": ["run", "dev", "--filter=@t3tools/web"],
-  "dev:desktop": ["run", "dev", "--filter=@t3tools/desktop", "--filter=@t3tools/web", "--parallel"],
+  "dev:desktop": [
+    "run",
+    "dev",
+    "--filter=@t3tools/desktop",
+    "--filter=@t3tools/web",
+    "--parallel",
+  ],
 } as const satisfies Record<string, ReadonlyArray<string>>;
 
 type DevMode = keyof typeof MODE_ARGS;
-type PortAvailabilityCheck<R = never> = (port: number) => Effect.Effect<boolean, never, R>;
+type PortAvailabilityCheck<R = never> = (
+  port: number,
+) => Effect.Effect<boolean, never, R>;
 
 const DEV_RUNNER_MODES = Object.keys(MODE_ARGS) as Array<DevMode>;
 
@@ -43,12 +62,16 @@ class DevRunnerError extends Data.TaggedError("DevRunnerError")<{
   readonly cause?: unknown;
 }> {}
 
-const optionalStringConfig = (name: string): Config.Config<string | undefined> =>
+const optionalStringConfig = (
+  name: string,
+): Config.Config<string | undefined> =>
   Config.string(name).pipe(
     Config.option,
     Config.map((value) => Option.getOrUndefined(value)),
   );
-const optionalBooleanConfig = (name: string): Config.Config<boolean | undefined> =>
+const optionalBooleanConfig = (
+  name: string,
+): Config.Config<boolean | undefined> =>
   Config.boolean(name).pipe(
     Config.option,
     Config.map((value) => Option.getOrUndefined(value)),
@@ -58,7 +81,9 @@ const optionalPortConfig = (name: string): Config.Config<number | undefined> =>
     Config.option,
     Config.map((value) => Option.getOrUndefined(value)),
   );
-const optionalIntegerConfig = (name: string): Config.Config<number | undefined> =>
+const optionalIntegerConfig = (
+  name: string,
+): Config.Config<number | undefined> =>
   Config.int(name).pipe(
     Config.option,
     Config.map((value) => Option.getOrUndefined(value)),
@@ -70,8 +95,8 @@ const optionalUrlConfig = (name: string): Config.Config<URL | undefined> =>
   );
 
 const OffsetConfig = Config.all({
-  portOffset: optionalIntegerConfig("T3CODE_PORT_OFFSET"),
-  devInstance: optionalStringConfig("T3CODE_DEV_INSTANCE"),
+  portOffset: optionalIntegerConfig("TETHER_PORT_OFFSET"),
+  devInstance: optionalStringConfig("TETHER_DEV_INSTANCE"),
 });
 
 export function resolveOffset(config: {
@@ -80,11 +105,11 @@ export function resolveOffset(config: {
 }): { readonly offset: number; readonly source: string } {
   if (config.portOffset !== undefined) {
     if (config.portOffset < 0) {
-      throw new Error(`Invalid T3CODE_PORT_OFFSET: ${config.portOffset}`);
+      throw new Error(`Invalid TETHER_PORT_OFFSET: ${config.portOffset}`);
     }
     return {
       offset: config.portOffset,
-      source: `T3CODE_PORT_OFFSET=${config.portOffset}`,
+      source: `TETHER_PORT_OFFSET=${config.portOffset}`,
     };
   }
 
@@ -94,14 +119,19 @@ export function resolveOffset(config: {
   }
 
   if (/^\d+$/.test(seed)) {
-    return { offset: Number(seed), source: `numeric T3CODE_DEV_INSTANCE=${seed}` };
+    return {
+      offset: Number(seed),
+      source: `numeric TETHER_DEV_INSTANCE=${seed}`,
+    };
   }
 
   const offset = ((Hash.string(seed) >>> 0) % MAX_HASH_OFFSET) + 1;
-  return { offset, source: `hashed T3CODE_DEV_INSTANCE=${seed}` };
+  return { offset, source: `hashed TETHER_DEV_INSTANCE=${seed}` };
 }
 
-function resolveStateDir(stateDir: string | undefined): Effect.Effect<string, never, Path.Path> {
+function resolveStateDir(
+  stateDir: string | undefined,
+): Effect.Effect<string, never, Path.Path> {
   return Effect.gen(function* () {
     const path = yield* Path.Path;
     const configured = stateDir?.trim();
@@ -143,7 +173,11 @@ export function createDevRunnerEnv({
   host,
   port,
   devUrl,
-}: CreateDevRunnerEnvInput): Effect.Effect<NodeJS.ProcessEnv, never, Path.Path> {
+}: CreateDevRunnerEnvInput): Effect.Effect<
+  NodeJS.ProcessEnv,
+  never,
+  Path.Path
+> {
   return Effect.gen(function* () {
     const serverPort = port ?? BASE_SERVER_PORT + serverOffset;
     const webPort = BASE_WEB_PORT + webOffset;
@@ -151,50 +185,51 @@ export function createDevRunnerEnv({
 
     const output: NodeJS.ProcessEnv = {
       ...baseEnv,
-      T3CODE_PORT: String(serverPort),
+      TETHER_PORT: String(serverPort),
       PORT: String(webPort),
       ELECTRON_RENDERER_PORT: String(webPort),
       VITE_WS_URL: `ws://localhost:${serverPort}`,
       VITE_DEV_SERVER_URL: devUrl?.toString() ?? `http://localhost:${webPort}`,
-      T3CODE_STATE_DIR: resolvedStateDir,
+      TETHER_STATE_DIR: resolvedStateDir,
     };
 
     if (host !== undefined) {
-      output.T3CODE_HOST = host;
+      output.TETHER_HOST = host;
     }
 
     if (authToken !== undefined) {
-      output.T3CODE_AUTH_TOKEN = authToken;
+      output.TETHER_AUTH_TOKEN = authToken;
     } else {
-      delete output.T3CODE_AUTH_TOKEN;
+      delete output.TETHER_AUTH_TOKEN;
     }
 
     if (noBrowser !== undefined) {
-      output.T3CODE_NO_BROWSER = noBrowser ? "1" : "0";
+      output.TETHER_NO_BROWSER = noBrowser ? "1" : "0";
     } else {
-      delete output.T3CODE_NO_BROWSER;
+      delete output.TETHER_NO_BROWSER;
     }
 
     if (autoBootstrapProjectFromCwd !== undefined) {
-      output.T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD = autoBootstrapProjectFromCwd ? "1" : "0";
+      output.TETHER_AUTO_BOOTSTRAP_PROJECT_FROM_CWD =
+        autoBootstrapProjectFromCwd ? "1" : "0";
     } else {
-      delete output.T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD;
+      delete output.TETHER_AUTO_BOOTSTRAP_PROJECT_FROM_CWD;
     }
 
     if (logWebSocketEvents !== undefined) {
-      output.T3CODE_LOG_WS_EVENTS = logWebSocketEvents ? "1" : "0";
+      output.TETHER_LOG_WS_EVENTS = logWebSocketEvents ? "1" : "0";
     } else {
-      delete output.T3CODE_LOG_WS_EVENTS;
+      delete output.TETHER_LOG_WS_EVENTS;
     }
 
     if (mode === "dev") {
-      output.T3CODE_MODE = "web";
-      delete output.T3CODE_DESKTOP_WS_URL;
+      output.TETHER_MODE = "web";
+      delete output.TETHER_DESKTOP_WS_URL;
     }
 
     if (mode === "dev:server" || mode === "dev:web") {
-      output.T3CODE_MODE = "web";
-      delete output.T3CODE_DESKTOP_WS_URL;
+      output.TETHER_MODE = "web";
+      delete output.TETHER_DESKTOP_WS_URL;
     }
 
     return output;
@@ -211,7 +246,9 @@ function portPairForOffset(offset: number): {
   };
 }
 
-const defaultCheckPortAvailability: PortAvailabilityCheck<NetService> = (port) =>
+const defaultCheckPortAvailability: PortAvailabilityCheck<NetService> = (
+  port,
+) =>
   Effect.gen(function* () {
     const net = yield* NetService;
     return yield* net.isPortAvailableOnLoopback(port);
@@ -242,7 +279,9 @@ export function findFirstAvailableOffset<R = NetService>({
       if (
         (requireServerPort && serverPortOutOfRange) ||
         (requireWebPort && webPortOutOfRange) ||
-        (!requireServerPort && !requireWebPort && (serverPortOutOfRange || webPortOutOfRange))
+        (!requireServerPort &&
+          !requireWebPort &&
+          (serverPortOutOfRange || webPortOutOfRange))
       ) {
         break;
       }
@@ -382,7 +421,8 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       Effect.mapError(
         (cause) =>
           new DevRunnerError({
-            message: "Failed to read T3CODE_PORT_OFFSET/T3CODE_DEV_INSTANCE configuration.",
+            message:
+              "Failed to read TETHER_PORT_OFFSET/TETHER_DEV_INSTANCE configuration.",
             cause,
           }),
       ),
@@ -398,11 +438,11 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
     });
 
     const envOverrides = {
-      noBrowser: readOptionalBooleanEnv("T3CODE_NO_BROWSER"),
+      noBrowser: readOptionalBooleanEnv("TETHER_NO_BROWSER"),
       autoBootstrapProjectFromCwd: readOptionalBooleanEnv(
-        "T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD",
+        "TETHER_AUTO_BOOTSTRAP_PROJECT_FROM_CWD",
       ),
-      logWebSocketEvents: readOptionalBooleanEnv("T3CODE_LOG_WS_EVENTS"),
+      logWebSocketEvents: readOptionalBooleanEnv("TETHER_LOG_WS_EVENTS"),
     };
 
     const { serverOffset, webOffset } = yield* resolveModePortOffsets({
@@ -419,7 +459,10 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       webOffset,
       stateDir: input.stateDir,
       authToken: input.authToken,
-      noBrowser: resolveOptionalBooleanOverride(input.noBrowser, envOverrides.noBrowser),
+      noBrowser: resolveOptionalBooleanOverride(
+        input.noBrowser,
+        envOverrides.noBrowser,
+      ),
       autoBootstrapProjectFromCwd: resolveOptionalBooleanOverride(
         input.autoBootstrapProjectFromCwd,
         envOverrides.autoBootstrapProjectFromCwd,
@@ -439,7 +482,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
         : "";
 
     yield* Effect.logInfo(
-      `[dev-runner] mode=${input.mode} source=${source}${selectionSuffix} serverPort=${String(env.T3CODE_PORT)} webPort=${String(env.PORT)} stateDir=${String(env.T3CODE_STATE_DIR)}`,
+      `[dev-runner] mode=${input.mode} source=${source}${selectionSuffix} serverPort=${String(env.TETHER_PORT)} webPort=${String(env.PORT)} stateDir=${String(env.TETHER_STATE_DIR)}`,
     );
 
     if (input.dryRun) {
@@ -474,7 +517,8 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       cause instanceof DevRunnerError
         ? cause
         : new DevRunnerError({
-            message: cause instanceof Error ? cause.message : "dev-runner failed",
+            message:
+              cause instanceof Error ? cause.message : "dev-runner failed",
             cause,
           }),
     ),
@@ -486,45 +530,63 @@ const devRunnerCli = Command.make("dev-runner", {
     Argument.withDescription("Development mode to run."),
   ),
   stateDir: Flag.string("state-dir").pipe(
-    Flag.withDescription("State directory path (forwards to T3CODE_STATE_DIR)."),
-    Flag.withFallbackConfig(optionalStringConfig("T3CODE_STATE_DIR")),
+    Flag.withDescription(
+      "State directory path (forwards to TETHER_STATE_DIR).",
+    ),
+    Flag.withFallbackConfig(optionalStringConfig("TETHER_STATE_DIR")),
   ),
   authToken: Flag.string("auth-token").pipe(
-    Flag.withDescription("Auth token (forwards to T3CODE_AUTH_TOKEN)."),
+    Flag.withDescription("Auth token (forwards to TETHER_AUTH_TOKEN)."),
     Flag.withAlias("token"),
-    Flag.withFallbackConfig(optionalStringConfig("T3CODE_AUTH_TOKEN")),
+    Flag.withFallbackConfig(optionalStringConfig("TETHER_AUTH_TOKEN")),
   ),
   noBrowser: Flag.boolean("no-browser").pipe(
-    Flag.withDescription("Browser auto-open toggle (equivalent to T3CODE_NO_BROWSER)."),
-    Flag.withFallbackConfig(optionalBooleanConfig("T3CODE_NO_BROWSER")),
-  ),
-  autoBootstrapProjectFromCwd: Flag.boolean("auto-bootstrap-project-from-cwd").pipe(
     Flag.withDescription(
-      "Auto-bootstrap toggle (equivalent to T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD).",
+      "Browser auto-open toggle (equivalent to TETHER_NO_BROWSER).",
     ),
-    Flag.withFallbackConfig(optionalBooleanConfig("T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD")),
+    Flag.withFallbackConfig(optionalBooleanConfig("TETHER_NO_BROWSER")),
+  ),
+  autoBootstrapProjectFromCwd: Flag.boolean(
+    "auto-bootstrap-project-from-cwd",
+  ).pipe(
+    Flag.withDescription(
+      "Auto-bootstrap toggle (equivalent to TETHER_AUTO_BOOTSTRAP_PROJECT_FROM_CWD).",
+    ),
+    Flag.withFallbackConfig(
+      optionalBooleanConfig("TETHER_AUTO_BOOTSTRAP_PROJECT_FROM_CWD"),
+    ),
   ),
   logWebSocketEvents: Flag.boolean("log-websocket-events").pipe(
-    Flag.withDescription("WebSocket event logging toggle (equivalent to T3CODE_LOG_WS_EVENTS)."),
+    Flag.withDescription(
+      "WebSocket event logging toggle (equivalent to TETHER_LOG_WS_EVENTS).",
+    ),
     Flag.withAlias("log-ws-events"),
-    Flag.withFallbackConfig(optionalBooleanConfig("T3CODE_LOG_WS_EVENTS")),
+    Flag.withFallbackConfig(optionalBooleanConfig("TETHER_LOG_WS_EVENTS")),
   ),
   host: Flag.string("host").pipe(
-    Flag.withDescription("Server host/interface override (forwards to T3CODE_HOST)."),
-    Flag.withFallbackConfig(optionalStringConfig("T3CODE_HOST")),
+    Flag.withDescription(
+      "Server host/interface override (forwards to TETHER_HOST).",
+    ),
+    Flag.withFallbackConfig(optionalStringConfig("TETHER_HOST")),
   ),
   port: Flag.integer("port").pipe(
-    Flag.withSchema(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }))),
-    Flag.withDescription("Server port override (forwards to T3CODE_PORT)."),
-    Flag.withFallbackConfig(optionalPortConfig("T3CODE_PORT")),
+    Flag.withSchema(
+      Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 })),
+    ),
+    Flag.withDescription("Server port override (forwards to TETHER_PORT)."),
+    Flag.withFallbackConfig(optionalPortConfig("TETHER_PORT")),
   ),
   devUrl: Flag.string("dev-url").pipe(
     Flag.withSchema(Schema.URLFromString),
-    Flag.withDescription("Web dev URL override (forwards to VITE_DEV_SERVER_URL)."),
+    Flag.withDescription(
+      "Web dev URL override (forwards to VITE_DEV_SERVER_URL).",
+    ),
     Flag.withFallbackConfig(optionalUrlConfig("VITE_DEV_SERVER_URL")),
   ),
   dryRun: Flag.boolean("dry-run").pipe(
-    Flag.withDescription("Resolve mode/ports/env and print, but do not spawn turbo."),
+    Flag.withDescription(
+      "Resolve mode/ports/env and print, but do not spawn turbo.",
+    ),
     Flag.withDefault(false),
   ),
   turboArgs: Argument.string("turbo-arg").pipe(
@@ -532,7 +594,9 @@ const devRunnerCli = Command.make("dev-runner", {
     Argument.variadic(),
   ),
 }).pipe(
-  Command.withDescription("Run monorepo development modes with deterministic port/env wiring."),
+  Command.withDescription(
+    "Run monorepo development modes with deterministic port/env wiring.",
+  ),
   Command.withHandler((input) => runDevRunnerWithInput(input)),
 );
 

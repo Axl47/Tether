@@ -124,7 +124,9 @@ function waitFor(predicate: () => boolean, timeoutMs = 800): Promise<void> {
   });
 }
 
-function openInput(overrides: Partial<TerminalOpenInput> = {}): TerminalOpenInput {
+function openInput(
+  overrides: Partial<TerminalOpenInput> = {},
+): TerminalOpenInput {
   return {
     threadId: "thread-1",
     cwd: process.cwd(),
@@ -138,7 +140,10 @@ function historyLogName(threadId: string): string {
   return `terminal_${Encoding.encodeBase64Url(threadId)}.log`;
 }
 
-function multiTerminalHistoryLogName(threadId: string, terminalId: string): string {
+function multiTerminalHistoryLogName(
+  threadId: string,
+  terminalId: string,
+): string {
   const threadPart = `terminal_${Encoding.encodeBase64Url(threadId)}`;
   if (terminalId === DEFAULT_TERMINAL_ID) {
     return `${threadPart}.log`;
@@ -178,7 +183,7 @@ describe("TerminalManager", () => {
       ptyAdapter?: FakePtyAdapter;
     } = {},
   ) {
-    const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3code-terminal-"));
+    const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), "tether-terminal-"));
     tempDirs.push(logsDir);
     const ptyAdapter = options.ptyAdapter ?? new FakePtyAdapter();
     const manager = new TerminalManagerRuntime({
@@ -186,11 +191,15 @@ describe("TerminalManager", () => {
       ptyAdapter,
       historyLineLimit,
       shellResolver: options.shellResolver ?? (() => "/bin/bash"),
-      ...(options.subprocessChecker ? { subprocessChecker: options.subprocessChecker } : {}),
+      ...(options.subprocessChecker
+        ? { subprocessChecker: options.subprocessChecker }
+        : {}),
       ...(options.subprocessPollIntervalMs
         ? { subprocessPollIntervalMs: options.subprocessPollIntervalMs }
         : {}),
-      ...(options.processKillGraceMs ? { processKillGraceMs: options.processKillGraceMs } : {}),
+      ...(options.processKillGraceMs
+        ? { processKillGraceMs: options.processKillGraceMs }
+        : {}),
       ...(options.maxRetainedInactiveSessions
         ? { maxRetainedInactiveSessions: options.maxRetainedInactiveSessions }
         : {}),
@@ -216,7 +225,9 @@ describe("TerminalManager", () => {
   });
 
   it("supports asynchronous PTY spawn effects", async () => {
-    const { manager, ptyAdapter } = makeManager(5, { ptyAdapter: new FakePtyAdapter("async") });
+    const { manager, ptyAdapter } = makeManager(5, {
+      ptyAdapter: new FakePtyAdapter("async"),
+    });
 
     const snapshot = await manager.open(openInput());
 
@@ -313,8 +324,16 @@ describe("TerminalManager", () => {
     expect(second).toBeDefined();
     if (!first || !second) return;
 
-    await manager.write({ threadId: "thread-1", terminalId: "default", data: "pwd\n" });
-    await manager.write({ threadId: "thread-1", terminalId: "term-2", data: "ls\n" });
+    await manager.write({
+      threadId: "thread-1",
+      terminalId: "default",
+      data: "pwd\n",
+    });
+    await manager.write({
+      threadId: "thread-1",
+      terminalId: "term-2",
+      data: "ls\n",
+    });
 
     expect(first.writes).toEqual(["pwd\n"]);
     expect(second.writes).toEqual(["ls\n"]);
@@ -337,7 +356,9 @@ describe("TerminalManager", () => {
     process.emitData("hello\n");
     await waitFor(() => fs.existsSync(historyLogPath(logsDir)));
     await manager.clear({ threadId: "thread-1" });
-    await waitFor(() => fs.readFileSync(historyLogPath(logsDir), "utf8") === "");
+    await waitFor(
+      () => fs.readFileSync(historyLogPath(logsDir), "utf8") === "",
+    );
 
     expect(events.some((event) => event.type === "cleared")).toBe(true);
     expect(
@@ -365,7 +386,9 @@ describe("TerminalManager", () => {
     expect(snapshot.history).toBe("");
     expect(snapshot.status).toBe("running");
     expect(ptyAdapter.spawnInputs).toHaveLength(2);
-    await waitFor(() => fs.readFileSync(historyLogPath(logsDir), "utf8") === "");
+    await waitFor(
+      () => fs.readFileSync(historyLogPath(logsDir), "utf8") === "",
+    );
 
     manager.dispose();
   });
@@ -403,7 +426,9 @@ describe("TerminalManager", () => {
 
     process.emitExit({ exitCode: 0, signal: 0 });
 
-    await expect(manager.write({ threadId: "thread-1", data: "\r" })).resolves.toBeUndefined();
+    await expect(
+      manager.write({ threadId: "thread-1", data: "\r" }),
+    ).resolves.toBeUndefined();
     expect(process.writes).toEqual([]);
 
     manager.dispose();
@@ -427,14 +452,20 @@ describe("TerminalManager", () => {
     hasRunningSubprocess = true;
     await waitFor(
       () =>
-        events.some((event) => event.type === "activity" && event.hasRunningSubprocess === true),
+        events.some(
+          (event) =>
+            event.type === "activity" && event.hasRunningSubprocess === true,
+        ),
       1_200,
     );
 
     hasRunningSubprocess = false;
     await waitFor(
       () =>
-        events.some((event) => event.type === "activity" && event.hasRunningSubprocess === false),
+        events.some(
+          (event) =>
+            event.type === "activity" && event.hasRunningSubprocess === false,
+        ),
       1_200,
     );
 
@@ -452,7 +483,9 @@ describe("TerminalManager", () => {
     await manager.close({ threadId: "thread-1" });
 
     const reopened = await manager.open(openInput());
-    const nonEmptyLines = reopened.history.split("\n").filter((line) => line.length > 0);
+    const nonEmptyLines = reopened.history
+      .split("\n")
+      .filter((line) => line.length > 0);
     expect(nonEmptyLines).toEqual(["line2", "line3", "line4"]);
 
     manager.dispose();
@@ -485,15 +518,31 @@ describe("TerminalManager", () => {
 
     defaultProcess.emitData("default\n");
     sidecarProcess.emitData("sidecar\n");
-    await waitFor(() => fs.existsSync(multiTerminalHistoryLogPath(logsDir, "thread-1", "default")));
-    await waitFor(() => fs.existsSync(multiTerminalHistoryLogPath(logsDir, "thread-1", "sidecar")));
+    await waitFor(() =>
+      fs.existsSync(
+        multiTerminalHistoryLogPath(logsDir, "thread-1", "default"),
+      ),
+    );
+    await waitFor(() =>
+      fs.existsSync(
+        multiTerminalHistoryLogPath(logsDir, "thread-1", "sidecar"),
+      ),
+    );
 
     await manager.close({ threadId: "thread-1", deleteHistory: true });
 
     expect(defaultProcess.killed).toBe(true);
     expect(sidecarProcess.killed).toBe(true);
-    expect(fs.existsSync(multiTerminalHistoryLogPath(logsDir, "thread-1", "default"))).toBe(false);
-    expect(fs.existsSync(multiTerminalHistoryLogPath(logsDir, "thread-1", "sidecar"))).toBe(false);
+    expect(
+      fs.existsSync(
+        multiTerminalHistoryLogPath(logsDir, "thread-1", "default"),
+      ),
+    ).toBe(false);
+    expect(
+      fs.existsSync(
+        multiTerminalHistoryLogPath(logsDir, "thread-1", "sidecar"),
+      ),
+    ).toBe(false);
 
     manager.dispose();
   });
@@ -515,7 +564,9 @@ describe("TerminalManager", () => {
   });
 
   it("evicts oldest inactive terminal sessions when retention limit is exceeded", async () => {
-    const { manager, ptyAdapter } = makeManager(5, { maxRetainedInactiveSessions: 1 });
+    const { manager, ptyAdapter } = makeManager(5, {
+      maxRetainedInactiveSessions: 1,
+    });
 
     await manager.open(openInput({ threadId: "thread-1" }));
     await manager.open(openInput({ threadId: "thread-2" }));
@@ -531,11 +582,14 @@ describe("TerminalManager", () => {
     second.emitExit({ exitCode: 0, signal: 0 });
 
     await waitFor(() => {
-      const sessions = (manager as unknown as { sessions: Map<string, unknown> }).sessions;
+      const sessions = (
+        manager as unknown as { sessions: Map<string, unknown> }
+      ).sessions;
       return sessions.size === 1;
     });
 
-    const sessions = (manager as unknown as { sessions: Map<string, unknown> }).sessions;
+    const sessions = (manager as unknown as { sessions: Map<string, unknown> })
+      .sessions;
     const keys = [...sessions.keys()];
     expect(keys).toEqual(["thread-2\u0000default"]);
 
@@ -573,13 +627,16 @@ describe("TerminalManager", () => {
     if (process.platform === "win32") {
       expect(
         ptyAdapter.spawnInputs.some(
-          (input) => input.shell === "cmd.exe" || input.shell === "powershell.exe",
+          (input) =>
+            input.shell === "cmd.exe" || input.shell === "powershell.exe",
         ),
       ).toBe(true);
     } else {
       expect(
         ptyAdapter.spawnInputs.some((input) =>
-          ["/bin/zsh", "/bin/bash", "/bin/sh", "zsh", "bash", "sh"].includes(input.shell),
+          ["/bin/zsh", "/bin/bash", "/bin/sh", "zsh", "bash", "sh"].includes(
+            input.shell,
+          ),
         ),
       ).toBe(true);
     }
@@ -610,7 +667,7 @@ describe("TerminalManager", () => {
     };
 
     setEnv("PORT", "5173");
-    setEnv("T3CODE_PORT", "3773");
+    setEnv("TETHER_PORT", "3773");
     setEnv("VITE_DEV_SERVER_URL", "http://localhost:5173");
     setEnv("TEST_TERMINAL_KEEP", "keep-me");
 
@@ -622,7 +679,7 @@ describe("TerminalManager", () => {
       if (!spawnInput) return;
 
       expect(spawnInput.env.PORT).toBeUndefined();
-      expect(spawnInput.env.T3CODE_PORT).toBeUndefined();
+      expect(spawnInput.env.TETHER_PORT).toBeUndefined();
       expect(spawnInput.env.VITE_DEV_SERVER_URL).toBeUndefined();
       expect(spawnInput.env.TEST_TERMINAL_KEEP).toBe("keep-me");
 
@@ -637,8 +694,8 @@ describe("TerminalManager", () => {
     await manager.open(
       openInput({
         env: {
-          T3CODE_PROJECT_ROOT: "/repo",
-          T3CODE_WORKTREE_PATH: "/repo/worktree-a",
+          TETHER_PROJECT_ROOT: "/repo",
+          TETHER_WORKTREE_PATH: "/repo/worktree-a",
           CUSTOM_FLAG: "1",
         },
       }),
@@ -647,8 +704,8 @@ describe("TerminalManager", () => {
     expect(spawnInput).toBeDefined();
     if (!spawnInput) return;
 
-    expect(spawnInput.env.T3CODE_PROJECT_ROOT).toBe("/repo");
-    expect(spawnInput.env.T3CODE_WORKTREE_PATH).toBe("/repo/worktree-a");
+    expect(spawnInput.env.TETHER_PROJECT_ROOT).toBe("/repo");
+    expect(spawnInput.env.TETHER_WORKTREE_PATH).toBe("/repo/worktree-a");
     expect(spawnInput.env.CUSTOM_FLAG).toBe("1");
 
     manager.dispose();

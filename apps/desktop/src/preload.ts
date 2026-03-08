@@ -10,16 +10,20 @@ const UPDATE_STATE_CHANNEL = "desktop:update-state";
 const UPDATE_GET_STATE_CHANNEL = "desktop:update-get-state";
 const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
 const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
-const wsUrl = process.env.T3CODE_DESKTOP_WS_URL ?? null;
+const wsUrl = process.env.TETHER_DESKTOP_WS_URL ?? null;
 
 contextBridge.exposeInMainWorld("desktopBridge", {
   getWsUrl: () => wsUrl,
   pickFolder: () => ipcRenderer.invoke(PICK_FOLDER_CHANNEL),
   confirm: (message) => ipcRenderer.invoke(CONFIRM_CHANNEL, message),
-  showContextMenu: (items, position) => ipcRenderer.invoke(CONTEXT_MENU_CHANNEL, items, position),
+  showContextMenu: (items, position) =>
+    ipcRenderer.invoke(CONTEXT_MENU_CHANNEL, items, position),
   openExternal: (url: string) => ipcRenderer.invoke(OPEN_EXTERNAL_CHANNEL, url),
   onMenuAction: (listener) => {
-    const wrappedListener = (_event: Electron.IpcRendererEvent, action: unknown) => {
+    const wrappedListener = (
+      _event: Electron.IpcRendererEvent,
+      action: unknown,
+    ) => {
       if (typeof action !== "string") return;
       listener(action);
     };
@@ -33,7 +37,10 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   downloadUpdate: () => ipcRenderer.invoke(UPDATE_DOWNLOAD_CHANNEL),
   installUpdate: () => ipcRenderer.invoke(UPDATE_INSTALL_CHANNEL),
   onUpdateState: (listener) => {
-    const wrappedListener = (_event: Electron.IpcRendererEvent, state: unknown) => {
+    const wrappedListener = (
+      _event: Electron.IpcRendererEvent,
+      state: unknown,
+    ) => {
       if (typeof state !== "object" || state === null) return;
       listener(state as Parameters<typeof listener>[0]);
     };

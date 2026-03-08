@@ -45,13 +45,15 @@ it.layer(NodeServices.layer)("AnalyticsService test", (it) => {
       const capturedRequests: Array<RecordedBatchRequest> = [];
       const serverConfigLayer = ServerConfig.layerTest(process.cwd(), stateDir);
 
-      const telemetryLayer = AnalyticsServiceLayerLive.pipe(Layer.provideMerge(serverConfigLayer));
+      const telemetryLayer = AnalyticsServiceLayerLive.pipe(
+        Layer.provideMerge(serverConfigLayer),
+      );
       const configLayer = ConfigProvider.layer(
         ConfigProvider.fromUnknown({
-          T3CODE_TELEMETRY_ENABLED: true,
-          T3CODE_POSTHOG_KEY: "phc_test_key",
-          T3CODE_POSTHOG_HOST: "",
-          T3CODE_TELEMETRY_FLUSH_BATCH_SIZE: 20,
+          TETHER_TELEMETRY_ENABLED: true,
+          TETHER_POSTHOG_KEY: "phc_test_key",
+          TETHER_POSTHOG_HOST: "",
+          TETHER_TELEMETRY_FLUSH_BATCH_SIZE: 20,
         }),
       );
       const batchServerLayer = HttpServer.serve(
@@ -90,12 +92,17 @@ it.layer(NodeServices.layer)("AnalyticsService test", (it) => {
       }).pipe(Effect.provide(runtimeLayer));
 
       const batchRequests = capturedRequests.filter(
-        (request): request is RecordedBatchRequest & { readonly body: RecordedBatchBody } =>
-          Array.isArray(request.body?.batch),
+        (
+          request,
+        ): request is RecordedBatchRequest & {
+          readonly body: RecordedBatchBody;
+        } => Array.isArray(request.body?.batch),
       );
       assert.equal(batchRequests.length, 3);
       assert.equal(
-        batchRequests.every((request) => request.path === "/batch/" || request.path === "/batch"),
+        batchRequests.every(
+          (request) => request.path === "/batch/" || request.path === "/batch",
+        ),
         true,
       );
       const deliveredIndexes = batchRequests.flatMap((request) =>
@@ -113,7 +120,9 @@ it.layer(NodeServices.layer)("AnalyticsService test", (it) => {
       );
       assert.equal(
         batchRequests.every((request) =>
-          request.body.batch.every((event) => event.properties?.clientType === "cli-web-client"),
+          request.body.batch.every(
+            (event) => event.properties?.clientType === "cli-web-client",
+          ),
         ),
         true,
       );

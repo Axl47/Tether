@@ -6,14 +6,21 @@ import { it } from "@effect/vitest";
 import { Effect, FileSystem, Layer, PlatformError, Scope } from "effect";
 import { expect } from "vitest";
 
-import { GitCommandError, GitHubCliError, TextGenerationError } from "../Errors.ts";
+import {
+  GitCommandError,
+  GitHubCliError,
+  TextGenerationError,
+} from "../Errors.ts";
 import { type GitManagerShape } from "../Services/GitManager.ts";
 import {
   type GitHubCliShape,
   type GitHubPullRequestSummary,
   GitHubCli,
 } from "../Services/GitHubCli.ts";
-import { type TextGenerationShape, TextGeneration } from "../Services/TextGeneration.ts";
+import {
+  type TextGenerationShape,
+  TextGeneration,
+} from "../Services/TextGeneration.ts";
 import { GitServiceLive } from "./GitService.ts";
 import { GitService } from "../Services/GitService.ts";
 import { GitCoreLive } from "./GitCore.ts";
@@ -53,7 +60,11 @@ interface FakeGitTextGeneration {
 
 function makeTempDir(
   prefix: string,
-): Effect.Effect<string, PlatformError.PlatformError, FileSystem.FileSystem | Scope.Scope> {
+): Effect.Effect<
+  string,
+  PlatformError.PlatformError,
+  FileSystem.FileSystem | Scope.Scope
+> {
   return Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     return yield* fileSystem.makeTempDirectoryScoped({ prefix });
@@ -82,7 +93,11 @@ function runGit(
 
 function initRepo(
   cwd: string,
-): Effect.Effect<void, PlatformError.PlatformError | GitCommandError, FileSystem.FileSystem | Scope.Scope | GitService> {
+): Effect.Effect<
+  void,
+  PlatformError.PlatformError | GitCommandError,
+  FileSystem.FileSystem | Scope.Scope | GitService
+> {
   return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     yield* runGit(cwd, ["init", "--initial-branch=main"]);
@@ -100,13 +115,15 @@ function createBareRemote(): Effect.Effect<
   FileSystem.FileSystem | Scope.Scope | GitService
 > {
   return Effect.gen(function* () {
-    const remoteDir = yield* makeTempDir("t3code-git-remote-");
+    const remoteDir = yield* makeTempDir("tether-git-remote-");
     yield* runGit(remoteDir, ["init", "--bare"]);
     return remoteDir;
   });
 }
 
-function createTextGeneration(overrides: Partial<FakeGitTextGeneration> = {}): TextGenerationShape {
+function createTextGeneration(
+  overrides: Partial<FakeGitTextGeneration> = {},
+): TextGenerationShape {
   const implementation: FakeGitTextGeneration = {
     generateCommitMessage: (input) =>
       Effect.succeed({
@@ -194,7 +211,8 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
     if (args[0] === "pr" && args[1] === "create") {
       return Effect.succeed({
         stdout:
-          (scenario.createdPrUrl ?? "https://github.com/pingdotgg/codething-mvp/pull/101") + "\n",
+          (scenario.createdPrUrl ??
+            "https://github.com/pingdotgg/codething-mvp/pull/101") + "\n",
         stderr: "",
         code: 0,
         signal: null,
@@ -250,7 +268,10 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
           ],
         }).pipe(
           Effect.map(
-            (result) => JSON.parse(result.stdout) as ReadonlyArray<GitHubPullRequestSummary>,
+            (result) =>
+              JSON.parse(
+                result.stdout,
+              ) as ReadonlyArray<GitHubPullRequestSummary>,
           ),
         ),
       createPullRequest: (input) =>
@@ -272,7 +293,14 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
       getDefaultBranch: (input) =>
         execute({
           cwd: input.cwd,
-          args: ["repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"],
+          args: [
+            "repo",
+            "view",
+            "--json",
+            "defaultBranchRef",
+            "--jq",
+            ".defaultBranchRef.name",
+          ],
         }).pipe(
           Effect.map((result) => {
             const value = result.stdout.trim();
@@ -300,7 +328,9 @@ function makeManager(input?: {
   ghScenario?: FakeGhScenario;
   textGeneration?: Partial<FakeGitTextGeneration>;
 }) {
-  const { service: gitHubCli, ghCalls } = createGitHubCliWithFakeGh(input?.ghScenario);
+  const { service: gitHubCli, ghCalls } = createGitHubCliWithFakeGh(
+    input?.ghScenario,
+  );
   const textGeneration = createTextGeneration(input?.textGeneration);
 
   const gitCoreLayer = GitCoreLive.pipe(
@@ -321,50 +351,60 @@ function makeManager(input?: {
   );
 }
 
-const GitManagerTestLayer = Layer.provideMerge(GitServiceLive, NodeServices.layer);
+const GitManagerTestLayer = Layer.provideMerge(
+  GitServiceLive,
+  NodeServices.layer,
+);
 
 it.layer(GitManagerTestLayer)("GitManager", (it) => {
-  it.effect("status includes PR metadata when branch already has an open PR", () =>
-    Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
-      yield* initRepo(repoDir);
-      yield* runGit(repoDir, ["checkout", "-b", "feature/status-open-pr"]);
-      const remoteDir = yield* createBareRemote();
-      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
-      yield* runGit(repoDir, ["push", "-u", "origin", "feature/status-open-pr"]);
+  it.effect(
+    "status includes PR metadata when branch already has an open PR",
+    () =>
+      Effect.gen(function* () {
+        const repoDir = yield* makeTempDir("tether-git-manager-");
+        yield* initRepo(repoDir);
+        yield* runGit(repoDir, ["checkout", "-b", "feature/status-open-pr"]);
+        const remoteDir = yield* createBareRemote();
+        yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+        yield* runGit(repoDir, [
+          "push",
+          "-u",
+          "origin",
+          "feature/status-open-pr",
+        ]);
 
-      const { manager } = yield* makeManager({
-        ghScenario: {
-          prListSequence: [
-            JSON.stringify([
-              {
-                number: 13,
-                title: "Existing PR",
-                url: "https://github.com/pingdotgg/codething-mvp/pull/13",
-                baseRefName: "main",
-                headRefName: "feature/status-open-pr",
-              },
-            ]),
-          ],
-        },
-      });
+        const { manager } = yield* makeManager({
+          ghScenario: {
+            prListSequence: [
+              JSON.stringify([
+                {
+                  number: 13,
+                  title: "Existing PR",
+                  url: "https://github.com/pingdotgg/codething-mvp/pull/13",
+                  baseRefName: "main",
+                  headRefName: "feature/status-open-pr",
+                },
+              ]),
+            ],
+          },
+        });
 
-      const status = yield* manager.status({ cwd: repoDir });
-      expect(status.branch).toBe("feature/status-open-pr");
-      expect(status.pr).toEqual({
-        number: 13,
-        title: "Existing PR",
-        url: "https://github.com/pingdotgg/codething-mvp/pull/13",
-        baseBranch: "main",
-        headBranch: "feature/status-open-pr",
-        state: "open",
-      });
-    }),
+        const status = yield* manager.status({ cwd: repoDir });
+        expect(status.branch).toBe("feature/status-open-pr");
+        expect(status.pr).toEqual({
+          number: 13,
+          title: "Existing PR",
+          url: "https://github.com/pingdotgg/codething-mvp/pull/13",
+          baseBranch: "main",
+          headBranch: "feature/status-open-pr",
+          state: "open",
+        });
+      }),
   );
 
   it.effect("status returns merged PR state when latest PR was merged", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("tether-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/status-merged-pr"]);
 
@@ -402,9 +442,13 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
 
   it.effect("status prefers open PR when merged PR has newer updatedAt", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("tether-git-manager-");
       yield* initRepo(repoDir);
-      yield* runGit(repoDir, ["checkout", "-b", "feature/status-open-over-merged"]);
+      yield* runGit(repoDir, [
+        "checkout",
+        "-b",
+        "feature/status-open-over-merged",
+      ]);
 
       const { manager } = yield* makeManager({
         ghScenario: {
@@ -447,33 +491,41 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
-  it.effect("status is resilient to gh lookup failures and returns pr null", () =>
-    Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
-      yield* initRepo(repoDir);
-      yield* runGit(repoDir, ["checkout", "-b", "feature/status-no-gh"]);
-      const remoteDir = yield* createBareRemote();
-      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
-      yield* runGit(repoDir, ["push", "-u", "origin", "feature/status-no-gh"]);
+  it.effect(
+    "status is resilient to gh lookup failures and returns pr null",
+    () =>
+      Effect.gen(function* () {
+        const repoDir = yield* makeTempDir("tether-git-manager-");
+        yield* initRepo(repoDir);
+        yield* runGit(repoDir, ["checkout", "-b", "feature/status-no-gh"]);
+        const remoteDir = yield* createBareRemote();
+        yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+        yield* runGit(repoDir, [
+          "push",
+          "-u",
+          "origin",
+          "feature/status-no-gh",
+        ]);
 
-      const { manager } = yield* makeManager({
-        ghScenario: {
-          failWith: new GitHubCliError({
-            operation: "execute",
-            detail: "GitHub CLI (`gh`) is required but not available on PATH.",
-          }),
-        },
-      });
+        const { manager } = yield* makeManager({
+          ghScenario: {
+            failWith: new GitHubCliError({
+              operation: "execute",
+              detail:
+                "GitHub CLI (`gh`) is required but not available on PATH.",
+            }),
+          },
+        });
 
-      const status = yield* manager.status({ cwd: repoDir });
-      expect(status.branch).toBe("feature/status-no-gh");
-      expect(status.pr).toBeNull();
-    }),
+        const status = yield* manager.status({ cwd: repoDir });
+        expect(status.branch).toBe("feature/status-no-gh");
+        expect(status.pr).toBeNull();
+      }),
   );
 
   it.effect("creates a commit when working tree is dirty", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("tether-git-manager-");
       yield* initRepo(repoDir);
       fs.writeFileSync(path.join(repoDir, "README.md"), "hello\nworld\n");
 
@@ -497,7 +549,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
 
   it.effect("uses custom commit message when provided", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("tether-git-manager-");
       yield* initRepo(repoDir);
       fs.writeFileSync(path.join(repoDir, "README.md"), "hello\ncustom\n");
       let generatedCount = 0;
@@ -538,104 +590,120 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
-  it.effect("creates feature branch, commits, and pushes with featureBranch option", () =>
-    Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
-      yield* initRepo(repoDir);
-      const remoteDir = yield* createBareRemote();
-      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
-      yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
-      fs.writeFileSync(path.join(repoDir, "README.md"), "hello\nfeature-branch\n");
-      let generatedCount = 0;
+  it.effect(
+    "creates feature branch, commits, and pushes with featureBranch option",
+    () =>
+      Effect.gen(function* () {
+        const repoDir = yield* makeTempDir("tether-git-manager-");
+        yield* initRepo(repoDir);
+        const remoteDir = yield* createBareRemote();
+        yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+        yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
+        fs.writeFileSync(
+          path.join(repoDir, "README.md"),
+          "hello\nfeature-branch\n",
+        );
+        let generatedCount = 0;
 
-      const { manager } = yield* makeManager({
-        textGeneration: {
-          generateCommitMessage: (input) =>
-            Effect.sync(() => {
-              generatedCount += 1;
-              return {
-                subject: "Implement stacked git actions",
-                body: "",
-                ...(input.includeBranch
-                  ? { branch: "feature/implement-stacked-git-actions" }
-                  : {}),
-              };
-            }),
-        },
-      });
-      const result = yield* runStackedAction(manager, {
-        cwd: repoDir,
-        action: "commit_push",
-        featureBranch: true,
-      });
+        const { manager } = yield* makeManager({
+          textGeneration: {
+            generateCommitMessage: (input) =>
+              Effect.sync(() => {
+                generatedCount += 1;
+                return {
+                  subject: "Implement stacked git actions",
+                  body: "",
+                  ...(input.includeBranch
+                    ? { branch: "feature/implement-stacked-git-actions" }
+                    : {}),
+                };
+              }),
+          },
+        });
+        const result = yield* runStackedAction(manager, {
+          cwd: repoDir,
+          action: "commit_push",
+          featureBranch: true,
+        });
 
-      expect(result.branch.status).toBe("created");
-      expect(result.branch.name).toBe("feature/implement-stacked-git-actions");
-      expect(result.commit.status).toBe("created");
-      expect(result.push.status).toBe("pushed");
-      expect(
-        yield* runGit(repoDir, ["rev-parse", "--abbrev-ref", "HEAD"]).pipe(
-          Effect.map((result) => result.stdout.trim()),
-        ),
-      ).toBe("feature/implement-stacked-git-actions");
+        expect(result.branch.status).toBe("created");
+        expect(result.branch.name).toBe(
+          "feature/implement-stacked-git-actions",
+        );
+        expect(result.commit.status).toBe("created");
+        expect(result.push.status).toBe("pushed");
+        expect(
+          yield* runGit(repoDir, ["rev-parse", "--abbrev-ref", "HEAD"]).pipe(
+            Effect.map((result) => result.stdout.trim()),
+          ),
+        ).toBe("feature/implement-stacked-git-actions");
 
-      const mainSha = yield* runGit(repoDir, ["rev-parse", "main"]).pipe(
-        Effect.map((r) => r.stdout.trim()),
-      );
-      const mergeBase = yield* runGit(repoDir, ["merge-base", "main", "HEAD"]).pipe(
-        Effect.map((r) => r.stdout.trim()),
-      );
-      expect(mergeBase).toBe(mainSha);
-      expect(generatedCount).toBe(1);
-    }),
+        const mainSha = yield* runGit(repoDir, ["rev-parse", "main"]).pipe(
+          Effect.map((r) => r.stdout.trim()),
+        );
+        const mergeBase = yield* runGit(repoDir, [
+          "merge-base",
+          "main",
+          "HEAD",
+        ]).pipe(Effect.map((r) => r.stdout.trim()));
+        expect(mergeBase).toBe(mainSha);
+        expect(generatedCount).toBe(1);
+      }),
   );
 
-  it.effect("featureBranch uses custom commit message and derives branch name", () =>
-    Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
-      yield* initRepo(repoDir);
-      fs.writeFileSync(path.join(repoDir, "README.md"), "hello\ncustom-feature\n");
-      let generatedCount = 0;
+  it.effect(
+    "featureBranch uses custom commit message and derives branch name",
+    () =>
+      Effect.gen(function* () {
+        const repoDir = yield* makeTempDir("tether-git-manager-");
+        yield* initRepo(repoDir);
+        fs.writeFileSync(
+          path.join(repoDir, "README.md"),
+          "hello\ncustom-feature\n",
+        );
+        let generatedCount = 0;
 
-      const { manager } = yield* makeManager({
-        textGeneration: {
-          generateCommitMessage: (input) =>
-            Effect.sync(() => {
-              generatedCount += 1;
-              return {
-                subject: "unused",
-                body: "",
-                ...(input.includeBranch ? { branch: "feature/unused" } : {}),
-              };
-            }),
-        },
-      });
-      const result = yield* runStackedAction(manager, {
-        cwd: repoDir,
-        action: "commit",
-        featureBranch: true,
-        commitMessage: "feat: custom summary line\n\n- details from user",
-      });
+        const { manager } = yield* makeManager({
+          textGeneration: {
+            generateCommitMessage: (input) =>
+              Effect.sync(() => {
+                generatedCount += 1;
+                return {
+                  subject: "unused",
+                  body: "",
+                  ...(input.includeBranch ? { branch: "feature/unused" } : {}),
+                };
+              }),
+          },
+        });
+        const result = yield* runStackedAction(manager, {
+          cwd: repoDir,
+          action: "commit",
+          featureBranch: true,
+          commitMessage: "feat: custom summary line\n\n- details from user",
+        });
 
-      expect(result.branch.status).toBe("created");
-      expect(result.branch.name).toBe("feature/feat-custom-summary-line");
-      expect(result.commit.status).toBe("created");
-      expect(result.commit.subject).toBe("feat: custom summary line");
-      expect(generatedCount).toBe(0);
+        expect(result.branch.status).toBe("created");
+        expect(result.branch.name).toBe("feature/feat-custom-summary-line");
+        expect(result.commit.status).toBe("created");
+        expect(result.commit.subject).toBe("feat: custom summary line");
+        expect(generatedCount).toBe(0);
 
-      const mainSha = yield* runGit(repoDir, ["rev-parse", "main"]).pipe(
-        Effect.map((r) => r.stdout.trim()),
-      );
-      const mergeBase = yield* runGit(repoDir, ["merge-base", "main", result.branch.name!]).pipe(
-        Effect.map((r) => r.stdout.trim()),
-      );
-      expect(mergeBase).toBe(mainSha);
-    }),
+        const mainSha = yield* runGit(repoDir, ["rev-parse", "main"]).pipe(
+          Effect.map((r) => r.stdout.trim()),
+        );
+        const mergeBase = yield* runGit(repoDir, [
+          "merge-base",
+          "main",
+          result.branch.name!,
+        ]).pipe(Effect.map((r) => r.stdout.trim()));
+        expect(mergeBase).toBe(mainSha);
+      }),
   );
 
   it.effect("skips commit when there are no uncommitted changes", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("tether-git-manager-");
       yield* initRepo(repoDir);
 
       const { manager } = yield* makeManager();
@@ -653,7 +721,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
 
   it.effect("featureBranch returns error when worktree is clean", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("tether-git-manager-");
       yield* initRepo(repoDir);
 
       const { manager } = yield* makeManager();
@@ -672,7 +740,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
 
   it.effect("commits and pushes with upstream auto-setup when needed", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("tether-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/stacked-flow"]);
       const remoteDir = yield* createBareRemote();
@@ -690,9 +758,11 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       expect(result.push.status).toBe("pushed");
       expect(result.push.setUpstream).toBe(true);
       expect(
-        yield* runGit(repoDir, ["rev-parse", "--abbrev-ref", "@{upstream}"]).pipe(
-          Effect.map((result) => result.stdout.trim()),
-        ),
+        yield* runGit(repoDir, [
+          "rev-parse",
+          "--abbrev-ref",
+          "@{upstream}",
+        ]).pipe(Effect.map((result) => result.stdout.trim())),
       ).toBe("origin/feature/stacked-flow");
     }),
   );
@@ -701,7 +771,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     "pushes and creates PR from a no-upstream branch when local commits are ahead of base",
     () =>
       Effect.gen(function* () {
-        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        const repoDir = yield* makeTempDir("tether-git-manager-");
         yield* initRepo(repoDir);
         yield* runGit(repoDir, ["checkout", "-b", "feature/no-upstream-pr"]);
         const remoteDir = yield* createBareRemote();
@@ -736,13 +806,17 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         expect(result.push.setUpstream).toBe(true);
         expect(result.pr.status).toBe("created");
         expect(
-          yield* runGit(repoDir, ["rev-parse", "--abbrev-ref", "@{upstream}"]).pipe(
-            Effect.map((result) => result.stdout.trim()),
-          ),
+          yield* runGit(repoDir, [
+            "rev-parse",
+            "--abbrev-ref",
+            "@{upstream}",
+          ]).pipe(Effect.map((result) => result.stdout.trim())),
         ).toBe("origin/feature/no-upstream-pr");
         expect(
           ghCalls.some((call) =>
-            call.includes("pr create --base main --head feature/no-upstream-pr"),
+            call.includes(
+              "pr create --base main --head feature/no-upstream-pr",
+            ),
           ),
         ).toBe(true);
       }),
@@ -750,7 +824,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
 
   it.effect("skips push when branch is already up to date", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("tether-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/up-to-date"]);
       const remoteDir = yield* createBareRemote();
@@ -771,7 +845,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
 
   it.effect("returns existing PR metadata for commit/push/pr action", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("tether-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/existing-pr"]);
       const remoteDir = yield* createBareRemote();
@@ -807,7 +881,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
 
   it.effect("creates PR when one does not already exist", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("tether-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature-create-pr"]);
       const remoteDir = yield* createBareRemote();
@@ -816,7 +890,11 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       yield* runGit(repoDir, ["add", "changes.txt"]);
       yield* runGit(repoDir, ["commit", "-m", "Feature commit"]);
       yield* runGit(repoDir, ["push", "-u", "origin", "feature-create-pr"]);
-      yield* runGit(repoDir, ["config", "branch.feature-create-pr.gh-merge-base", "main"]);
+      yield* runGit(repoDir, [
+        "config",
+        "branch.feature-create-pr.gh-merge-base",
+        "main",
+      ]);
 
       const { manager, ghCalls } = yield* makeManager({
         ghScenario: {
@@ -843,7 +921,9 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       expect(result.pr.status).toBe("created");
       expect(result.pr.number).toBe(88);
       expect(
-        ghCalls.some((call) => call.includes("pr create --base main --head feature-create-pr")),
+        ghCalls.some((call) =>
+          call.includes("pr create --base main --head feature-create-pr"),
+        ),
       ).toBe(true);
       expect(ghCalls.some((call) => call.startsWith("pr view "))).toBe(false);
     }),
@@ -851,7 +931,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
 
   it.effect("rejects push/pr actions from detached HEAD", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("tether-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "--detach", "HEAD"]);
 
@@ -869,7 +949,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
 
   it.effect("surfaces missing gh binary errors", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("tether-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/gh-missing"]);
       const remoteDir = yield* createBareRemote();
@@ -898,7 +978,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
 
   it.effect("surfaces gh auth errors with guidance", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("tether-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/gh-auth"]);
       const remoteDir = yield* createBareRemote();
@@ -909,7 +989,8 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         ghScenario: {
           failWith: new GitHubCliError({
             operation: "execute",
-            detail: "GitHub CLI is not authenticated. Run `gh auth login` and retry.",
+            detail:
+              "GitHub CLI is not authenticated. Run `gh auth login` and retry.",
           }),
         },
       });

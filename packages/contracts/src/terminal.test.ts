@@ -13,8 +13,13 @@ import {
   TerminalWriteInput,
 } from "./terminal";
 
-function decodeSync<S extends Schema.Top>(schema: S, input: unknown): Schema.Schema.Type<S> {
-  return Schema.decodeUnknownSync(schema as never)(input) as Schema.Schema.Type<S>;
+function decodeSync<S extends Schema.Top>(
+  schema: S,
+  input: unknown,
+): Schema.Schema.Type<S> {
+  return Schema.decodeUnknownSync(schema as never)(
+    input,
+  ) as Schema.Schema.Type<S>;
 }
 
 function decodes<S extends Schema.Top>(schema: S, input: unknown): boolean {
@@ -66,12 +71,12 @@ describe("TerminalOpenInput", () => {
       cols: 100,
       rows: 24,
       env: {
-        T3CODE_PROJECT_ROOT: "/tmp/project",
+        TETHER_PROJECT_ROOT: "/tmp/project",
         CUSTOM_FLAG: "1",
       },
     });
     expect(parsed.env).toMatchObject({
-      T3CODE_PROJECT_ROOT: "/tmp/project",
+      TETHER_PROJECT_ROOT: "/tmp/project",
       CUSTOM_FLAG: "1",
     });
   });

@@ -38,7 +38,7 @@ describe("searchWorkspaceEntries", () => {
   });
 
   it("returns files and directories relative to cwd", async () => {
-    const cwd = makeTempDir("t3code-workspace-entries-");
+    const cwd = makeTempDir("tether-workspace-entries-");
     writeFile(cwd, "src/components/Composer.tsx");
     writeFile(cwd, "src/index.ts");
     writeFile(cwd, "README.md");
@@ -53,31 +53,47 @@ describe("searchWorkspaceEntries", () => {
     assert.include(paths, "src/components/Composer.tsx");
     assert.include(paths, "README.md");
     assert.isFalse(paths.some((entryPath) => entryPath.startsWith(".git")));
-    assert.isFalse(paths.some((entryPath) => entryPath.startsWith("node_modules")));
+    assert.isFalse(
+      paths.some((entryPath) => entryPath.startsWith("node_modules")),
+    );
     assert.isFalse(result.truncated);
   });
 
   it("filters and ranks entries by query", async () => {
-    const cwd = makeTempDir("t3code-workspace-query-");
+    const cwd = makeTempDir("tether-workspace-query-");
     writeFile(cwd, "src/components/Composer.tsx");
     writeFile(cwd, "src/components/composePrompt.ts");
     writeFile(cwd, "docs/composition.md");
 
-    const result = await searchWorkspaceEntries({ cwd, query: "compo", limit: 5 });
+    const result = await searchWorkspaceEntries({
+      cwd,
+      query: "compo",
+      limit: 5,
+    });
 
     assert.isAbove(result.entries.length, 0);
-    assert.isTrue(result.entries.some((entry) => entry.path === "src/components"));
-    assert.isTrue(result.entries.every((entry) => entry.path.toLowerCase().includes("compo")));
+    assert.isTrue(
+      result.entries.some((entry) => entry.path === "src/components"),
+    );
+    assert.isTrue(
+      result.entries.every((entry) =>
+        entry.path.toLowerCase().includes("compo"),
+      ),
+    );
   });
 
   it("excludes gitignored paths for git repositories", async () => {
-    const cwd = makeTempDir("t3code-workspace-gitignore-");
+    const cwd = makeTempDir("tether-workspace-gitignore-");
     runGit(cwd, ["init"]);
     writeFile(cwd, ".gitignore", ".convex/\nconvex/\nignored.txt\n");
     writeFile(cwd, "src/keep.ts", "export {};");
     writeFile(cwd, "ignored.txt", "ignore me");
     writeFile(cwd, ".convex/local-storage/data.json", "{}");
-    writeFile(cwd, "convex/UOoS-l/convex_local_storage/modules/data.json", "{}");
+    writeFile(
+      cwd,
+      "convex/UOoS-l/convex_local_storage/modules/data.json",
+      "{}",
+    );
 
     const result = await searchWorkspaceEntries({ cwd, query: "", limit: 100 });
     const paths = result.entries.map((entry) => entry.path);
@@ -90,7 +106,7 @@ describe("searchWorkspaceEntries", () => {
   });
 
   it("excludes tracked paths that match ignore rules", async () => {
-    const cwd = makeTempDir("t3code-workspace-tracked-gitignore-");
+    const cwd = makeTempDir("tether-workspace-tracked-gitignore-");
     runGit(cwd, ["init"]);
     writeFile(cwd, ".convex/local-storage/data.json", "{}");
     writeFile(cwd, "src/keep.ts", "export {};");
@@ -106,7 +122,7 @@ describe("searchWorkspaceEntries", () => {
   });
 
   it("excludes .convex in non-git workspaces", async () => {
-    const cwd = makeTempDir("t3code-workspace-non-git-convex-");
+    const cwd = makeTempDir("tether-workspace-non-git-convex-");
     writeFile(cwd, ".convex/local-storage/data.json", "{}");
     writeFile(cwd, "src/keep.ts", "export {};");
 
@@ -119,7 +135,7 @@ describe("searchWorkspaceEntries", () => {
   });
 
   it("deduplicates concurrent index builds for the same cwd", async () => {
-    const cwd = makeTempDir("t3code-workspace-concurrent-build-");
+    const cwd = makeTempDir("tether-workspace-concurrent-build-");
     writeFile(cwd, "src/components/Composer.tsx");
 
     let rootReadCount = 0;
@@ -144,7 +160,7 @@ describe("searchWorkspaceEntries", () => {
   });
 
   it("limits concurrent directory reads while walking the filesystem", async () => {
-    const cwd = makeTempDir("t3code-workspace-read-concurrency-");
+    const cwd = makeTempDir("tether-workspace-read-concurrency-");
     for (let index = 0; index < 80; index += 1) {
       writeFile(cwd, `group-${index}/entry-${index}.ts`, "export {};");
     }

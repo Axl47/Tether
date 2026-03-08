@@ -63,7 +63,10 @@ async function withRouteServer(
   }
 }
 
-async function request(baseUrl: string, pathname: string): Promise<HttpResponse> {
+async function request(
+  baseUrl: string,
+  pathname: string,
+): Promise<HttpResponse> {
   const response = await fetch(`${baseUrl}${pathname}`);
   return {
     statusCode: response.status,
@@ -88,8 +91,12 @@ describe("tryHandleProjectFaviconRequest", () => {
   });
 
   it("serves a well-known favicon file from the project root", async () => {
-    const projectDir = makeTempDir("t3code-favicon-route-root-");
-    fs.writeFileSync(path.join(projectDir, "favicon.svg"), "<svg>favicon</svg>", "utf8");
+    const projectDir = makeTempDir("tether-favicon-route-root-");
+    fs.writeFileSync(
+      path.join(projectDir, "favicon.svg"),
+      "<svg>favicon</svg>",
+      "utf8",
+    );
 
     await withRouteServer(async (baseUrl) => {
       const pathname = `/api/project-favicon?cwd=${encodeURIComponent(projectDir)}`;
@@ -101,10 +108,13 @@ describe("tryHandleProjectFaviconRequest", () => {
   });
 
   it("resolves icon href from source files when no well-known favicon exists", async () => {
-    const projectDir = makeTempDir("t3code-favicon-route-source-");
+    const projectDir = makeTempDir("tether-favicon-route-source-");
     const iconPath = path.join(projectDir, "public", "brand", "logo.svg");
     fs.mkdirSync(path.dirname(iconPath), { recursive: true });
-    fs.writeFileSync(path.join(projectDir, "index.html"), '<link rel="icon" href="/brand/logo.svg">');
+    fs.writeFileSync(
+      path.join(projectDir, "index.html"),
+      '<link rel="icon" href="/brand/logo.svg">',
+    );
     fs.writeFileSync(iconPath, "<svg>brand</svg>", "utf8");
 
     await withRouteServer(async (baseUrl) => {
@@ -117,10 +127,13 @@ describe("tryHandleProjectFaviconRequest", () => {
   });
 
   it("resolves icon link when href appears before rel in HTML", async () => {
-    const projectDir = makeTempDir("t3code-favicon-route-html-order-");
+    const projectDir = makeTempDir("tether-favicon-route-html-order-");
     const iconPath = path.join(projectDir, "public", "brand", "logo.svg");
     fs.mkdirSync(path.dirname(iconPath), { recursive: true });
-    fs.writeFileSync(path.join(projectDir, "index.html"), '<link href="/brand/logo.svg" rel="icon">');
+    fs.writeFileSync(
+      path.join(projectDir, "index.html"),
+      '<link href="/brand/logo.svg" rel="icon">',
+    );
     fs.writeFileSync(iconPath, "<svg>brand-html-order</svg>", "utf8");
 
     await withRouteServer(async (baseUrl) => {
@@ -133,7 +146,7 @@ describe("tryHandleProjectFaviconRequest", () => {
   });
 
   it("resolves object-style icon metadata when href appears before rel", async () => {
-    const projectDir = makeTempDir("t3code-favicon-route-obj-order-");
+    const projectDir = makeTempDir("tether-favicon-route-obj-order-");
     const iconPath = path.join(projectDir, "public", "brand", "obj.svg");
     fs.mkdirSync(path.dirname(iconPath), { recursive: true });
     fs.mkdirSync(path.join(projectDir, "src"), { recursive: true });
@@ -154,7 +167,7 @@ describe("tryHandleProjectFaviconRequest", () => {
   });
 
   it("serves a fallback favicon when no icon exists", async () => {
-    const projectDir = makeTempDir("t3code-favicon-route-fallback-");
+    const projectDir = makeTempDir("tether-favicon-route-fallback-");
 
     await withRouteServer(async (baseUrl) => {
       const pathname = `/api/project-favicon?cwd=${encodeURIComponent(projectDir)}`;

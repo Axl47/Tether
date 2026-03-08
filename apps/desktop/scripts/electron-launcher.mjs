@@ -1,4 +1,4 @@
-// This file mostly exists because we want dev mode to say "T3 Code (Dev)" instead of "electron"
+// This file mostly exists because we want dev mode to say "Tether (Dev)" instead of "electron"
 
 import { spawnSync } from "node:child_process";
 import {
@@ -17,30 +17,42 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
-const APP_DISPLAY_NAME = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
-const APP_BUNDLE_ID = "com.t3tools.t3code";
+const APP_DISPLAY_NAME = isDevelopment ? "Tether (Dev)" : "Tether (Alpha)";
+const APP_BUNDLE_ID = "com.axorio.tether";
 const LAUNCHER_VERSION = 1;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const desktopDir = resolve(__dirname, "..");
 
 function setPlistString(plistPath, key, value) {
-  const replaceResult = spawnSync("plutil", ["-replace", key, "-string", value, plistPath], {
-    encoding: "utf8",
-  });
+  const replaceResult = spawnSync(
+    "plutil",
+    ["-replace", key, "-string", value, plistPath],
+    {
+      encoding: "utf8",
+    },
+  );
   if (replaceResult.status === 0) {
     return;
   }
 
-  const insertResult = spawnSync("plutil", ["-insert", key, "-string", value, plistPath], {
-    encoding: "utf8",
-  });
+  const insertResult = spawnSync(
+    "plutil",
+    ["-insert", key, "-string", value, plistPath],
+    {
+      encoding: "utf8",
+    },
+  );
   if (insertResult.status === 0) {
     return;
   }
 
-  const details = [replaceResult.stderr, insertResult.stderr].filter(Boolean).join("\n");
-  throw new Error(`Failed to update plist key "${key}" at ${plistPath}: ${details}`.trim());
+  const details = [replaceResult.stderr, insertResult.stderr]
+    .filter(Boolean)
+    .join("\n");
+  throw new Error(
+    `Failed to update plist key "${key}" at ${plistPath}: ${details}`.trim(),
+  );
 }
 
 function patchMainBundleInfoPlist(appBundlePath, iconPath) {
@@ -69,16 +81,28 @@ function patchHelperBundleInfoPlists(appBundlePath) {
       continue;
     }
 
-    const helperPlistPath = join(frameworksDir, entry.name, "Contents", "Info.plist");
+    const helperPlistPath = join(
+      frameworksDir,
+      entry.name,
+      "Contents",
+      "Info.plist",
+    );
     if (!existsSync(helperPlistPath)) {
       continue;
     }
 
-    const suffix = entry.name.replace("Electron Helper", "").replace(".app", "").trim();
+    const suffix = entry.name
+      .replace("Electron Helper", "")
+      .replace(".app", "")
+      .trim();
     const helperName = suffix
       ? `${APP_DISPLAY_NAME} Helper ${suffix}`
       : `${APP_DISPLAY_NAME} Helper`;
-    const helperIdSuffix = suffix.replace(/[()]/g, "").trim().toLowerCase().replace(/\s+/g, "-");
+    const helperIdSuffix = suffix
+      .replace(/[()]/g, "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "-");
     const helperBundleId = helperIdSuffix
       ? `${APP_BUNDLE_ID}.helper.${helperIdSuffix}`
       : `${APP_BUNDLE_ID}.helper`;
@@ -101,7 +125,12 @@ function buildMacLauncher(electronBinaryPath) {
   const sourceAppBundlePath = resolve(electronBinaryPath, "../../..");
   const runtimeDir = join(desktopDir, ".electron-runtime");
   const targetAppBundlePath = join(runtimeDir, `${APP_DISPLAY_NAME}.app`);
-  const targetBinaryPath = join(targetAppBundlePath, "Contents", "MacOS", "Electron");
+  const targetBinaryPath = join(
+    targetAppBundlePath,
+    "Contents",
+    "MacOS",
+    "Electron",
+  );
   const iconPath = join(desktopDir, "resources", "icon.icns");
   const metadataPath = join(runtimeDir, "metadata.json");
 

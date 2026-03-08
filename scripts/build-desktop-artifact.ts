@@ -13,7 +13,17 @@ import { resolveCatalogDependencies } from "./lib/resolve-catalog.ts";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { Config, Data, Effect, FileSystem, Layer, Logger, Option, Path, Schema } from "effect";
+import {
+  Config,
+  Data,
+  Effect,
+  FileSystem,
+  Layer,
+  Logger,
+  Option,
+  Path,
+  Schema,
+} from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
@@ -23,18 +33,23 @@ const BuildArch = Schema.Literals(["arm64", "x64", "universal"]);
 const RepoRoot = Effect.service(Path.Path).pipe(
   Effect.flatMap((path) => path.fromFileUrl(new URL("..", import.meta.url))),
 );
-const ProductionMacIconSource = Effect.zipWith(RepoRoot, Effect.service(Path.Path), (repoRoot, path) =>
-  path.join(repoRoot, BRAND_ASSET_PATHS.productionMacIconPng),
+const ProductionMacIconSource = Effect.zipWith(
+  RepoRoot,
+  Effect.service(Path.Path),
+  (repoRoot, path) =>
+    path.join(repoRoot, BRAND_ASSET_PATHS.productionMacIconPng),
 );
 const ProductionLinuxIconSource = Effect.zipWith(
   RepoRoot,
   Effect.service(Path.Path),
-  (repoRoot, path) => path.join(repoRoot, BRAND_ASSET_PATHS.productionLinuxIconPng),
+  (repoRoot, path) =>
+    path.join(repoRoot, BRAND_ASSET_PATHS.productionLinuxIconPng),
 );
 const ProductionWindowsIconSource = Effect.zipWith(
   RepoRoot,
   Effect.service(Path.Path),
-  (repoRoot, path) => path.join(repoRoot, BRAND_ASSET_PATHS.productionWindowsIconIco),
+  (repoRoot, path) =>
+    path.join(repoRoot, BRAND_ASSET_PATHS.productionWindowsIconIco),
 );
 const encodeJsonString = Schema.encodeEffect(Schema.UnknownFromJsonString);
 
@@ -74,14 +89,18 @@ interface BuildCliInput {
   readonly verbose: Option.Option<boolean>;
 }
 
-function detectHostBuildPlatform(hostPlatform: string): typeof BuildPlatform.Type | undefined {
+function detectHostBuildPlatform(
+  hostPlatform: string,
+): typeof BuildPlatform.Type | undefined {
   if (hostPlatform === "darwin") return "mac";
   if (hostPlatform === "linux") return "linux";
   if (hostPlatform === "win32") return "win";
   return undefined;
 }
 
-function getDefaultArch(platform: typeof BuildPlatform.Type): typeof BuildArch.Type {
+function getDefaultArch(
+  platform: typeof BuildPlatform.Type,
+): typeof BuildArch.Type {
   const config = PLATFORM_CONFIG[platform];
   if (!config) {
     return "x64";
@@ -126,8 +145,19 @@ function resolvePythonForNodeGyp(): string | undefined {
   if (process.platform === "win32") {
     const localAppData = process.env.LOCALAPPDATA;
     if (localAppData) {
-      for (const version of ["Python313", "Python312", "Python311", "Python310"]) {
-        const candidate = join(localAppData, "Programs", "Python", version, "python.exe");
+      for (const version of [
+        "Python313",
+        "Python312",
+        "Python311",
+        "Python310",
+      ]) {
+        const candidate = join(
+          localAppData,
+          "Programs",
+          "Python",
+          version,
+          "python.exe",
+        );
         if (existsSync(candidate)) {
           return candidate;
         }
@@ -135,9 +165,13 @@ function resolvePythonForNodeGyp(): string | undefined {
     }
   }
 
-  const probe = spawnSync("python", ["-c", "import sys;print(sys.executable)"], {
-    encoding: "utf8",
-  });
+  const probe = spawnSync(
+    "python",
+    ["-c", "import sys;print(sys.executable)"],
+    {
+      encoding: "utf8",
+    },
+  );
   if (probe.status !== 0) {
     return undefined;
   }
@@ -166,7 +200,7 @@ interface StagePackageJson {
   readonly name: string;
   readonly version: string;
   readonly buildVersion: string;
-  readonly t3codeCommitHash: string;
+  readonly tetherCommitHash: string;
   readonly private: true;
   readonly description: string;
   readonly author: string;
@@ -181,35 +215,54 @@ interface StagePackageJson {
 const AzureTrustedSigningOptionsConfig = Config.all({
   publisherName: Config.string("AZURE_TRUSTED_SIGNING_PUBLISHER_NAME"),
   endpoint: Config.string("AZURE_TRUSTED_SIGNING_ENDPOINT"),
-  certificateProfileName: Config.string("AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME"),
+  certificateProfileName: Config.string(
+    "AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME",
+  ),
   codeSigningAccountName: Config.string("AZURE_TRUSTED_SIGNING_ACCOUNT_NAME"),
-  fileDigest: Config.string("AZURE_TRUSTED_SIGNING_FILE_DIGEST").pipe(Config.withDefault("SHA256")),
+  fileDigest: Config.string("AZURE_TRUSTED_SIGNING_FILE_DIGEST").pipe(
+    Config.withDefault("SHA256"),
+  ),
   timestampDigest: Config.string("AZURE_TRUSTED_SIGNING_TIMESTAMP_DIGEST").pipe(
     Config.withDefault("SHA256"),
   ),
-  timestampRfc3161: Config.string("AZURE_TRUSTED_SIGNING_TIMESTAMP_RFC3161").pipe(
-    Config.withDefault("http://timestamp.acs.microsoft.com"),
-  ),
+  timestampRfc3161: Config.string(
+    "AZURE_TRUSTED_SIGNING_TIMESTAMP_RFC3161",
+  ).pipe(Config.withDefault("http://timestamp.acs.microsoft.com")),
 });
 
 const BuildEnvConfig = Config.all({
-  platform: Config.schema(BuildPlatform, "T3CODE_DESKTOP_PLATFORM").pipe(Config.option),
-  target: Config.string("T3CODE_DESKTOP_TARGET").pipe(Config.option),
-  arch: Config.schema(BuildArch, "T3CODE_DESKTOP_ARCH").pipe(Config.option),
-  version: Config.string("T3CODE_DESKTOP_VERSION").pipe(Config.option),
-  outputDir: Config.string("T3CODE_DESKTOP_OUTPUT_DIR").pipe(Config.option),
-  skipBuild: Config.boolean("T3CODE_DESKTOP_SKIP_BUILD").pipe(Config.withDefault(false)),
-  keepStage: Config.boolean("T3CODE_DESKTOP_KEEP_STAGE").pipe(Config.withDefault(false)),
-  signed: Config.boolean("T3CODE_DESKTOP_SIGNED").pipe(Config.withDefault(false)),
-  verbose: Config.boolean("T3CODE_DESKTOP_VERBOSE").pipe(Config.withDefault(false)),
+  platform: Config.schema(BuildPlatform, "TETHER_DESKTOP_PLATFORM").pipe(
+    Config.option,
+  ),
+  target: Config.string("TETHER_DESKTOP_TARGET").pipe(Config.option),
+  arch: Config.schema(BuildArch, "TETHER_DESKTOP_ARCH").pipe(Config.option),
+  version: Config.string("TETHER_DESKTOP_VERSION").pipe(Config.option),
+  outputDir: Config.string("TETHER_DESKTOP_OUTPUT_DIR").pipe(Config.option),
+  skipBuild: Config.boolean("TETHER_DESKTOP_SKIP_BUILD").pipe(
+    Config.withDefault(false),
+  ),
+  keepStage: Config.boolean("TETHER_DESKTOP_KEEP_STAGE").pipe(
+    Config.withDefault(false),
+  ),
+  signed: Config.boolean("TETHER_DESKTOP_SIGNED").pipe(
+    Config.withDefault(false),
+  ),
+  verbose: Config.boolean("TETHER_DESKTOP_VERBOSE").pipe(
+    Config.withDefault(false),
+  ),
 });
 
 const resolveBooleanFlag = (flag: Option.Option<boolean>, envValue: boolean) =>
   Option.getOrElse(Option.filter(flag, Boolean), () => envValue);
-const mergeOptions = <A>(a: Option.Option<A>, b: Option.Option<A>, defaultValue: A) =>
-  Option.getOrElse(a, () => Option.getOrElse(b, () => defaultValue));
+const mergeOptions = <A>(
+  a: Option.Option<A>,
+  b: Option.Option<A>,
+  defaultValue: A,
+) => Option.getOrElse(a, () => Option.getOrElse(b, () => defaultValue));
 
-const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (input: BuildCliInput) {
+const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (
+  input: BuildCliInput,
+) {
   const path = yield* Path.Path;
   const repoRoot = yield* RepoRoot;
   const env = yield* BuildEnvConfig.asEffect();
@@ -226,10 +279,17 @@ const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (input: B
     });
   }
 
-  const target = mergeOptions(input.target, env.target, PLATFORM_CONFIG[platform].defaultTarget);
+  const target = mergeOptions(
+    input.target,
+    env.target,
+    PLATFORM_CONFIG[platform].defaultTarget,
+  );
   const arch = mergeOptions(input.arch, env.arch, getDefaultArch(platform));
   const version = mergeOptions(input.buildVersion, env.version, undefined);
-  const outputDir = path.resolve(repoRoot, mergeOptions(input.outputDir, env.outputDir, "release"));
+  const outputDir = path.resolve(
+    repoRoot,
+    mergeOptions(input.outputDir, env.outputDir, "release"),
+  );
 
   const skipBuild = resolveBooleanFlag(input.skipBuild, env.skipBuild);
   const keepStage = resolveBooleanFlag(input.keepStage, env.keepStage);
@@ -255,7 +315,9 @@ const commandOutputOptions = (verbose: boolean) =>
     stderr: "inherit",
   }) as const;
 
-const runCommand = Effect.fn("runCommand")(function* (command: ChildProcess.Command) {
+const runCommand = Effect.fn("runCommand")(function* (
+  command: ChildProcess.Command,
+) {
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const child = yield* commandSpawner.spawn(command);
   const exitCode = yield* child.exitCode;
@@ -315,7 +377,7 @@ function stageMacIcons(stageResourcesDir: string, verbose: boolean) {
     }
 
     const tmpRoot = yield* fs.makeTempDirectoryScoped({
-      prefix: "t3code-icon-build-",
+      prefix: "tether-icon-build-",
     });
 
     const iconPngPath = path.join(stageResourcesDir, "icon.png");
@@ -377,8 +439,16 @@ function validateBundledClientAssets(clientDir: string) {
     for (const ref of refs) {
       const normalizedRef = ref.split("#")[0]?.split("?")[0] ?? "";
       if (!normalizedRef) continue;
-      if (normalizedRef.startsWith("http://") || normalizedRef.startsWith("https://")) continue;
-      if (normalizedRef.startsWith("data:") || normalizedRef.startsWith("mailto:")) continue;
+      if (
+        normalizedRef.startsWith("http://") ||
+        normalizedRef.startsWith("https://")
+      )
+        continue;
+      if (
+        normalizedRef.startsWith("data:") ||
+        normalizedRef.startsWith("mailto:")
+      )
+        continue;
 
       const ext = path.extname(normalizedRef);
       if (!ext) continue;
@@ -409,10 +479,16 @@ function resolveDesktopRuntimeDependencies(
   }
 
   const runtimeDependencies = Object.fromEntries(
-    Object.entries(dependencies).filter(([dependencyName]) => dependencyName !== "electron"),
+    Object.entries(dependencies).filter(
+      ([dependencyName]) => dependencyName !== "electron",
+    ),
   );
 
-  return resolveCatalogDependencies(runtimeDependencies, catalog, "apps/desktop");
+  return resolveCatalogDependencies(
+    runtimeDependencies,
+    catalog,
+    "apps/desktop",
+  );
 }
 
 function resolveGitHubPublishConfig():
@@ -424,7 +500,7 @@ function resolveGitHubPublishConfig():
     }
   | undefined {
   const rawRepo =
-    process.env.T3CODE_DESKTOP_UPDATE_REPOSITORY?.trim() ||
+    process.env.TETHER_DESKTOP_UPDATE_REPOSITORY?.trim() ||
     process.env.GITHUB_REPOSITORY?.trim() ||
     "";
   if (!rawRepo) return undefined;
@@ -447,9 +523,9 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   signed: boolean,
 ) {
   const buildConfig: Record<string, unknown> = {
-    appId: "com.t3tools.t3code",
+    appId: "com.axorio.tether",
     productName,
-    artifactName: "T3-Code-${version}-${arch}.${ext}",
+    artifactName: "Tether-${version}-${arch}.${ext}",
     directories: {
       buildResources: "apps/desktop/resources",
     },
@@ -489,25 +565,27 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   return buildConfig;
 });
 
-const assertPlatformBuildResources = Effect.fn("assertPlatformBuildResources")(function* (
-  platform: typeof BuildPlatform.Type,
-  stageResourcesDir: string,
-  verbose: boolean,
-) {
-  if (platform === "mac") {
-    yield* stageMacIcons(stageResourcesDir, verbose);
-    return;
-  }
+const assertPlatformBuildResources = Effect.fn("assertPlatformBuildResources")(
+  function* (
+    platform: typeof BuildPlatform.Type,
+    stageResourcesDir: string,
+    verbose: boolean,
+  ) {
+    if (platform === "mac") {
+      yield* stageMacIcons(stageResourcesDir, verbose);
+      return;
+    }
 
-  if (platform === "linux") {
-    yield* stageLinuxIcons(stageResourcesDir);
-    return;
-  }
+    if (platform === "linux") {
+      yield* stageLinuxIcons(stageResourcesDir);
+      return;
+    }
 
-  if (platform === "win") {
-    yield* stageWindowsIcons(stageResourcesDir);
-  }
-});
+    if (platform === "win") {
+      yield* stageWindowsIcons(stageResourcesDir);
+    }
+  },
+);
 
 const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   options: ResolvedBuildOptions,
@@ -528,7 +606,8 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   const serverDependencies = serverPackageJson.dependencies;
   if (!serverDependencies || Object.keys(serverDependencies).length === 0) {
     return yield* new BuildScriptError({
-      message: "Could not resolve production dependencies from apps/server/package.json.",
+      message:
+        "Could not resolve production dependencies from apps/server/package.json.",
     });
   }
 
@@ -541,7 +620,8 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       ),
     catch: (cause) =>
       new BuildScriptError({
-        message: "Could not resolve production dependencies from apps/server/package.json.",
+        message:
+          "Could not resolve production dependencies from apps/server/package.json.",
         cause,
       }),
   });
@@ -553,16 +633,19 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       ),
     catch: (cause) =>
       new BuildScriptError({
-        message: "Could not resolve desktop runtime dependencies from apps/desktop/package.json.",
+        message:
+          "Could not resolve desktop runtime dependencies from apps/desktop/package.json.",
         cause,
       }),
   });
 
   const appVersion = options.version ?? serverPackageJson.version;
   const commitHash = resolveGitCommitHash(repoRoot);
-  const mkdir = options.keepStage ? fs.makeTempDirectory : fs.makeTempDirectoryScoped;
+  const mkdir = options.keepStage
+    ? fs.makeTempDirectory
+    : fs.makeTempDirectoryScoped;
   const stageRoot = yield* mkdir({
-    prefix: `t3code-desktop-${options.platform}-stage-`,
+    prefix: `tether-desktop-${options.platform}-stage-`,
   });
 
   const stageAppDir = path.join(stageRoot, "app");
@@ -572,10 +655,15 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     desktopResources: path.join(repoRoot, "apps/desktop/resources"),
     serverDist: path.join(repoRoot, "apps/server/dist"),
   };
-  const bundledClientEntry = path.join(distDirs.serverDist, "client/index.html");
+  const bundledClientEntry = path.join(
+    distDirs.serverDist,
+    "client/index.html",
+  );
 
   if (!options.skipBuild) {
-    yield* Effect.log("[desktop-artifact] Building desktop/server/web artifacts...");
+    yield* Effect.log(
+      "[desktop-artifact] Building desktop/server/web artifacts...",
+    );
     yield* runCommand(
       ChildProcess.make({
         cwd: repoRoot,
@@ -600,29 +688,43 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
 
   yield* validateBundledClientAssets(path.dirname(bundledClientEntry));
 
-  yield* fs.makeDirectory(path.join(stageAppDir, "apps/desktop"), { recursive: true });
-  yield* fs.makeDirectory(path.join(stageAppDir, "apps/server"), { recursive: true });
+  yield* fs.makeDirectory(path.join(stageAppDir, "apps/desktop"), {
+    recursive: true,
+  });
+  yield* fs.makeDirectory(path.join(stageAppDir, "apps/server"), {
+    recursive: true,
+  });
 
   yield* Effect.log("[desktop-artifact] Staging release app...");
-  yield* fs.copy(distDirs.desktopDist, path.join(stageAppDir, "apps/desktop/dist-electron"));
+  yield* fs.copy(
+    distDirs.desktopDist,
+    path.join(stageAppDir, "apps/desktop/dist-electron"),
+  );
   yield* fs.copy(distDirs.desktopResources, stageResourcesDir);
-  yield* fs.copy(distDirs.serverDist, path.join(stageAppDir, "apps/server/dist"));
+  yield* fs.copy(
+    distDirs.serverDist,
+    path.join(stageAppDir, "apps/server/dist"),
+  );
 
-  yield* assertPlatformBuildResources(options.platform, stageResourcesDir, options.verbose);
+  yield* assertPlatformBuildResources(
+    options.platform,
+    stageResourcesDir,
+    options.verbose,
+  );
 
   const stagePackageJson: StagePackageJson = {
     name: "t3-code-desktop",
     version: appVersion,
     buildVersion: appVersion,
-    t3codeCommitHash: commitHash,
+    tetherCommitHash: commitHash,
     private: true,
-    description: "T3 Code desktop build",
-    author: "T3 Tools",
+    description: "Tether desktop build",
+    author: "AxorIO",
     main: "apps/desktop/dist-electron/main.js",
     build: yield* createBuildConfig(
       options.platform,
       options.target,
-      desktopPackageJson.productName ?? "T3 Code",
+      desktopPackageJson.productName ?? "Tether",
       options.signed,
     ),
     dependencies: {
@@ -635,9 +737,14 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   };
 
   const stagePackageJsonString = yield* encodeJsonString(stagePackageJson);
-  yield* fs.writeFileString(path.join(stageAppDir, "package.json"), `${stagePackageJsonString}\n`);
+  yield* fs.writeFileString(
+    path.join(stageAppDir, "package.json"),
+    `${stagePackageJsonString}\n`,
+  );
 
-  yield* Effect.log("[desktop-artifact] Installing staged production dependencies...");
+  yield* Effect.log(
+    "[desktop-artifact] Installing staged production dependencies...",
+  );
   yield* runCommand(
     ChildProcess.make({
       cwd: stageAppDir,
@@ -668,7 +775,8 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       buildEnv.PYTHON = python;
       buildEnv.npm_config_python = python;
     }
-    buildEnv.npm_config_msvs_version = buildEnv.npm_config_msvs_version ?? "2022";
+    buildEnv.npm_config_msvs_version =
+      buildEnv.npm_config_msvs_version ?? "2022";
     buildEnv.GYP_MSVS_VERSION = buildEnv.GYP_MSVS_VERSION ?? "2022";
   }
 
@@ -696,7 +804,9 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   const copiedArtifacts: string[] = [];
   for (const entry of stageEntries) {
     const from = path.join(stageDistDir, entry);
-    const stat = yield* fs.stat(from).pipe(Effect.catch(() => Effect.succeed(null)));
+    const stat = yield* fs
+      .stat(from)
+      .pipe(Effect.catch(() => Effect.succeed(null)));
     if (!stat || stat.type !== "File") continue;
 
     const to = path.join(options.outputDir, entry);
@@ -717,53 +827,68 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
 
 const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
   platform: Flag.choice("platform", BuildPlatform.literals).pipe(
-    Flag.withDescription("Build platform (env: T3CODE_DESKTOP_PLATFORM)."),
+    Flag.withDescription("Build platform (env: TETHER_DESKTOP_PLATFORM)."),
     Flag.optional,
   ),
   target: Flag.string("target").pipe(
     Flag.withDescription(
-      "Artifact target, for example dmg/AppImage/nsis (env: T3CODE_DESKTOP_TARGET).",
+      "Artifact target, for example dmg/AppImage/nsis (env: TETHER_DESKTOP_TARGET).",
     ),
     Flag.optional,
   ),
   arch: Flag.choice("arch", BuildArch.literals).pipe(
-    Flag.withDescription("Build arch, for example arm64/x64/universal (env: T3CODE_DESKTOP_ARCH)."),
+    Flag.withDescription(
+      "Build arch, for example arm64/x64/universal (env: TETHER_DESKTOP_ARCH).",
+    ),
     Flag.optional,
   ),
   buildVersion: Flag.string("build-version").pipe(
-    Flag.withDescription("Artifact version metadata (env: T3CODE_DESKTOP_VERSION)."),
+    Flag.withDescription(
+      "Artifact version metadata (env: TETHER_DESKTOP_VERSION).",
+    ),
     Flag.optional,
   ),
   outputDir: Flag.string("output-dir").pipe(
-    Flag.withDescription("Output directory for artifacts (env: T3CODE_DESKTOP_OUTPUT_DIR)."),
+    Flag.withDescription(
+      "Output directory for artifacts (env: TETHER_DESKTOP_OUTPUT_DIR).",
+    ),
     Flag.optional,
   ),
   skipBuild: Flag.boolean("skip-build").pipe(
     Flag.withDescription(
-      "Skip `bun run build:desktop` and use existing dist artifacts (env: T3CODE_DESKTOP_SKIP_BUILD).",
+      "Skip `bun run build:desktop` and use existing dist artifacts (env: TETHER_DESKTOP_SKIP_BUILD).",
     ),
     Flag.optional,
   ),
   keepStage: Flag.boolean("keep-stage").pipe(
-    Flag.withDescription("Keep temporary staging files (env: T3CODE_DESKTOP_KEEP_STAGE)."),
+    Flag.withDescription(
+      "Keep temporary staging files (env: TETHER_DESKTOP_KEEP_STAGE).",
+    ),
     Flag.optional,
   ),
   signed: Flag.boolean("signed").pipe(
     Flag.withDescription(
-      "Enable signing/notarization discovery; Windows uses Azure Trusted Signing (env: T3CODE_DESKTOP_SIGNED).",
+      "Enable signing/notarization discovery; Windows uses Azure Trusted Signing (env: TETHER_DESKTOP_SIGNED).",
     ),
     Flag.optional,
   ),
   verbose: Flag.boolean("verbose").pipe(
-    Flag.withDescription("Stream subprocess stdout (env: T3CODE_DESKTOP_VERBOSE)."),
+    Flag.withDescription(
+      "Stream subprocess stdout (env: TETHER_DESKTOP_VERBOSE).",
+    ),
     Flag.optional,
   ),
 }).pipe(
-  Command.withDescription("Build a desktop artifact for T3 Code."),
-  Command.withHandler((input) => Effect.flatMap(resolveBuildOptions(input), buildDesktopArtifact)),
+  Command.withDescription("Build a desktop artifact for Tether."),
+  Command.withHandler((input) =>
+    Effect.flatMap(resolveBuildOptions(input), buildDesktopArtifact),
+  ),
 );
 
-const cliRuntimeLayer = Layer.mergeAll(Logger.layer([Logger.consolePretty()]), NodeServices.layer);
+const cliRuntimeLayer = Layer.mergeAll(
+  Logger.layer([Logger.consolePretty()]),
+  NodeServices.layer,
+);
 
 Command.run(buildDesktopArtifactCli, { version: "0.0.0" }).pipe(
   Effect.scoped,

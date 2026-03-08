@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 
 import { Effect, FileSystem, Layer, Path } from "effect";
-import { resolveAutoFeatureBranchName, sanitizeFeatureBranchName } from "@t3tools/shared/git";
+import {
+  resolveAutoFeatureBranchName,
+  sanitizeFeatureBranchName,
+} from "@t3tools/shared/git";
 
 import { GitManagerError } from "../Errors.ts";
 import { GitManager, type GitManagerShape } from "../Services/GitManager.ts";
@@ -37,7 +40,11 @@ function parsePullRequestList(raw: unknown): PullRequestInfo[] {
     const state = record.state;
     const mergedAt = record.mergedAt;
     const updatedAt = record.updatedAt;
-    if (typeof number !== "number" || !Number.isInteger(number) || number <= 0) {
+    if (
+      typeof number !== "number" ||
+      !Number.isInteger(number) ||
+      number <= 0
+    ) {
       continue;
     }
     if (
@@ -50,7 +57,10 @@ function parsePullRequestList(raw: unknown): PullRequestInfo[] {
     }
 
     let normalizedState: "open" | "closed" | "merged";
-    if ((typeof mergedAt === "string" && mergedAt.trim().length > 0) || state === "MERGED") {
+    if (
+      (typeof mergedAt === "string" && mergedAt.trim().length > 0) ||
+      state === "MERGED"
+    ) {
       normalizedState = "merged";
     } else if (state === "OPEN" || state === undefined || state === null) {
       normalizedState = "open";
@@ -67,13 +77,20 @@ function parsePullRequestList(raw: unknown): PullRequestInfo[] {
       baseRefName,
       headRefName,
       state: normalizedState,
-      updatedAt: typeof updatedAt === "string" && updatedAt.trim().length > 0 ? updatedAt : null,
+      updatedAt:
+        typeof updatedAt === "string" && updatedAt.trim().length > 0
+          ? updatedAt
+          : null,
     });
   }
   return parsed;
 }
 
-function gitManagerError(operation: string, detail: string, cause?: unknown): GitManagerError {
+function gitManagerError(
+  operation: string,
+  detail: string,
+  cause?: unknown,
+): GitManagerError {
   return new GitManagerError({
     operation,
     detail,
@@ -97,7 +114,10 @@ function sanitizeCommitMessage(generated: {
 } {
   const rawSubject = generated.subject.trim().split(/\r?\n/g)[0]?.trim() ?? "";
   const subject = rawSubject.replace(/[.]+$/g, "").trim();
-  const safeSubject = subject.length > 0 ? subject.slice(0, 72).trimEnd() : "Update project files";
+  const safeSubject =
+    subject.length > 0
+      ? subject.slice(0, 72).trimEnd()
+      : "Update project files";
   return {
     subject: safeSubject,
     body: generated.body.trim(),
@@ -120,7 +140,9 @@ function formatCommitMessage(subject: string, body: string): string {
   return `${subject}\n\n${trimmedBody}`;
 }
 
-function parseCustomCommitMessage(raw: string): { subject: string; body: string } | null {
+function parseCustomCommitMessage(
+  raw: string,
+): { subject: string; body: string } | null {
   const normalized = raw.replace(/\r\n/g, "\n").trim();
   if (normalized.length === 0) {
     return null;
@@ -182,7 +204,8 @@ export const makeGitManager = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
 
-  const tempDir = process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP ?? "/tmp";
+  const tempDir =
+    process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP ?? "/tmp";
 
   const findOpenPr = (cwd: string, branch: string) =>
     gitHubCli
@@ -237,7 +260,11 @@ export const makeGitManager = Effect.gen(function* () {
       const parsedJson = yield* Effect.try({
         try: () => JSON.parse(raw) as unknown,
         catch: (cause) =>
-          gitManagerError("findLatestPr", "GitHub CLI returned invalid PR list JSON.", cause),
+          gitManagerError(
+            "findLatestPr",
+            "GitHub CLI returned invalid PR list JSON.",
+            cause,
+          ),
       });
 
       const parsed = parsePullRequestList(parsedJson).toSorted((a, b) => {
@@ -253,9 +280,16 @@ export const makeGitManager = Effect.gen(function* () {
       return parsed[0] ?? null;
     });
 
-  const resolveBaseBranch = (cwd: string, branch: string, upstreamRef: string | null) =>
+  const resolveBaseBranch = (
+    cwd: string,
+    branch: string,
+    upstreamRef: string | null,
+  ) =>
     Effect.gen(function* () {
-      const configured = yield* gitCore.readConfigValue(cwd, `branch.${branch}.gh-merge-base`);
+      const configured = yield* gitCore.readConfigValue(
+        cwd,
+        `branch.${branch}.gh-merge-base`,
+      );
       if (configured) return configured;
 
       if (upstreamRef) {
@@ -296,7 +330,10 @@ export const makeGitManager = Effect.gen(function* () {
           ...(input.includeBranch
             ? { branch: sanitizeFeatureBranchName(customCommit.subject) }
             : {}),
-          commitMessage: formatCommitMessage(customCommit.subject, customCommit.body),
+          commitMessage: formatCommitMessage(
+            customCommit.subject,
+            customCommit.body,
+          ),
         };
       }
 
@@ -336,7 +373,11 @@ export const makeGitManager = Effect.gen(function* () {
         return { status: "skipped_no_changes" as const };
       }
 
-      const { commitSha } = yield* gitCore.commit(cwd, suggestion.subject, suggestion.body);
+      const { commitSha } = yield* gitCore.commit(
+        cwd,
+        suggestion.subject,
+        suggestion.body,
+      );
       return {
         status: "created" as const,
         commitSha,
@@ -373,7 +414,11 @@ export const makeGitManager = Effect.gen(function* () {
         };
       }
 
-      const baseBranch = yield* resolveBaseBranch(cwd, branch, details.upstreamRef);
+      const baseBranch = yield* resolveBaseBranch(
+        cwd,
+        branch,
+        details.upstreamRef,
+      );
       const rangeContext = yield* gitCore.readRangeContext(cwd, baseBranch);
 
       const generated = yield* textGeneration.generatePrContent({
@@ -385,12 +430,19 @@ export const makeGitManager = Effect.gen(function* () {
         diffPatch: limitContext(rangeContext.diffPatch, 60_000),
       });
 
-      const bodyFile = path.join(tempDir, `t3code-pr-body-${process.pid}-${randomUUID()}.md`);
+      const bodyFile = path.join(
+        tempDir,
+        `tether-pr-body-${process.pid}-${randomUUID()}.md`,
+      );
       yield* fileSystem
         .writeFileString(bodyFile, generated.body)
         .pipe(
           Effect.mapError((cause) =>
-            gitManagerError("runPrStep", "Failed to write pull request body temp file.", cause),
+            gitManagerError(
+              "runPrStep",
+              "Failed to write pull request body temp file.",
+              cause,
+            ),
           ),
         );
       yield* gitHubCli
@@ -401,7 +453,11 @@ export const makeGitManager = Effect.gen(function* () {
           title: generated.title,
           bodyFile,
         })
-        .pipe(Effect.ensuring(fileSystem.remove(bodyFile).pipe(Effect.catch(() => Effect.void))));
+        .pipe(
+          Effect.ensuring(
+            fileSystem.remove(bodyFile).pipe(Effect.catch(() => Effect.void)),
+          ),
+        );
 
       const created = yield* findOpenPr(cwd, branch);
       if (!created) {
@@ -423,29 +479,35 @@ export const makeGitManager = Effect.gen(function* () {
       };
     });
 
-  const status: GitManagerShape["status"] = Effect.fnUntraced(function* (input) {
-    const details = yield* gitCore.statusDetails(input.cwd);
+  const status: GitManagerShape["status"] = Effect.fnUntraced(
+    function* (input) {
+      const details = yield* gitCore.statusDetails(input.cwd);
 
-    const pr =
-      details.branch !== null
-        ? yield* findLatestPr(input.cwd, details.branch).pipe(
-            Effect.map((latest) => (latest ? toStatusPr(latest) : null)),
-            Effect.catch(() => Effect.succeed(null)),
-          )
-        : null;
+      const pr =
+        details.branch !== null
+          ? yield* findLatestPr(input.cwd, details.branch).pipe(
+              Effect.map((latest) => (latest ? toStatusPr(latest) : null)),
+              Effect.catch(() => Effect.succeed(null)),
+            )
+          : null;
 
-    return {
-      branch: details.branch,
-      hasWorkingTreeChanges: details.hasWorkingTreeChanges,
-      workingTree: details.workingTree,
-      hasUpstream: details.hasUpstream,
-      aheadCount: details.aheadCount,
-      behindCount: details.behindCount,
-      pr,
-    };
-  });
+      return {
+        branch: details.branch,
+        hasWorkingTreeChanges: details.hasWorkingTreeChanges,
+        workingTree: details.workingTree,
+        hasUpstream: details.hasUpstream,
+        aheadCount: details.aheadCount,
+        behindCount: details.behindCount,
+        pr,
+      };
+    },
+  );
 
-  const runFeatureBranchStep = (cwd: string, branch: string | null, commitMessage?: string) =>
+  const runFeatureBranchStep = (
+    cwd: string,
+    branch: string | null,
+    commitMessage?: string,
+  ) =>
     Effect.gen(function* () {
       const suggestion = yield* resolveCommitAndBranchSuggestion({
         cwd,
@@ -460,12 +522,18 @@ export const makeGitManager = Effect.gen(function* () {
         );
       }
 
-      const preferredBranch = suggestion.branch ?? sanitizeFeatureBranchName(suggestion.subject);
+      const preferredBranch =
+        suggestion.branch ?? sanitizeFeatureBranchName(suggestion.subject);
       const existingBranchNames = yield* gitCore.listLocalBranchNames(cwd);
-      const resolvedBranch = resolveAutoFeatureBranchName(existingBranchNames, preferredBranch);
+      const resolvedBranch = resolveAutoFeatureBranchName(
+        existingBranchNames,
+        preferredBranch,
+      );
 
       yield* gitCore.createBranch({ cwd, branch: resolvedBranch });
-      yield* Effect.scoped(gitCore.checkoutBranch({ cwd, branch: resolvedBranch }));
+      yield* Effect.scoped(
+        gitCore.checkoutBranch({ cwd, branch: resolvedBranch }),
+      );
 
       return {
         branchStep: { status: "created" as const, name: resolvedBranch },
@@ -474,14 +542,17 @@ export const makeGitManager = Effect.gen(function* () {
       };
     });
 
-  const runStackedAction: GitManagerShape["runStackedAction"] = Effect.fnUntraced(
-    function* (input) {
+  const runStackedAction: GitManagerShape["runStackedAction"] =
+    Effect.fnUntraced(function* (input) {
       const wantsPush = input.action !== "commit";
       const wantsPr = input.action === "commit_push_pr";
 
       const initialStatus = yield* gitCore.statusDetails(input.cwd);
       if (!input.featureBranch && wantsPush && !initialStatus.branch) {
-        return yield* gitManagerError("runStackedAction", "Cannot push from detached HEAD.");
+        return yield* gitManagerError(
+          "runStackedAction",
+          "Cannot push from detached HEAD.",
+        );
       }
       if (!input.featureBranch && wantsPr && !initialStatus.branch) {
         return yield* gitManagerError(
@@ -490,9 +561,13 @@ export const makeGitManager = Effect.gen(function* () {
         );
       }
 
-      let branchStep: { status: "created" | "skipped_not_requested"; name?: string };
+      let branchStep: {
+        status: "created" | "skipped_not_requested";
+        name?: string;
+      };
       let commitMessageForStep = input.commitMessage;
-      let preResolvedCommitSuggestion: CommitAndBranchSuggestion | undefined = undefined;
+      let preResolvedCommitSuggestion: CommitAndBranchSuggestion | undefined =
+        undefined;
 
       if (input.featureBranch) {
         const result = yield* runFeatureBranchStep(
@@ -531,8 +606,7 @@ export const makeGitManager = Effect.gen(function* () {
         push,
         pr,
       };
-    },
-  );
+    });
 
   return {
     status,

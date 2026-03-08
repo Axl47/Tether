@@ -7,7 +7,11 @@ import { desktopDir, resolveElectronPath } from "./electron-launcher.mjs";
 
 const port = Number(process.env.ELECTRON_RENDERER_PORT ?? 5733);
 const devServerUrl = `http://localhost:${port}`;
-const requiredFiles = ["dist-electron/main.js", "dist-electron/preload.js", "../server/dist/index.mjs"];
+const requiredFiles = [
+  "dist-electron/main.js",
+  "dist-electron/preload.js",
+  "../server/dist/index.mjs",
+];
 const watchedDirectories = [
   { directory: "dist-electron", files: new Set(["main.js", "preload.js"]) },
   { directory: "../server/dist", files: new Set(["index.mjs"]) },
@@ -17,7 +21,10 @@ const restartDebounceMs = 120;
 const childTreeGracePeriodMs = 1_200;
 
 await waitOn({
-  resources: [`tcp:${port}`, ...requiredFiles.map((filePath) => `file:${filePath}`)],
+  resources: [
+    `tcp:${port}`,
+    ...requiredFiles.map((filePath) => `file:${filePath}`),
+  ],
 });
 
 const childEnv = { ...process.env };
@@ -43,7 +50,9 @@ function cleanupStaleDevApps() {
     return;
   }
 
-  spawnSync("pkill", ["-f", "--", `--t3code-dev-root=${desktopDir}`], { stdio: "ignore" });
+  spawnSync("pkill", ["-f", "--", `--tether-dev-root=${desktopDir}`], {
+    stdio: "ignore",
+  });
 }
 
 function startApp() {
@@ -53,7 +62,7 @@ function startApp() {
 
   const app = spawn(
     resolveElectronPath(),
-    [`--t3code-dev-root=${desktopDir}`, "dist-electron/main.js"],
+    [`--tether-dev-root=${desktopDir}`, "dist-electron/main.js"],
     {
       cwd: desktopDir,
       env: {
@@ -148,13 +157,17 @@ function scheduleRestart() {
 
 function startWatchers() {
   for (const { directory, files } of watchedDirectories) {
-    const watcher = watch(join(desktopDir, directory), { persistent: true }, (_eventType, filename) => {
-      if (typeof filename !== "string" || !files.has(filename)) {
-        return;
-      }
+    const watcher = watch(
+      join(desktopDir, directory),
+      { persistent: true },
+      (_eventType, filename) => {
+        if (typeof filename !== "string" || !files.has(filename)) {
+          return;
+        }
 
-      scheduleRestart();
-    });
+        scheduleRestart();
+      },
+    );
 
     watchers.push(watcher);
   }
@@ -166,7 +179,9 @@ function killChildTree(signal) {
   }
 
   // Kill direct children as a final fallback in case normal shutdown leaves stragglers.
-  spawnSync("pkill", [`-${signal}`, "-P", String(process.pid)], { stdio: "ignore" });
+  spawnSync("pkill", [`-${signal}`, "-P", String(process.pid)], {
+    stdio: "ignore",
+  });
 }
 
 async function shutdown(exitCode) {

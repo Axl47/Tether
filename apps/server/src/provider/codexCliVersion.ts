@@ -20,7 +20,9 @@ function normalizeCodexVersion(version: string): string {
     segments.push("0");
   }
 
-  return prerelease ? `${segments.join(".")}-${prerelease}` : segments.join(".");
+  return prerelease
+    ? `${segments.join(".")}-${prerelease}`
+    : segments.join(".");
 }
 
 function parseSemver(version: string): ParsedSemver | null {
@@ -32,7 +34,11 @@ function parseSemver(version: string): ParsedSemver | null {
   }
 
   const [majorSegment, minorSegment, patchSegment] = segments;
-  if (majorSegment === undefined || minorSegment === undefined || patchSegment === undefined) {
+  if (
+    majorSegment === undefined ||
+    minorSegment === undefined ||
+    patchSegment === undefined
+  ) {
     return null;
   }
 
@@ -88,7 +94,10 @@ export function compareCodexCliVersions(left: string, right: string): number {
     return parsedLeft.patch - parsedRight.patch;
   }
 
-  if (parsedLeft.prerelease.length === 0 && parsedRight.prerelease.length === 0) {
+  if (
+    parsedLeft.prerelease.length === 0 &&
+    parsedRight.prerelease.length === 0
+  ) {
     return 0;
   }
   if (parsedLeft.prerelease.length === 0) {
@@ -98,7 +107,10 @@ export function compareCodexCliVersions(left: string, right: string): number {
     return -1;
   }
 
-  const length = Math.max(parsedLeft.prerelease.length, parsedRight.prerelease.length);
+  const length = Math.max(
+    parsedLeft.prerelease.length,
+    parsedRight.prerelease.length,
+  );
   for (let index = 0; index < length; index += 1) {
     const leftIdentifier = parsedLeft.prerelease[index];
     const rightIdentifier = parsedRight.prerelease[index];
@@ -108,7 +120,10 @@ export function compareCodexCliVersions(left: string, right: string): number {
     if (rightIdentifier === undefined) {
       return 1;
     }
-    const comparison = comparePrereleaseIdentifier(leftIdentifier, rightIdentifier);
+    const comparison = comparePrereleaseIdentifier(
+      leftIdentifier,
+      rightIdentifier,
+    );
     if (comparison !== 0) {
       return comparison;
     }
@@ -137,5 +152,5 @@ export function isCodexCliVersionSupported(version: string): boolean {
 
 export function formatCodexCliUpgradeMessage(version: string | null): string {
   const versionLabel = version ? `v${version}` : "the installed version";
-  return `Codex CLI ${versionLabel} is too old for T3 Code. Upgrade to v${MINIMUM_CODEX_CLI_VERSION} or newer and restart T3 Code.`;
+  return `Codex CLI ${versionLabel} is too old for Tether. Upgrade to v${MINIMUM_CODEX_CLI_VERSION} or newer and restart Tether.`;
 }

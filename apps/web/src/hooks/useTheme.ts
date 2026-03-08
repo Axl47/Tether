@@ -6,7 +6,7 @@ type ThemeSnapshot = {
   systemDark: boolean;
 };
 
-const STORAGE_KEY = "t3code:theme";
+const STORAGE_KEY = "tether:theme";
 const MEDIA_QUERY = "(prefers-color-scheme: dark)";
 
 let listeners: Array<() => void> = [];
@@ -48,7 +48,11 @@ function getSnapshot(): ThemeSnapshot {
   const theme = getStored();
   const systemDark = theme === "system" ? getSystemDark() : false;
 
-  if (lastSnapshot && lastSnapshot.theme === theme && lastSnapshot.systemDark === systemDark) {
+  if (
+    lastSnapshot &&
+    lastSnapshot.theme === theme &&
+    lastSnapshot.systemDark === systemDark
+  ) {
     return lastSnapshot;
   }
 
