@@ -33,6 +33,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     lastVisitedAt: undefined,
     branch: null,
     worktreePath: null,
+    contextWindow: null,
     turnDiffSummaries: [],
     activities: [],
     ...overrides,

@@ -67,5 +67,6 @@ export function buildLocalDraftThread(input: {
     turnDiffSummaries: [],
     activities: [],
     proposedPlans: [],
+    contextWindow: null,
   };
 }

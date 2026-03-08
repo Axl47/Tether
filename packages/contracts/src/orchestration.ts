@@ -186,6 +186,20 @@ export const OrchestrationSession = Schema.Struct({
 });
 export type OrchestrationSession = typeof OrchestrationSession.Type;
 
+export const OrchestrationContextWindow = Schema.Struct({
+  provider: ProviderKind,
+  usedTokens: NonNegativeInt,
+  maxTokens: NonNegativeInt,
+  remainingTokens: NonNegativeInt,
+  usedPercent: NonNegativeInt.check(Schema.isLessThanOrEqualTo(100)),
+  inputTokens: Schema.optional(NonNegativeInt),
+  cachedInputTokens: Schema.optional(NonNegativeInt),
+  outputTokens: Schema.optional(NonNegativeInt),
+  reasoningOutputTokens: Schema.optional(NonNegativeInt),
+  updatedAt: IsoDateTime,
+});
+export type OrchestrationContextWindow = typeof OrchestrationContextWindow.Type;
+
 export const OrchestrationCheckpointFile = Schema.Struct({
   path: TrimmedNonEmptyString,
   kind: TrimmedNonEmptyString,
@@ -264,6 +278,9 @@ export const OrchestrationThread = Schema.Struct({
   messages: Schema.Array(OrchestrationMessage),
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(
     Schema.withDecodingDefault(() => []),
+  ),
+  contextWindow: Schema.NullOr(OrchestrationContextWindow).pipe(
+    Schema.withDecodingDefault(() => null),
   ),
   activities: Schema.Array(OrchestrationThreadActivity),
   checkpoints: Schema.Array(OrchestrationCheckpointSummary),
@@ -508,6 +525,14 @@ const ThreadProposedPlanUpsertCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadContextWindowSetCommand = Schema.Struct({
+  type: Schema.Literal("thread.context-window.set"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  contextWindow: OrchestrationContextWindow,
+  createdAt: IsoDateTime,
+});
+
 const ThreadTurnDiffCompleteCommand = Schema.Struct({
   type: Schema.Literal("thread.turn.diff.complete"),
   commandId: CommandId,
@@ -543,6 +568,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadMessageAssistantDeltaCommand,
   ThreadMessageAssistantCompleteCommand,
   ThreadProposedPlanUpsertCommand,
+  ThreadContextWindowSetCommand,
   ThreadTurnDiffCompleteCommand,
   ThreadActivityAppendCommand,
   ThreadRevertCompleteCommand,
@@ -574,6 +600,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.session-stop-requested",
   "thread.session-set",
   "thread.proposed-plan-upserted",
+  "thread.context-window-set",
   "thread.turn-diff-completed",
   "thread.activity-appended",
 ]);
@@ -723,6 +750,11 @@ export const ThreadProposedPlanUpsertedPayload = Schema.Struct({
   proposedPlan: OrchestrationProposedPlan,
 });
 
+export const ThreadContextWindowSetPayload = Schema.Struct({
+  threadId: ThreadId,
+  contextWindow: OrchestrationContextWindow,
+});
+
 export const ThreadTurnDiffCompletedPayload = Schema.Struct({
   threadId: ThreadId,
   turnId: TurnId,
@@ -867,6 +899,11 @@ export const OrchestrationEvent = Schema.Union([
   }),
   Schema.Struct({
     ...EventBaseFields,
+    type: Schema.Literal("thread.context-window-set"),
+    payload: ThreadContextWindowSetPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
     type: Schema.Literal("thread.turn-diff-completed"),
     payload: ThreadTurnDiffCompletedPayload,
   }),
@@ -968,6 +1005,11 @@ export const OrchestrationPersistedEvent = Schema.Union([
     ...PersistedEventBaseFields,
     eventType: Schema.Literal("thread.proposed-plan-upserted"),
     payload: ThreadProposedPlanUpsertedPayload,
+  }),
+  Schema.Struct({
+    ...PersistedEventBaseFields,
+    eventType: Schema.Literal("thread.context-window-set"),
+    payload: ThreadContextWindowSetPayload,
   }),
   Schema.Struct({
     ...PersistedEventBaseFields,

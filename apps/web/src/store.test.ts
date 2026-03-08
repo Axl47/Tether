@@ -23,6 +23,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     latestTurn: null,
     branch: null,
     worktreePath: null,
+    contextWindow: null,
     ...overrides,
   };
 }
@@ -61,6 +62,7 @@ function makeReadModelThread(overrides: Partial<OrchestrationReadModel["threads"
     messages: [],
     activities: [],
     proposedPlans: [],
+    contextWindow: null,
     checkpoints: [],
     session: null,
     ...overrides,
@@ -140,5 +142,28 @@ describe("store read model sync", () => {
     const next = syncServerReadModel(initialState, readModel);
 
     expect(next.threads[0]?.model).toBe("claude-opus-4-6");
+  });
+
+  it("syncs normalized thread context-window snapshots from the read model", () => {
+    const initialState = makeState(makeThread());
+    const readModel = makeReadModel(
+      makeReadModelThread({
+        contextWindow: {
+          provider: "codex",
+          usedTokens: 119000,
+          maxTokens: 258000,
+          remainingTokens: 139000,
+          usedPercent: 46,
+          updatedAt: "2026-02-27T00:00:00.000Z",
+        },
+      }),
+    );
+
+    const next = syncServerReadModel(initialState, readModel);
+
+    expect(next.threads[0]?.contextWindow).toMatchObject({
+      provider: "codex",
+      usedPercent: 46,
+    });
   });
 });
