@@ -741,6 +741,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const [expandedWorkGroups, setExpandedWorkGroups] = useState<
     Record<string, boolean>
   >({});
+  const [dismissedPlanCreatedAtByThreadId, setDismissedPlanCreatedAtByThreadId] =
+    useState<Record<string, string>>({});
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [terminalFocusRequestId, setTerminalFocusRequestId] = useState(0);
   const [composerHighlightedItemId, setComposerHighlightedItemId] = useState<
@@ -1091,6 +1093,23 @@ export default function ChatView({ threadId }: ChatViewProps) {
       ),
     [activeLatestTurn?.turnId, threadActivities],
   );
+  const visibleActivePlan = useMemo(() => {
+    if (!activePlan || !activeThreadId) {
+      return activePlan;
+    }
+    return dismissedPlanCreatedAtByThreadId[activeThreadId] === activePlan.createdAt
+      ? null
+      : activePlan;
+  }, [activePlan, activeThreadId, dismissedPlanCreatedAtByThreadId]);
+  const dismissActivePlan = useCallback(() => {
+    if (!activePlan || !activeThreadId) {
+      return;
+    }
+    setDismissedPlanCreatedAtByThreadId((existing) => ({
+      ...existing,
+      [activeThreadId]: activePlan.createdAt,
+    }));
+  }, [activePlan, activeThreadId]);
   const showPlanFollowUpPrompt =
     pendingUserInputs.length === 0 &&
     interactionMode === "plan" &&
@@ -3859,7 +3878,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       {/* Error banner */}
       <ProviderHealthBanner status={activeProviderStatus} />
       <ThreadErrorBanner error={activeThread.error} />
-      <PlanModePanel activePlan={activePlan} />
+      <PlanModePanel activePlan={visibleActivePlan} onDismiss={dismissActivePlan} />
 
       {/* Messages */}
       <div
@@ -4718,6 +4737,7 @@ const ComposerPendingApprovalActions = memo(
 
 interface PlanModePanelProps {
   activePlan: ReturnType<typeof deriveActivePlanState>;
+  onDismiss: () => void;
 }
 
 function PlanStepStatusIndicator({
@@ -4757,6 +4777,7 @@ function PlanStepStatusIndicator({
 
 const PlanModePanel = memo(function PlanModePanel({
   activePlan,
+  onDismiss,
 }: PlanModePanelProps) {
   if (!activePlan) return null;
 
@@ -4768,6 +4789,17 @@ const PlanModePanel = memo(function PlanModePanel({
           <span className="text-xs text-muted-foreground">
             Updated {formatTimestamp(activePlan.createdAt)}
           </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            className="ml-auto"
+            onClick={onDismiss}
+            aria-label="Dismiss plan steps"
+            title="Dismiss plan steps"
+          >
+            <XIcon />
+          </Button>
         </div>
         {activePlan.explanation ? (
           <p className="mt-2 text-sm text-muted-foreground">
