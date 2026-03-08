@@ -3957,8 +3957,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
             {/* Textarea area */}
             <div
               className={cn(
-                "relative px-3 pb-2 sm:px-4",
-                hasComposerHeader ? "pt-2.5 sm:pt-3" : "pt-3.5 sm:pt-4",
+                "relative px-3 pb-1.5 sm:px-4",
+                hasComposerHeader ? "pt-2 sm:pt-2.5" : "pt-2.5 sm:pt-3",
               )}
             >
               {composerMenuOpen && !isComposerApprovalState && (
@@ -4075,7 +4075,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
             {/* Bottom toolbar */}
             {activePendingApproval ? (
-              <div className="flex items-center justify-end gap-2 px-2.5 pb-2.5 sm:px-3 sm:pb-3">
+              <div className="flex items-center justify-end gap-2 px-2.5 pb-2 sm:px-3 sm:pb-2.5">
                 <ComposerPendingApprovalActions
                   requestId={activePendingApproval.requestId}
                   isResponding={respondingRequestIds.includes(
@@ -4085,7 +4085,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                 />
               </div>
             ) : (
-              <div className="flex flex-wrap items-center justify-between gap-2 px-2.5 pb-2.5 sm:flex-nowrap sm:gap-0 sm:px-3 sm:pb-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 px-2.5 pb-2 sm:flex-nowrap sm:gap-0 sm:px-3 sm:pb-2.5">
                 <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:min-w-max sm:overflow-visible">
                   {/* Provider/model picker */}
                   <ProviderModelPicker
