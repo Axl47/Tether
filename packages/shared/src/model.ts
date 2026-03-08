@@ -46,7 +46,7 @@ export function normalizeModelSlug(
   }
 
   const aliases = MODEL_SLUG_ALIASES_BY_PROVIDER[provider] as Record<string, ModelSlug>;
-  const aliased = aliases[trimmed];
+  const aliased = aliases[trimmed.toLowerCase()];
   return typeof aliased === "string" ? aliased : (trimmed as ModelSlug);
 }
 
