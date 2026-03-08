@@ -5,6 +5,8 @@ import { DiffWorkerPoolProvider } from "../components/DiffWorkerPoolProvider";
 import ThreadSidebar from "../components/Sidebar";
 import { Sidebar, SidebarProvider } from "~/components/ui/sidebar";
 
+const CHAT_SIDEBAR_STORAGE_KEY = "tether:chat-sidebar-open";
+
 function ChatRouteLayout() {
   const navigate = useNavigate();
 
@@ -25,7 +27,7 @@ function ChatRouteLayout() {
   }, [navigate]);
 
   return (
-    <SidebarProvider defaultOpen>
+    <SidebarProvider defaultOpen storageKey={CHAT_SIDEBAR_STORAGE_KEY}>
       <Sidebar
         side="left"
         collapsible="offcanvas"

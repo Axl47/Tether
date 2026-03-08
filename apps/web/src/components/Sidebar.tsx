@@ -59,11 +59,6 @@ import {
   shouldShowDesktopUpdateButton,
   shouldToastDesktopUpdateActionResult,
 } from "./desktopUpdate.logic";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "./ui/collapsible";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import {
   SidebarContent,
@@ -1179,32 +1174,22 @@ export default function Sidebar() {
                   : projectThreads;
 
               return (
-                <Collapsible
-                  key={project.id}
-                  className="group/collapsible"
-                  open={project.expanded}
-                  onOpenChange={(open) => {
-                    if (open === project.expanded) return;
-                    setProjectExpanded(project.id, open);
-                  }}
-                >
-                  <SidebarMenuItem>
-                    <div className="group/project-header relative">
-                      <CollapsibleTrigger
-                        render={
-                          <SidebarMenuButton
-                            size="sm"
-                            className="gap-2 px-2 py-1.5 text-left hover:bg-accent group-hover/project-header:bg-accent group-hover/project-header:text-sidebar-accent-foreground"
-                          />
-                        }
-                        onContextMenu={(event) => {
-                          event.preventDefault();
-                          void handleProjectContextMenu(project.id, {
-                            x: event.clientX,
-                            y: event.clientY,
-                          });
-                        }}
-                      >
+                <SidebarMenuItem key={project.id}>
+                  <div className="group/project-header relative">
+                    <SidebarMenuButton
+                      size="sm"
+                      className="gap-2 px-2 py-1.5 text-left hover:bg-accent group-hover/project-header:bg-accent group-hover/project-header:text-sidebar-accent-foreground"
+                      onClick={() => {
+                        setProjectExpanded(project.id, !project.expanded);
+                      }}
+                      onContextMenu={(event) => {
+                        event.preventDefault();
+                        void handleProjectContextMenu(project.id, {
+                          x: event.clientX,
+                          y: event.clientY,
+                        });
+                      }}
+                    >
                         <ChevronRightIcon
                           className={`-ml-0.5 size-3.5 shrink-0 text-muted-foreground/70 transition-transform duration-150 ${
                             project.expanded ? "rotate-90" : ""
@@ -1214,38 +1199,40 @@ export default function Sidebar() {
                         <span className="flex-1 truncate text-xs font-medium text-foreground/90">
                           {project.name}
                         </span>
-                      </CollapsibleTrigger>
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <SidebarMenuAction
-                              render={
-                                <button
-                                  type="button"
-                                  aria-label={`Create new thread in ${project.name}`}
-                                />
-                              }
-                              showOnHover
-                              className="top-1 right-1 size-5 rounded-md p-0 text-muted-foreground/70 hover:bg-secondary hover:text-foreground"
-                              onClick={(event) => {
-                                event.preventDefault();
-                                event.stopPropagation();
-                                void handleNewThread(project.id);
-                              }}
-                            >
-                              <SquarePenIcon className="size-3.5" />
-                            </SidebarMenuAction>
-                          }
-                        />
-                        <TooltipPopup side="top">
-                          {newThreadShortcutLabel
-                            ? `New thread (${newThreadShortcutLabel})`
-                            : "New thread"}
-                        </TooltipPopup>
-                      </Tooltip>
-                    </div>
+                    </SidebarMenuButton>
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <SidebarMenuAction
+                            render={
+                              <button
+                                type="button"
+                                aria-label={`Create new thread in ${project.name}`}
+                              />
+                            }
+                            showOnHover
+                            className="top-1 right-1 size-5 rounded-md p-0 text-muted-foreground/70 hover:bg-secondary hover:text-foreground"
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              void handleNewThread(project.id);
+                            }}
+                          >
+                            <SquarePenIcon className="size-3.5" />
+                          </SidebarMenuAction>
+                        }
+                      />
+                      <TooltipPopup side="top">
+                        {newThreadShortcutLabel
+                          ? `New thread (${newThreadShortcutLabel})`
+                          : "New thread"}
+                      </TooltipPopup>
+                    </Tooltip>
+                  </div>
 
-                    <CollapsibleContent>
+                  {project.expanded ? (
+                    // Render directly from the persisted expanded flag so live
+                    // thread resorting cannot desynchronize the chevron and panel.
                       <SidebarMenuSub className="mx-1 my-0 w-full translate-x-0 gap-0 px-1.5 py-0">
                         {visibleThreads.map((thread) => {
                           const isActive = routeThreadId === thread.id;
@@ -1448,9 +1435,8 @@ export default function Sidebar() {
                           </SidebarMenuSubItem>
                         )}
                       </SidebarMenuSub>
-                    </CollapsibleContent>
-                  </SidebarMenuItem>
-                </Collapsible>
+                  ) : null}
+                </SidebarMenuItem>
               );
             })}
           </SidebarMenu>
