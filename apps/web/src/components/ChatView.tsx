@@ -48,6 +48,7 @@ import {
   useVirtualizer,
 } from "@tanstack/react-virtual";
 import { gitBranchesQueryOptions, gitCreateWorktreeMutationOptions } from "~/lib/gitReactQuery";
+import { copyTextToClipboard } from "~/lib/clipboard";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { serverConfigQueryOptions, serverQueryKeys } from "~/lib/serverReactQuery";
 
@@ -225,6 +226,7 @@ import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "./Compose
 import ContextWindowIndicator from "./ContextWindowIndicator";
 import { estimateTimelineMessageHeight } from "./timelineHeight";
 import { useThreadRunStateStore } from "../threadRunStateStore";
+import { deriveTimelineScrollbarMarkers } from "../timelineScrollbarMarkers";
 
 function formatMessageMeta(createdAt: string, duration: string | null): string {
   if (!duration) return formatTimestamp(createdAt);
@@ -674,6 +676,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const lastKnownScrollTopRef = useRef(0);
   const isPointerScrollActiveRef = useRef(false);
   const lastTouchClientYRef = useRef<number | null>(null);
+  const floatingThreadCardsRef = useRef<HTMLDivElement | null>(null);
   const pendingUserScrollUpIntentRef = useRef(false);
   const pendingAutoScrollFrameRef = useRef<number | null>(null);
   const pendingInteractionAnchorRef = useRef<{
@@ -784,6 +787,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
   const activeContextWindow =
     isServerThread && activeThread?.session?.provider === "codex" ? activeThread.contextWindow : null;
+  const [floatingThreadCardsHeight, setFloatingThreadCardsHeight] = useState(0);
   const diffSearch = useMemo(
     () => parseDiffRouteSearch(rawSearch as Record<string, unknown>),
     [rawSearch],
@@ -1159,6 +1163,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   }, []);
   const threadContextMessage =
     threadContextMode === "last" ? latestThreadContextMessage : originalThreadContextMessage;
+  const hasFloatingThreadCards = threadContextMessage !== null || activePlan !== null;
   const [threadContextJumpRequest, setThreadContextJumpRequest] = useState<{
     messageId: MessageId;
     key: number;
@@ -2005,6 +2010,32 @@ export default function ChatView({ threadId }: ChatViewProps) {
       observer.disconnect();
     };
   }, [activeThread?.id, scheduleStickToBottom]);
+  useLayoutEffect(() => {
+    const floatingThreadCards = floatingThreadCardsRef.current;
+    if (!floatingThreadCards || !hasFloatingThreadCards) {
+      setFloatingThreadCardsHeight(0);
+      return;
+    }
+
+    const syncFloatingThreadCardsHeight = () => {
+      const nextHeight = Math.ceil(floatingThreadCards.getBoundingClientRect().height);
+      setFloatingThreadCardsHeight((current) => (current === nextHeight ? current : nextHeight));
+    };
+
+    syncFloatingThreadCardsHeight();
+
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => {
+      syncFloatingThreadCardsHeight();
+    });
+    observer.observe(floatingThreadCards);
+    return () => {
+      observer.disconnect();
+    };
+  }, [activeThread?.id, hasFloatingThreadCards]);
   useEffect(() => {
     if (!shouldAutoScrollRef.current) return;
     scheduleStickToBottom();
@@ -3565,59 +3596,76 @@ export default function ChatView({ threadId }: ChatViewProps) {
       {/* Error banner */}
       <ProviderHealthBanner status={activeProviderStatus} />
       <ThreadErrorBanner error={activeThread.error} />
-      <ThreadContextPanel
-        contextMessage={threadContextMessage}
-        contextMode={threadContextMode}
-        onContextModeChange={handleThreadContextModeChange}
-        onJumpToMessage={onJumpToThreadContext}
-      />
-      <PlanModePanel activePlan={activePlan} />
+      <div className="relative min-h-0 flex-1">
+        {hasFloatingThreadCards ? (
+          <div
+            ref={floatingThreadCardsRef}
+            data-thread-floating-cards="true"
+            className="pointer-events-none absolute inset-x-3 top-3 z-20 sm:inset-x-5 sm:top-4"
+          >
+            <div className="mx-auto flex max-w-3xl flex-col gap-3">
+              <ThreadContextPanel
+                contextMessage={threadContextMessage}
+                contextMode={threadContextMode}
+                messageCount={timelineMessages.filter((m) => m.role === "user").length}
+                onContextModeChange={handleThreadContextModeChange}
+                onJumpToMessage={onJumpToThreadContext}
+              />
+              <PlanModePanel activePlan={activePlan} />
+            </div>
+          </div>
+        ) : null}
 
-      {/* Messages */}
-      <div
-        ref={setMessagesScrollContainerRef}
-        className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain px-3 py-3 sm:px-5 sm:py-4"
-        onScroll={onMessagesScroll}
-        onClickCapture={onMessagesClickCapture}
-        onWheel={onMessagesWheel}
-        onPointerDown={onMessagesPointerDown}
-        onPointerUp={onMessagesPointerUp}
-        onPointerCancel={onMessagesPointerCancel}
-        onTouchStart={onMessagesTouchStart}
-        onTouchMove={onMessagesTouchMove}
-        onTouchEnd={onMessagesTouchEnd}
-        onTouchCancel={onMessagesTouchEnd}
-      >
-        <MessagesTimeline
-          key={activeThread.id}
-          hasMessages={timelineEntries.length > 0}
-          isWorking={isWorking}
-          activeTurnInProgress={isWorking || !latestTurnSettled}
-          activeTurnStartedAt={activeWorkStartedAt}
-          activeAssistantLabel={activeAssistantLabel}
-          activeWorkSummary={activeWorkSummary}
-          liveWorkEntries={workLogEntries}
-          optimisticRunPhase={optimisticThreadRun?.phase ?? null}
-          scrollContainer={messagesScrollElement}
-          timelineEntries={timelineEntries}
-          jumpToMessageId={threadContextJumpRequest?.messageId ?? null}
-          jumpToMessageRequestKey={threadContextJumpRequest?.key ?? 0}
-          completionDividerBeforeEntryId={completionDividerBeforeEntryId}
-          completionSummary={completionSummary}
-          animatedAssistantMessageId={animatedAssistantMessageId}
-          onAnimatedAssistantMessageComplete={() => setAnimatedAssistantMessageId(null)}
-          turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
-          nowIso={nowIso}
-          expandedWorkGroups={expandedWorkGroups}
-          onToggleWorkGroup={onToggleWorkGroup}
-          onOpenTurnDiff={onOpenTurnDiff}
-          revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
-          onRevertUserMessage={onRevertUserMessage}
-          isRevertingCheckpoint={isRevertingCheckpoint}
-          onImageExpand={onExpandTimelineImage}
-          markdownCwd={gitCwd ?? undefined}
-          workspaceRoot={activeProject?.cwd ?? undefined}
-        />
+        {/* Messages */}
+        <div
+          ref={setMessagesScrollContainerRef}
+          className="h-full min-h-0 overflow-x-hidden overflow-y-auto overscroll-y-contain px-3 pb-3 sm:px-5 sm:pb-4"
+          style={{
+            paddingTop: `${floatingThreadCardsHeight + 16}px`,
+            scrollPaddingTop: floatingThreadCardsHeight > 0 ? `${floatingThreadCardsHeight + 16}px` : undefined,
+          }}
+          onScroll={onMessagesScroll}
+          onClickCapture={onMessagesClickCapture}
+          onWheel={onMessagesWheel}
+          onPointerDown={onMessagesPointerDown}
+          onPointerUp={onMessagesPointerUp}
+          onPointerCancel={onMessagesPointerCancel}
+          onTouchStart={onMessagesTouchStart}
+          onTouchMove={onMessagesTouchMove}
+          onTouchEnd={onMessagesTouchEnd}
+          onTouchCancel={onMessagesTouchEnd}
+        >
+          <MessagesTimeline
+            key={activeThread.id}
+            hasMessages={timelineEntries.length > 0}
+            isWorking={isWorking}
+            activeTurnInProgress={isWorking || !latestTurnSettled}
+            activeTurnStartedAt={activeWorkStartedAt}
+            activeAssistantLabel={activeAssistantLabel}
+            activeWorkSummary={activeWorkSummary}
+            liveWorkEntries={workLogEntries}
+            optimisticRunPhase={optimisticThreadRun?.phase ?? null}
+            scrollContainer={messagesScrollElement}
+            timelineEntries={timelineEntries}
+            jumpToMessageId={threadContextJumpRequest?.messageId ?? null}
+            jumpToMessageRequestKey={threadContextJumpRequest?.key ?? 0}
+            completionDividerBeforeEntryId={completionDividerBeforeEntryId}
+            completionSummary={completionSummary}
+            animatedAssistantMessageId={animatedAssistantMessageId}
+            onAnimatedAssistantMessageComplete={() => setAnimatedAssistantMessageId(null)}
+            turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
+            nowIso={nowIso}
+            expandedWorkGroups={expandedWorkGroups}
+            onToggleWorkGroup={onToggleWorkGroup}
+            onOpenTurnDiff={onOpenTurnDiff}
+            revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
+            onRevertUserMessage={onRevertUserMessage}
+            isRevertingCheckpoint={isRevertingCheckpoint}
+            onImageExpand={onExpandTimelineImage}
+            markdownCwd={gitCwd ?? undefined}
+            workspaceRoot={activeProject?.cwd ?? undefined}
+          />
+        </div>
       </div>
 
       {/* Input bar */}
@@ -4445,26 +4493,33 @@ function summarizeActivePlanSteps(
   return parts.join(", ");
 }
 
-const ThreadContextPanel = memo(function ThreadContextPanel(props: {
+type ThreadContextPanelProps = {
   contextMessage: ChatMessage | null;
   contextMode: ThreadContextMode;
+  messageCount: number;
   onContextModeChange: (mode: ThreadContextMode) => void;
   onJumpToMessage: () => void;
-}) {
-  const { contextMessage, contextMode, onContextModeChange, onJumpToMessage } = props;
+};
+
+const ThreadContextPanel = memo(function ThreadContextPanel(props: ThreadContextPanelProps) {
+  const { contextMessage, contextMode, messageCount, onContextModeChange, onJumpToMessage } =
+    props;
   if (!contextMessage) {
     return null;
   }
 
   return (
-    <div className="mx-auto max-w-3xl pt-3">
-      <div className="relative w-full rounded-xl border border-input bg-background px-4 py-3 text-foreground shadow-xs/5 transition-colors duration-150 before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-xl)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] dark:bg-input/32 dark:before:shadow-[0_-1px_--theme(--color-white/6%)]">
+    <div className="pointer-events-auto">
+      <div className="relative w-full rounded-xl border border-input/80 bg-background/85 px-4 py-3 text-foreground shadow-lg shadow-black/5 backdrop-blur-md transition-colors duration-150 before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-xl)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] supports-[backdrop-filter]:bg-background/72 dark:bg-input/55 dark:before:shadow-[0_-1px_--theme(--color-white/6%)]">
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2">
             <Badge variant="outline">Context</Badge>
             <span className="text-xs text-muted-foreground">
               {contextMode === "last" ? "Updated" : "Started"}{" "}
               {formatTimestamp(contextMessage.createdAt)}
+            </span>
+            <span className="text-xs text-muted-foreground/70">
+              &middot; {messageCount} sent
             </span>
           </div>
           <Group aria-label="Context message range" className="flex gap-0.5 rounded-md bg-muted/60 p-0.5">
@@ -4530,10 +4585,10 @@ const PlanModePanel = memo(function PlanModePanel({ activePlan }: PlanModePanelP
   const planSummary = summarizeActivePlanSteps(activePlan.steps);
 
   return (
-    <div className="pt-3 mx-auto max-w-3xl">
+    <div className="pointer-events-auto">
       <div
         data-plan-mode-panel="true"
-        className="rounded-xl border border-border/70 bg-muted/30 p-4"
+        className="rounded-xl border border-border/70 bg-background/82 p-4 shadow-lg shadow-black/5 backdrop-blur-md supports-[backdrop-filter]:bg-background/72"
       >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
@@ -4704,12 +4759,36 @@ const ComposerPlanFollowUpBanner = memo(function ComposerPlanFollowUpBanner({
 
 const MessageCopyButton = memo(function MessageCopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleCopy = useCallback(() => {
-    void navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    void copyTextToClipboard(text)
+      .then(() => {
+        if (copiedTimerRef.current != null) {
+          clearTimeout(copiedTimerRef.current);
+        }
+        setCopied(true);
+        copiedTimerRef.current = setTimeout(() => {
+          setCopied(false);
+          copiedTimerRef.current = null;
+        }, 2000);
+      })
+      .catch(() => {
+        toastManager.add({
+          type: "warning",
+          title: "Failed to copy message",
+          description: "Clipboard access was blocked or unavailable.",
+        });
+      });
   }, [text]);
+
+  useEffect(() => {
+    return () => {
+      if (copiedTimerRef.current != null) {
+        clearTimeout(copiedTimerRef.current);
+      }
+    };
+  }, []);
 
   return (
     <Button type="button" size="xs" variant="outline" onClick={handleCopy} title="Copy message">
@@ -4967,6 +5046,13 @@ type TimelineRow =
     }
   | { kind: "working"; id: string; createdAt: string | null };
 
+interface TimelineFlaggerMarkerLayout {
+  kind: "sent" | "final";
+  messageId: MessageId;
+  topPx: number;
+  heightPx: number;
+}
+
 const AnimatedActivityText = memo(function AnimatedActivityText(props: {
   text: string;
   className?: string;
@@ -5206,6 +5292,127 @@ function estimateTimelineProposedPlanHeight(proposedPlan: TimelineProposedPlan):
   return 120 + Math.min(estimatedLines * 22, 880);
 }
 
+const TimelineFlaggerRail = memo(function TimelineFlaggerRail(props: {
+  viewportHeightPx: number;
+  scrollTop: number;
+  clientHeight: number;
+  scrollHeight: number;
+  markers: ReadonlyArray<TimelineFlaggerMarkerLayout>;
+  onJumpToMessage: (messageId: MessageId) => void;
+  onScrollToRatio: (ratio: number) => void;
+}) {
+  const { viewportHeightPx, scrollTop, clientHeight, scrollHeight, markers, onJumpToMessage, onScrollToRatio } =
+    props;
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const activePointerIdRef = useRef<number | null>(null);
+  const trackHeightPx = Math.max(1, viewportHeightPx);
+  const maxScrollTop = Math.max(scrollHeight - clientHeight, 0);
+  const thumbHeightPx =
+    maxScrollTop > 0
+      ? clamp((clientHeight / Math.max(scrollHeight, 1)) * trackHeightPx, {
+          minimum: 44,
+          maximum: trackHeightPx,
+        })
+      : trackHeightPx;
+  const thumbTravelPx = Math.max(trackHeightPx - thumbHeightPx, 0);
+  const thumbTopPx = maxScrollTop > 0 ? (scrollTop / maxScrollTop) * thumbTravelPx : 0;
+
+  const scrollToPointer = useCallback(
+    (clientY: number) => {
+      const track = trackRef.current;
+      if (!track) return;
+      const rect = track.getBoundingClientRect();
+      if (rect.height <= 0) return;
+      const ratio = clamp((clientY - rect.top) / rect.height, {
+        minimum: 0,
+        maximum: 1,
+      });
+      onScrollToRatio(ratio);
+    },
+    [onScrollToRatio],
+  );
+
+  if (viewportHeightPx <= 0) {
+    return null;
+  }
+
+  return (
+    <div
+      className="sticky top-0 z-10 flex shrink-0 self-start"
+      style={{ height: `${viewportHeightPx}px` }}
+    >
+      <div
+        ref={trackRef}
+        data-thread-flagger-rail="true"
+        className="relative h-full w-[14px] cursor-pointer border-l border-border/40 bg-background/50 transition-colors hover:bg-accent/30"
+        onPointerDown={(event) => {
+          if (event.button !== 0) return;
+          activePointerIdRef.current = event.pointerId;
+          event.currentTarget.setPointerCapture(event.pointerId);
+          scrollToPointer(event.clientY);
+        }}
+        onPointerMove={(event) => {
+          if (activePointerIdRef.current !== event.pointerId) return;
+          scrollToPointer(event.clientY);
+        }}
+        onPointerUp={(event) => {
+          if (activePointerIdRef.current !== event.pointerId) return;
+          activePointerIdRef.current = null;
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+          }
+        }}
+        onPointerCancel={(event) => {
+          if (activePointerIdRef.current !== event.pointerId) return;
+          activePointerIdRef.current = null;
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+          }
+        }}
+      >
+        {/* Viewport thumb — subtle rectangular overlay like VS Code's overview ruler */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 bg-foreground/8 transition-colors"
+          style={{
+            top: `${thumbTopPx}px`,
+            height: `${thumbHeightPx}px`,
+          }}
+        />
+        {/* Markers — thin horizontal dashes */}
+        {markers.map((marker) => (
+          <button
+            key={`${marker.kind}:${marker.messageId}`}
+            type="button"
+            data-thread-flagger-kind={marker.kind}
+            data-thread-flagger-message-id={marker.messageId}
+            className={cn(
+              "absolute right-[1px] left-[3px] transition-opacity duration-100",
+              "hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none",
+              marker.kind === "sent"
+                ? "bg-sky-400/90 hover:bg-sky-400 hover:shadow-[0_0_4px_rgba(56,189,248,0.45)]"
+                : "bg-emerald-400/90 hover:bg-emerald-400 hover:shadow-[0_0_4px_rgba(52,211,153,0.45)]",
+            )}
+            style={{
+              top: `${marker.topPx}px`,
+              height: `${Math.max(marker.heightPx, 2)}px`,
+              minHeight: "2px",
+              maxHeight: "4px",
+              borderRadius: "0.5px",
+            }}
+            aria-label={marker.kind === "sent" ? "Jump to sent message" : "Jump to final response"}
+            title={marker.kind === "sent" ? "Jump to sent message" : "Jump to final response"}
+            onClick={(event) => {
+              event.stopPropagation();
+              onJumpToMessage(marker.messageId);
+            }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+});
+
 const MessagesTimeline = memo(function MessagesTimeline({
   hasMessages,
   isWorking,
@@ -5237,6 +5444,11 @@ const MessagesTimeline = memo(function MessagesTimeline({
 }: MessagesTimelineProps) {
   const timelineRootRef = useRef<HTMLDivElement | null>(null);
   const [timelineWidthPx, setTimelineWidthPx] = useState<number | null>(null);
+  const [scrollMetrics, setScrollMetrics] = useState({
+    scrollTop: 0,
+    clientHeight: 0,
+    scrollHeight: 1,
+  });
 
   useLayoutEffect(() => {
     const timelineRoot = timelineRootRef.current;
@@ -5403,6 +5615,15 @@ const MessagesTimeline = memo(function MessagesTimeline({
     minimum: 0,
     maximum: rows.length,
   });
+  const estimateRowSize = useCallback(
+    (row: TimelineRow): number => {
+      if (row.kind === "work") return 112;
+      if (row.kind === "proposed-plan") return estimateTimelineProposedPlanHeight(row.proposedPlan);
+      if (row.kind === "working") return 132;
+      return estimateTimelineMessageHeight(row.message, { timelineWidthPx });
+    },
+    [timelineWidthPx],
+  );
 
   const rowVirtualizer = useVirtualizer({
     count: virtualizedRowCount,
@@ -5411,11 +5632,7 @@ const MessagesTimeline = memo(function MessagesTimeline({
     getItemKey: (index: number) => rows[index]?.id ?? index,
     estimateSize: (index: number) => {
       const row = rows[index];
-      if (!row) return 96;
-      if (row.kind === "work") return 112;
-      if (row.kind === "proposed-plan") return estimateTimelineProposedPlanHeight(row.proposedPlan);
-      if (row.kind === "working") return 132;
-      return estimateTimelineMessageHeight(row.message, { timelineWidthPx });
+      return row ? estimateRowSize(row) : 96;
     },
     measureElement: measureVirtualElement,
     useAnimationFrameWithResizeObserver: true,
@@ -5444,21 +5661,133 @@ const MessagesTimeline = memo(function MessagesTimeline({
     };
   }, [rowVirtualizer]);
   const pendingMeasureFrameRef = useRef<number | null>(null);
+  const pendingJumpFrameRef = useRef<number | null>(null);
+  const syncScrollMetrics = useCallback(() => {
+    if (!scrollContainer) {
+      setScrollMetrics({
+        scrollTop: 0,
+        clientHeight: 0,
+        scrollHeight: 1,
+      });
+      return;
+    }
+    setScrollMetrics((current) => {
+      const next = {
+        scrollTop: scrollContainer.scrollTop,
+        clientHeight: scrollContainer.clientHeight,
+        scrollHeight: Math.max(scrollContainer.scrollHeight, 1),
+      };
+      if (
+        current.scrollTop === next.scrollTop &&
+        current.clientHeight === next.clientHeight &&
+        current.scrollHeight === next.scrollHeight
+      ) {
+        return current;
+      }
+      return next;
+    });
+  }, [scrollContainer]);
   const onTimelineImageLoad = useCallback(() => {
     if (pendingMeasureFrameRef.current !== null) return;
     pendingMeasureFrameRef.current = window.requestAnimationFrame(() => {
       pendingMeasureFrameRef.current = null;
       rowVirtualizer.measure();
+      syncScrollMetrics();
     });
-  }, [rowVirtualizer]);
+  }, [rowVirtualizer, syncScrollMetrics]);
   useEffect(() => {
     return () => {
       const frame = pendingMeasureFrameRef.current;
       if (frame !== null) {
         window.cancelAnimationFrame(frame);
       }
+      if (pendingJumpFrameRef.current !== null) {
+        window.cancelAnimationFrame(pendingJumpFrameRef.current);
+      }
     };
   }, []);
+  useLayoutEffect(() => {
+    syncScrollMetrics();
+  }, [rows, scrollContainer, syncScrollMetrics, timelineWidthPx, virtualizedRowCount]);
+  useEffect(() => {
+    if (!scrollContainer) return;
+    syncScrollMetrics();
+    const handleScroll = () => {
+      syncScrollMetrics();
+    };
+    scrollContainer.addEventListener("scroll", handleScroll, { passive: true });
+    if (typeof ResizeObserver === "undefined") {
+      return () => {
+        scrollContainer.removeEventListener("scroll", handleScroll);
+      };
+    }
+    const observer = new ResizeObserver(() => {
+      syncScrollMetrics();
+    });
+    observer.observe(scrollContainer);
+    return () => {
+      observer.disconnect();
+      scrollContainer.removeEventListener("scroll", handleScroll);
+    };
+  }, [scrollContainer, syncScrollMetrics]);
+  const scrollToMessage = useCallback(
+    (messageId: MessageId) => {
+      const rowIndex = messageRowIndexById.get(messageId);
+      if (typeof rowIndex !== "number") {
+        return;
+      }
+
+      if (pendingJumpFrameRef.current !== null) {
+        window.cancelAnimationFrame(pendingJumpFrameRef.current);
+        pendingJumpFrameRef.current = null;
+      }
+
+      const scrollTargetIntoView = (): boolean => {
+        const element = findMessageElement(messageId);
+        if (!element) {
+          return false;
+        }
+        element.scrollIntoView({ behavior: "smooth", block: "center" });
+        highlightMessage(messageId);
+        syncScrollMetrics();
+        return true;
+      };
+
+      if (scrollTargetIntoView()) {
+        return;
+      }
+
+      rowVirtualizer.scrollToIndex(rowIndex, { align: "start" });
+
+      if (rowIndex === 0) {
+        scrollContainer?.scrollTo({ top: 0 });
+      }
+      syncScrollMetrics();
+
+      let attemptsRemaining = 12;
+      const settleScroll = () => {
+        if (scrollTargetIntoView()) {
+          pendingJumpFrameRef.current = null;
+          return;
+        }
+        if (attemptsRemaining <= 0) {
+          pendingJumpFrameRef.current = null;
+          return;
+        }
+        attemptsRemaining -= 1;
+        pendingJumpFrameRef.current = window.requestAnimationFrame(settleScroll);
+      };
+      pendingJumpFrameRef.current = window.requestAnimationFrame(settleScroll);
+    },
+    [
+      findMessageElement,
+      highlightMessage,
+      messageRowIndexById,
+      rowVirtualizer,
+      scrollContainer,
+      syncScrollMetrics,
+    ],
+  );
   useEffect(() => {
     if (!jumpToMessageId || jumpToMessageRequestKey < 1) {
       return;
@@ -5471,61 +5800,78 @@ const MessagesTimeline = memo(function MessagesTimeline({
       return;
     }
     lastHandledJumpRequestKeyRef.current = jumpToMessageRequestKey;
-
-    const scrollTargetIntoView = (): boolean => {
-      const element = findMessageElement(jumpToMessageId);
-      if (!element) {
-        return false;
-      }
-      element.scrollIntoView({ behavior: "smooth", block: "center" });
-      highlightMessage(jumpToMessageId);
-      return true;
-    };
-
-    if (scrollTargetIntoView()) {
-      return;
-    }
-
-    rowVirtualizer.scrollToIndex(rowIndex, { align: "start" });
-
-    if (rowIndex === 0) {
-      scrollContainer?.scrollTo({ top: 0 });
-    }
-
-    let frameId = 0;
-    let cancelled = false;
-    let attemptsRemaining = 12;
-    const settleScroll = () => {
-      if (cancelled) {
-        return;
-      }
-      if (scrollTargetIntoView()) {
-        return;
-      }
-      if (attemptsRemaining <= 0) {
-        return;
-      }
-      attemptsRemaining -= 1;
-      frameId = window.requestAnimationFrame(settleScroll);
-    };
-    frameId = window.requestAnimationFrame(settleScroll);
-
-    return () => {
-      cancelled = true;
-      window.cancelAnimationFrame(frameId);
-    };
-  }, [
-    findMessageElement,
-    highlightMessage,
-    jumpToMessageId,
-    jumpToMessageRequestKey,
-    messageRowIndexById,
-    rowVirtualizer,
-    scrollContainer,
-  ]);
+    scrollToMessage(jumpToMessageId);
+  }, [jumpToMessageId, jumpToMessageRequestKey, messageRowIndexById, scrollToMessage]);
 
   const virtualRows = rowVirtualizer.getVirtualItems();
   const nonVirtualizedRows = rows.slice(virtualizedRowCount);
+  const scrollbarMarkers = useMemo(
+    () =>
+      deriveTimelineScrollbarMarkers(
+        rows.map((row) =>
+          row.kind === "message"
+            ? {
+                kind: row.kind,
+                message: row.message,
+              }
+            : { kind: row.kind },
+        ),
+      ),
+    [rows],
+  );
+  const estimatedRowLayouts = useMemo(() => {
+    const layouts: Array<{ start: number; size: number }> = [];
+    let currentOffsetPx = 0;
+    for (const row of rows) {
+      const size = estimateRowSize(row);
+      layouts.push({ start: currentOffsetPx, size });
+      currentOffsetPx += size;
+    }
+    return {
+      layouts,
+      totalHeightPx: Math.max(currentOffsetPx, 1),
+    };
+  }, [estimateRowSize, rows]);
+  const flaggerMarkerLayouts = useMemo<TimelineFlaggerMarkerLayout[]>(() => {
+    const trackHeightPx = Math.max(scrollMetrics.clientHeight, 1);
+    return scrollbarMarkers.flatMap((marker) => {
+      const rowLayout = estimatedRowLayouts.layouts[marker.rowIndex];
+      if (!rowLayout) {
+        return [];
+      }
+      const topRatio = rowLayout.start / estimatedRowLayouts.totalHeightPx;
+      const heightRatio = rowLayout.size / estimatedRowLayouts.totalHeightPx;
+      // Thin consistent markers (2–3px) like VS Code's overview ruler
+      const heightPx = clamp(heightRatio * trackHeightPx, {
+        minimum: 2,
+        maximum: 4,
+      });
+      const topPx = clamp(topRatio * trackHeightPx, {
+        minimum: 0,
+        maximum: Math.max(trackHeightPx - heightPx, 0),
+      });
+      return [
+        {
+          kind: marker.kind,
+          messageId: marker.messageId as MessageId,
+          topPx,
+          heightPx,
+        },
+      ];
+    });
+  }, [estimatedRowLayouts.layouts, estimatedRowLayouts.totalHeightPx, scrollMetrics.clientHeight, scrollbarMarkers]);
+  const scrollToRatio = useCallback(
+    (ratio: number) => {
+      if (!scrollContainer) {
+        return;
+      }
+      const maxScrollTop = Math.max(scrollContainer.scrollHeight - scrollContainer.clientHeight, 0);
+      const nextScrollTop = ratio * maxScrollTop;
+      scrollContainer.scrollTo({ top: nextScrollTop });
+      syncScrollMetrics();
+    },
+    [scrollContainer, syncScrollMetrics],
+  );
 
   const renderRowContent = (row: TimelineRow) => (
     <div
@@ -5646,7 +5992,10 @@ const MessagesTimeline = memo(function MessagesTimeline({
       {row.kind === "message" &&
         row.message.role === "assistant" &&
         (() => {
-          const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
+          const assistantImages = row.message.attachments ?? [];
+          const messageText =
+            row.message.text ||
+            (row.message.streaming || assistantImages.length > 0 ? "" : "(empty response)");
           return (
             <>
               {row.showCompletionDivider && (
@@ -5659,6 +6008,41 @@ const MessagesTimeline = memo(function MessagesTimeline({
                 </div>
               )}
               <div className="min-w-0 px-1 py-0.5">
+                {assistantImages.length > 0 && (
+                  <div className="mb-3 grid max-w-[520px] grid-cols-2 gap-2">
+                    {assistantImages.map((image) => (
+                      <div
+                        key={image.id}
+                        className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
+                      >
+                        {image.previewUrl ? (
+                          <button
+                            type="button"
+                            className="h-full w-full cursor-zoom-in"
+                            aria-label={`Preview ${image.name}`}
+                            onClick={() => {
+                              const preview = buildExpandedImagePreview(assistantImages, image.id);
+                              if (!preview) return;
+                              onImageExpand(preview);
+                            }}
+                          >
+                            <img
+                              src={image.previewUrl}
+                              alt={image.name}
+                              className="h-full max-h-[220px] w-full object-cover"
+                              onLoad={onTimelineImageLoad}
+                              onError={onTimelineImageLoad}
+                            />
+                          </button>
+                        ) : (
+                          <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
+                            {image.name}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <AnimatedAssistantMessage
                   message={{ ...row.message, text: messageText }}
                   cwd={markdownCwd}
@@ -5732,35 +6116,53 @@ const MessagesTimeline = memo(function MessagesTimeline({
   }
 
   return (
-    <div
-      ref={timelineRootRef}
-      data-timeline-root="true"
-      className="mx-auto w-full min-w-0 max-w-3xl overflow-x-hidden"
-    >
-      {virtualizedRowCount > 0 && (
-        <div className="relative" style={{ height: `${rowVirtualizer.getTotalSize()}px` }}>
-          {virtualRows.map((virtualRow: VirtualItem) => {
-            const row = rows[virtualRow.index];
-            if (!row) return null;
+    <div className="relative">
+      <div
+        ref={timelineRootRef}
+        data-timeline-root="true"
+        className="relative mx-auto w-full min-w-0 max-w-3xl overflow-x-hidden"
+      >
+        <div className="min-w-0">
+          {virtualizedRowCount > 0 && (
+            <div className="relative" style={{ height: `${rowVirtualizer.getTotalSize()}px` }}>
+              {virtualRows.map((virtualRow: VirtualItem) => {
+                const row = rows[virtualRow.index];
+                if (!row) return null;
 
-            return (
-              <div
-                key={`virtual-row:${row.id}`}
-                data-index={virtualRow.index}
-                ref={rowVirtualizer.measureElement}
-                className="absolute left-0 top-0 w-full"
-                style={{ transform: `translateY(${virtualRow.start}px)` }}
-              >
-                {renderRowContent(row)}
-              </div>
-            );
-          })}
+                return (
+                  <div
+                    key={`virtual-row:${row.id}`}
+                    data-index={virtualRow.index}
+                    ref={rowVirtualizer.measureElement}
+                    className="absolute left-0 top-0 w-full"
+                    style={{ transform: `translateY(${virtualRow.start}px)` }}
+                  >
+                    {renderRowContent(row)}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {nonVirtualizedRows.map((row) => (
+            <div key={`non-virtual-row:${row.id}`}>{renderRowContent(row)}</div>
+          ))}
         </div>
-      )}
-
-      {nonVirtualizedRows.map((row) => (
-        <div key={`non-virtual-row:${row.id}`}>{renderRowContent(row)}</div>
-      ))}
+      </div>
+      {/* Overview ruler — positioned at the right edge of the scroll container, next to the scrollbar */}
+      <div className="pointer-events-none absolute inset-y-0 right-0 z-10 flex items-stretch justify-end">
+        <div className="pointer-events-auto">
+          <TimelineFlaggerRail
+            viewportHeightPx={scrollMetrics.clientHeight}
+            scrollTop={scrollMetrics.scrollTop}
+            clientHeight={scrollMetrics.clientHeight}
+            scrollHeight={scrollMetrics.scrollHeight}
+            markers={flaggerMarkerLayouts}
+            onJumpToMessage={scrollToMessage}
+            onScrollToRatio={scrollToRatio}
+          />
+        </div>
+      </div>
     </div>
   );
 });

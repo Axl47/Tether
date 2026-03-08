@@ -213,6 +213,7 @@ function createSnapshotForTargetUser(options: {
         branch: "main",
         worktreePath: null,
         latestTurn: null,
+        lastAutoRenameUserMessageId: null,
         createdAt: NOW_ISO,
         updatedAt: NOW_ISO,
         deletedAt: null,
@@ -503,6 +504,19 @@ async function waitForThreadContextToggle(mode: "original" | "last"): Promise<HT
   return waitForElement(
     () => document.querySelector<HTMLButtonElement>(`button[aria-label="${ariaLabel}"]`),
     `Unable to find ${mode} thread context toggle.`,
+  );
+}
+
+async function waitForThreadFlagger(
+  kind: "sent" | "final",
+  messageId: MessageId,
+): Promise<HTMLButtonElement> {
+  return waitForElement(
+    () =>
+      document.querySelector<HTMLButtonElement>(
+        `[data-thread-flagger-kind="${kind}"][data-thread-flagger-message-id="${messageId}"]`,
+      ),
+    `Unable to find ${kind} thread flagger for ${messageId}.`,
   );
 }
 
@@ -891,6 +905,60 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("renders thread flaggers and jumps to the selected message", async () => {
+    const snapshot = createSnapshotForTargetUser({
+      targetMessageId: "msg-user-target-flagger" as MessageId,
+      targetText: "flagger target",
+    });
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot,
+    });
+
+    try {
+      const scrollContainer = await waitForElement(
+        () => document.querySelector<HTMLDivElement>("div.overflow-y-auto.overscroll-y-contain"),
+        "Unable to find ChatView message scroll container.",
+      );
+
+      await vi.waitFor(
+        () => {
+          expect(
+            document.querySelectorAll("[data-thread-flagger-kind='sent']").length,
+          ).toBeGreaterThanOrEqual(22);
+          expect(
+            document.querySelectorAll("[data-thread-flagger-kind='final']").length,
+          ).toBeGreaterThanOrEqual(22);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      await vi.waitFor(
+        () => {
+          expect(scrollContainer.scrollTop).toBeGreaterThan(200);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const firstSentFlagger = await waitForThreadFlagger("sent", "msg-user-0" as MessageId);
+      firstSentFlagger.click();
+
+      await vi.waitFor(
+        () => {
+          expect(scrollContainer.scrollTop).toBeLessThan(200);
+          expect(
+            document.querySelector<HTMLElement>(
+              '[data-message-id="msg-user-0"][data-message-role="user"]',
+            ),
+          ).toBeTruthy();
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("uses the latest user message for last thread context", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
@@ -1196,6 +1264,35 @@ describe("ChatView timeline estimator parity (full app)", () => {
         () => {
           expect(document.querySelector("[data-plan-mode-panel-body='true']")).toBeTruthy();
           expect(document.body.textContent).toContain("Add a minimize toggle");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("floats the thread cards above the message scroller", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotWithExecutingPlan(),
+    });
+
+    try {
+      const floatingCards = await waitForElement(
+        () => document.querySelector<HTMLElement>("[data-thread-floating-cards='true']"),
+        "Unable to find floating thread cards container.",
+      );
+      const scrollContainer = await waitForElement(
+        () => document.querySelector<HTMLDivElement>("div.overflow-y-auto.overscroll-y-contain"),
+        "Unable to find ChatView message scroll container.",
+      );
+
+      await vi.waitFor(
+        () => {
+          expect(floatingCards.getBoundingClientRect().height).toBeGreaterThan(0);
+          expect(scrollContainer.style.paddingTop).toMatch(/\d+px/);
+          expect(scrollContainer.style.scrollPaddingTop).toMatch(/\d+px/);
         },
         { timeout: 8_000, interval: 16 },
       );

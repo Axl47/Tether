@@ -453,6 +453,28 @@ describe("deriveWorkLogEntries", () => {
     expect(entry?.command).toBe("bun run lint");
   });
 
+  it("trims wrapped PowerShell tool commands for display", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "powershell-tool",
+        kind: "tool.completed",
+        summary: "Command run complete",
+        payload: {
+          itemType: "command_execution",
+          data: {
+            item: {
+              command:
+                "\"C:\\\\WINDOWS\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe\" -Command 'bun lint'",
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities, undefined);
+    expect(entry?.command).toBe("PowerShell: bun lint");
+  });
+
   it("extracts changed file paths for file-change tool activities", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

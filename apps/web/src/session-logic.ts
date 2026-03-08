@@ -410,6 +410,7 @@ export function deriveWorkLogEntries(
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
   return ordered
     .filter((activity) => (latestTurnId ? activity.turnId === latestTurnId : true))
+    .filter((activity) => activity.kind !== "tool.started")
     .filter((activity) => activity.kind !== "task.started" && activity.kind !== "task.completed")
     .filter((activity) => activity.summary !== "Checkpoint captured")
     .map((activity) => {
@@ -465,6 +466,106 @@ function normalizeCommandValue(value: unknown): string | null {
   return parts.length > 0 ? parts.join(" ") : null;
 }
 
+function unwrapQuotedValue(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length < 2) {
+    return trimmed;
+  }
+  const first = trimmed[0];
+  const last = trimmed[trimmed.length - 1];
+  if ((first === '"' || first === "'") && first === last) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
+}
+
+function tokenizeCommandLine(value: string): Array<{ raw: string; start: number; end: number }> {
+  const tokens: Array<{ raw: string; start: number; end: number }> = [];
+  let index = 0;
+
+  while (index < value.length) {
+    while (index < value.length && /\s/.test(value[index] ?? "")) {
+      index += 1;
+    }
+    if (index >= value.length) {
+      break;
+    }
+
+    const start = index;
+    let activeQuote: '"' | "'" | null = null;
+
+    while (index < value.length) {
+      const char = value[index];
+      if (!char) {
+        break;
+      }
+      if (activeQuote) {
+        if (char === activeQuote) {
+          activeQuote = null;
+        }
+        index += 1;
+        continue;
+      }
+      if (char === '"' || char === "'") {
+        activeQuote = char;
+        index += 1;
+        continue;
+      }
+      if (/\s/.test(char)) {
+        break;
+      }
+      index += 1;
+    }
+
+    tokens.push({
+      raw: value.slice(start, index),
+      start,
+      end: index,
+    });
+  }
+
+  return tokens;
+}
+
+function isPowerShellExecutable(value: string): boolean {
+  const normalized = unwrapQuotedValue(value).replaceAll("/", "\\").toLowerCase();
+  const segments = normalized.split("\\");
+  const basename = segments[segments.length - 1] ?? normalized;
+  return (
+    basename === "powershell" ||
+    basename === "powershell.exe" ||
+    basename === "pwsh" ||
+    basename === "pwsh.exe"
+  );
+}
+
+function formatCommandForDisplay(command: string): string {
+  const trimmed = command.trim();
+  const tokens = tokenizeCommandLine(trimmed);
+  const executable = tokens[0];
+  if (!executable || !isPowerShellExecutable(executable.raw)) {
+    return trimmed;
+  }
+
+  for (let index = 1; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (!token) {
+      continue;
+    }
+    const flag = unwrapQuotedValue(token.raw).toLowerCase();
+    if (flag === "-encodedcommand" || flag === "-ec") {
+      return "PowerShell: [encoded command]";
+    }
+    if (flag === "-command" || flag === "-c" || flag === "-file") {
+      const inner = unwrapQuotedValue(trimmed.slice(token.end).trim());
+      return inner.length > 0 ? `PowerShell: ${normalizeWhitespace(inner)}` : "PowerShell";
+    }
+  }
+
+  const remainder = unwrapQuotedValue(trimmed.slice(executable.end).trim());
+  return remainder.length > 0 ? `PowerShell: ${normalizeWhitespace(remainder)}` : "PowerShell";
+}
+
 function extractToolCommand(payload: Record<string, unknown> | null): string | null {
   const data = asRecord(payload?.data);
   const item = asRecord(data?.item);
@@ -476,7 +577,8 @@ function extractToolCommand(payload: Record<string, unknown> | null): string | n
     normalizeCommandValue(itemResult?.command),
     normalizeCommandValue(data?.command),
   ];
-  return candidates.find((candidate) => candidate !== null) ?? null;
+  const command = candidates.find((candidate) => candidate !== null) ?? null;
+  return command ? formatCommandForDisplay(command) : null;
 }
 
 function normalizeWhitespace(value: string): string {

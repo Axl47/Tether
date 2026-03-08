@@ -3,10 +3,10 @@ import {
   FolderIcon,
   GitPullRequestIcon,
   RocketIcon,
-  SearchIcon,
   SparklesIcon,
   SquarePenIcon,
   TerminalIcon,
+  XIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -24,6 +24,7 @@ import { useAppSettings } from "../appSettings";
 import { isElectron } from "../env";
 import { APP_STAGE_LABEL } from "../branding";
 import { buildLocalDraftThread } from "../draftThreads";
+import { copyTextToClipboard } from "../lib/clipboard";
 import { newCommandId, newProjectId, newThreadId } from "../lib/utils";
 import {
   DEFAULT_SIDEBAR_THREAD_SORT,
@@ -69,7 +70,7 @@ import {
   SidebarTrigger,
 } from "./ui/sidebar";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
-import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from "./ui/input-group";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "./ui/input-group";
 import {
   deriveThreadStatusPill,
   filterSidebarThreads,
@@ -81,13 +82,8 @@ import { isNonEmpty as isNonEmptyString } from "effect/String";
 
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 const THREAD_PREVIEW_LIMIT = 6;
-
-async function copyTextToClipboard(text: string): Promise<void> {
-  if (typeof navigator === "undefined" || navigator.clipboard?.writeText === undefined) {
-    throw new Error("Clipboard API unavailable.");
-  }
-  await navigator.clipboard.writeText(text);
-}
+const DRAFT_THREAD_LABEL_CLASS_NAME =
+  "inline-flex items-center rounded-full border border-amber-500/20 bg-amber-500/10 px-1.5 py-0.5 font-medium text-[10px] text-amber-700 dark:text-amber-300";
 
 function formatRelativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -1286,14 +1282,28 @@ export default function Sidebar() {
                                     event.stopPropagation();
                                   }}
                                 />
-                                <InputGroupAddon align="inline-end" className="pe-2.5">
-                                  <InputGroupText
-                                    aria-hidden="true"
-                                    className="text-muted-foreground/50"
+                                {hasActiveThreadSearch ? (
+                                  <InputGroupAddon
+                                    align="inline-end"
+                                    className="pe-2.5 [&>button]:me-0"
                                   >
-                                    <SearchIcon className="size-3.5" />
-                                  </InputGroupText>
-                                </InputGroupAddon>
+                                    <button
+                                      type="button"
+                                      aria-label={`Clear thread search in ${project.name}`}
+                                      className="inline-flex size-4 shrink-0 items-center justify-center text-muted-foreground/50 transition-colors hover:text-foreground"
+                                      onMouseDown={(event) => {
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                      }}
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        setProjectThreadSearch(project.id, "");
+                                      }}
+                                    >
+                                      <XIcon className="size-3.5" />
+                                    </button>
+                                  </InputGroupAddon>
+                                ) : null}
                               </InputGroup>
                             </div>
                           </SidebarMenuSubItem>
@@ -1307,6 +1317,8 @@ export default function Sidebar() {
                             hasPendingUserInput: pendingUserInputByThreadId.get(thread.id) === true,
                             pendingRunPhase: pendingRun?.phase ?? null,
                           });
+                          const isDraftThread =
+                            draftThreadIdSet.has(thread.id) || draftsByThreadId[thread.id] !== undefined;
                           const prStatus = prStatusIndicator(prByThreadId.get(thread.id) ?? null);
                           const terminalStatus = terminalStatusFromRunningIds(
                             selectThreadTerminalState(terminalStateByThreadId, thread.id)
@@ -1383,6 +1395,9 @@ export default function Sidebar() {
                                       />
                                       <span className="hidden md:inline">{threadStatus.label}</span>
                                     </span>
+                                  )}
+                                  {isDraftThread && (
+                                    <span className={DRAFT_THREAD_LABEL_CLASS_NAME}>Draft</span>
                                   )}
                                   {renamingThreadId === thread.id ? (
                                     <input
