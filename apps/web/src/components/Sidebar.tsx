@@ -1310,6 +1310,8 @@ export default function Sidebar() {
                                   )}
                                   {threadStatus && (
                                     <span
+                                      aria-label={threadStatus.label}
+                                      title={threadStatus.label}
                                       className={`inline-flex items-center gap-1 text-[10px] ${threadStatus.colorClass}`}
                                     >
                                       <span
@@ -1319,9 +1321,6 @@ export default function Sidebar() {
                                             : ""
                                         }`}
                                       />
-                                      <span className="hidden md:inline">
-                                        {threadStatus.label}
-                                      </span>
                                     </span>
                                   )}
                                   {renamingThreadId === thread.id ? (
