@@ -85,6 +85,10 @@ import {
   getOrphanedWorktreePathForThread,
 } from "../worktreeCleanup";
 import { isNonEmpty as isNonEmptyString } from "effect/String";
+import {
+  sortProjectsByLatestThreadUpdate,
+  sortThreadsByLatestActivity,
+} from "../lib/sidebarSort";
 
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 const THREAD_PREVIEW_LIMIT = 6;
@@ -347,6 +351,10 @@ export default function Sidebar() {
       new Map(projects.map((project) => [project.id, project.cwd] as const)),
     [projects],
   );
+  const sortedProjects = useMemo(
+    () => sortProjectsByLatestThreadUpdate(projects, threads),
+    [projects, threads],
+  );
   const threadGitTargets = useMemo(
     () =>
       threads.map((thread) => ({
@@ -510,14 +518,9 @@ export default function Sidebar() {
 
   const focusMostRecentThreadForProject = useCallback(
     (projectId: ProjectId) => {
-      const latestThread = threads
-        .filter((thread) => thread.projectId === projectId)
-        .toSorted((a, b) => {
-          const byDate =
-            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-          if (byDate !== 0) return byDate;
-          return b.id.localeCompare(a.id);
-        })[0];
+      const latestThread = sortThreadsByLatestActivity(
+        threads.filter((thread) => thread.projectId === projectId),
+      )[0];
       if (!latestThread) return;
 
       void navigate({
@@ -1144,16 +1147,10 @@ export default function Sidebar() {
       <SidebarContent className="gap-0">
         <SidebarGroup className="px-2 py-2">
           <SidebarMenu>
-            {projects.map((project) => {
-              const projectThreads = threads
-                .filter((thread) => thread.projectId === project.id)
-                .toSorted((a, b) => {
-                  const byDate =
-                    new Date(b.createdAt).getTime() -
-                    new Date(a.createdAt).getTime();
-                  if (byDate !== 0) return byDate;
-                  return b.id.localeCompare(a.id);
-                });
+            {sortedProjects.map((project) => {
+              const projectThreads = sortThreadsByLatestActivity(
+                threads.filter((thread) => thread.projectId === project.id),
+              );
               const isThreadListExpanded = expandedThreadListsByProject.has(
                 project.id,
               );
@@ -1397,7 +1394,7 @@ export default function Sidebar() {
                                         : "text-muted-foreground/40"
                                     }`}
                                   >
-                                    {formatRelativeTime(thread.createdAt)}
+                                    {formatRelativeTime(thread.updatedAt)}
                                   </span>
                                 </div>
                               </SidebarMenuSubButton>
