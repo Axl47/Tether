@@ -34,7 +34,7 @@ import {
   shortcutLabelForCommand,
 } from "../keybindings";
 import { type Thread } from "../types";
-import { derivePendingApprovals } from "../session-logic";
+import { derivePendingApprovals, derivePendingUserInputs } from "../session-logic";
 import {
   gitRemoveWorktreeMutationOptions,
   gitStatusQueryOptions,
@@ -114,7 +114,7 @@ function formatRelativeTime(iso: string): string {
 }
 
 interface ThreadStatusPill {
-  label: "Working" | "Connecting" | "Completed" | "Pending Approval";
+  label: "Working" | "Connecting" | "Completed" | "Pending Approval" | "Awaiting";
   colorClass: string;
   dotClass: string;
   pulse: boolean;
@@ -148,8 +148,18 @@ function hasUnseenCompletion(thread: Thread): boolean {
 
 function threadStatusPill(
   thread: Thread,
+  hasPendingUserInput: boolean,
   hasPendingApprovals: boolean,
 ): ThreadStatusPill | null {
+  if (hasPendingUserInput) {
+    return {
+      label: "Awaiting",
+      colorClass: "text-yellow-600 dark:text-yellow-300/90",
+      dotClass: "bg-yellow-500 dark:bg-yellow-300/90",
+      pulse: false,
+    };
+  }
+
   if (hasPendingApprovals) {
     return {
       label: "Pending Approval",
@@ -343,6 +353,13 @@ export default function Sidebar() {
     const map = new Map<ThreadId, boolean>();
     for (const thread of threads) {
       map.set(thread.id, derivePendingApprovals(thread.activities).length > 0);
+    }
+    return map;
+  }, [threads]);
+  const pendingUserInputByThreadId = useMemo(() => {
+    const map = new Map<ThreadId, boolean>();
+    for (const thread of threads) {
+      map.set(thread.id, derivePendingUserInputs(thread.activities).length > 0);
     }
     return map;
   }, [threads]);
@@ -1234,6 +1251,7 @@ export default function Sidebar() {
                           const isActive = routeThreadId === thread.id;
                           const threadStatus = threadStatusPill(
                             thread,
+                            pendingUserInputByThreadId.get(thread.id) === true,
                             pendingApprovalByThreadId.get(thread.id) === true,
                           );
                           const prStatus = prStatusIndicator(
