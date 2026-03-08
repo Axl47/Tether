@@ -109,6 +109,7 @@ import {
   buildProposedPlanMarkdownFilename,
   proposedPlanTitle,
   resolvePlanFollowUpSubmission,
+  summarizeCollapsedPlan,
 } from "../proposedPlan";
 import { truncateTitle } from "../truncateTitle";
 import {
@@ -4780,21 +4781,39 @@ const PlanModePanel = memo(function PlanModePanel({
   activePlan,
   onDismiss,
 }: PlanModePanelProps) {
+  const [collapsed, setCollapsed] = useState(false);
   if (!activePlan) return null;
+  const collapsedSummary = summarizeCollapsedPlan({
+    explanation: activePlan.explanation,
+    steps: activePlan.steps,
+  });
 
   return (
     <div className="pt-3 mx-auto max-w-3xl">
-      <div className="rounded-xl border border-border/70 bg-muted/30 p-4">
-        <div className="flex items-center gap-2">
-          <Badge variant="secondary">Plan</Badge>
-          <span className="text-xs text-muted-foreground">
-            Updated {formatTimestamp(activePlan.createdAt)}
-          </span>
+      <div className="relative rounded-xl border border-border/70 bg-transparent p-4">
+        <div className="absolute top-3 right-3 z-10 flex items-center gap-1">
           <Button
             type="button"
             variant="ghost"
             size="icon-xs"
-            className="ml-auto"
+            className="border-0 bg-transparent text-muted-foreground/70 shadow-none before:hidden hover:bg-transparent hover:text-foreground data-pressed:bg-transparent"
+            onClick={() => {
+              setCollapsed((current) => !current);
+            }}
+            aria-label={collapsed ? "Expand plan steps" : "Collapse plan steps"}
+            title={collapsed ? "Expand plan steps" : "Collapse plan steps"}
+          >
+            {collapsed ? (
+              <ChevronRightIcon className="size-3.5" />
+            ) : (
+              <ChevronDownIcon className="size-3.5" />
+            )}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            className="border-0 bg-transparent text-muted-foreground/70 shadow-none before:hidden hover:bg-transparent hover:text-foreground data-pressed:bg-transparent"
             onClick={onDismiss}
             aria-label="Dismiss plan steps"
             title="Dismiss plan steps"
@@ -4802,22 +4821,34 @@ const PlanModePanel = memo(function PlanModePanel({
             <XIcon />
           </Button>
         </div>
-        {activePlan.explanation ? (
+        <div className="flex items-center gap-2 pr-16">
+          <Badge variant="secondary">Plan</Badge>
+          <span className="text-xs text-muted-foreground">
+            Updated {formatTimestamp(activePlan.createdAt)}
+          </span>
+        </div>
+        {collapsed && collapsedSummary ? (
+          <p className="mt-2 text-sm text-muted-foreground">
+            {collapsedSummary}
+          </p>
+        ) : activePlan.explanation ? (
           <p className="mt-2 text-sm text-muted-foreground">
             {activePlan.explanation}
           </p>
         ) : null}
-        <div className="mt-3 space-y-2">
-          {activePlan.steps.map((step) => (
-            <div
-              key={`${step.status}:${step.step}`}
-              className="flex items-start gap-3 rounded-lg border border-border/60 bg-background/80 px-3 py-2"
-            >
-              <PlanStepStatusIndicator status={step.status} />
-              <div className="min-w-0 flex-1 text-sm">{step.step}</div>
-            </div>
-          ))}
-        </div>
+        {!collapsed ? (
+          <div className="mt-3 space-y-2">
+            {activePlan.steps.map((step) => (
+              <div
+                key={`${step.status}:${step.step}`}
+                className="flex items-start gap-3 rounded-lg border border-border/60 bg-transparent px-3 py-2"
+              >
+                <PlanStepStatusIndicator status={step.status} />
+                <div className="min-w-0 flex-1 text-sm">{step.step}</div>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </div>
     </div>
   );

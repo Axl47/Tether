@@ -49,3 +49,19 @@ export function buildProposedPlanMarkdownFilename(planMarkdown: string): string 
   const title = proposedPlanTitle(planMarkdown);
   return `${sanitizePlanFileSegment(title ?? "plan")}.md`;
 }
+
+export function summarizeCollapsedPlan(input: {
+  explanation: string | null | undefined;
+  steps: ReadonlyArray<{ step: string }>;
+}): string | null {
+  const primaryText =
+    input.explanation?.trim() ||
+    input.steps.find((step) => step.step.trim().length > 0)?.step.trim() ||
+    "";
+  if (primaryText.length === 0) {
+    return null;
+  }
+
+  const firstSentence = primaryText.match(/^(.+?[.!?])(?:\s|$)/s)?.[1]?.trim();
+  return firstSentence && firstSentence.length > 0 ? firstSentence : primaryText;
+}
