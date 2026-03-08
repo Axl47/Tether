@@ -140,5 +140,10 @@ describe("ThreadTitleManager", () => {
       reason: "up-to-date",
     });
     expect(generateThreadTitle).toHaveBeenCalledTimes(1);
+
+    const readModel = await runtime!.runPromise(engine.getReadModel());
+    const thread = readModel.threads.find((entry) => entry.id === threadId);
+    expect(thread?.lastAutoRenameUserMessageId).toBe(MessageId.makeUnsafe("message-1"));
+    expect(thread?.activities).toEqual([]);
   });
 });

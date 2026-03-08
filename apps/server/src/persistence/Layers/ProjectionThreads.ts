@@ -43,6 +43,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           worktree_path,
           context_window_json,
           latest_turn_id,
+          last_autorename_user_message_id,
           created_at,
           updated_at,
           deleted_at
@@ -58,6 +59,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           ${row.worktreePath},
           ${row.contextWindow === null ? null : JSON.stringify(row.contextWindow)},
           ${row.latestTurnId},
+          ${row.lastAutoRenameUserMessageId},
           ${row.createdAt},
           ${row.updatedAt},
           ${row.deletedAt}
@@ -73,6 +75,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           worktree_path = excluded.worktree_path,
           context_window_json = excluded.context_window_json,
           latest_turn_id = excluded.latest_turn_id,
+          last_autorename_user_message_id = excluded.last_autorename_user_message_id,
           created_at = excluded.created_at,
           updated_at = excluded.updated_at,
           deleted_at = excluded.deleted_at
@@ -95,6 +98,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           worktree_path AS "worktreePath",
           context_window_json AS "contextWindow",
           latest_turn_id AS "latestTurnId",
+          last_autorename_user_message_id AS "lastAutoRenameUserMessageId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -119,6 +123,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           worktree_path AS "worktreePath",
           context_window_json AS "contextWindow",
           latest_turn_id AS "latestTurnId",
+          last_autorename_user_message_id AS "lastAutoRenameUserMessageId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"

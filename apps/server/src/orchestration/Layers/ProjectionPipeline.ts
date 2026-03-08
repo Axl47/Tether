@@ -429,6 +429,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             worktreePath: event.payload.worktreePath,
             contextWindow: null,
             latestTurnId: null,
+            lastAutoRenameUserMessageId: null,
             createdAt: event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
             deletedAt: null,
@@ -449,6 +450,11 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             ...(event.payload.branch !== undefined ? { branch: event.payload.branch } : {}),
             ...(event.payload.worktreePath !== undefined
               ? { worktreePath: event.payload.worktreePath }
+              : {}),
+            ...(event.payload.lastAutoRenameUserMessageId !== undefined
+              ? {
+                  lastAutoRenameUserMessageId: event.payload.lastAutoRenameUserMessageId,
+                }
               : {}),
             updatedAt: event.payload.updatedAt,
           });

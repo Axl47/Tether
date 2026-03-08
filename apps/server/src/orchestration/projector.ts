@@ -259,6 +259,7 @@ export function projectEvent(
             branch: payload.branch,
             worktreePath: payload.worktreePath,
             latestTurn: null,
+            lastAutoRenameUserMessageId: null,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
             deletedAt: null,
@@ -301,6 +302,9 @@ export function projectEvent(
             ...(payload.model !== undefined ? { model: payload.model } : {}),
             ...(payload.branch !== undefined ? { branch: payload.branch } : {}),
             ...(payload.worktreePath !== undefined ? { worktreePath: payload.worktreePath } : {}),
+            ...(payload.lastAutoRenameUserMessageId !== undefined
+              ? { lastAutoRenameUserMessageId: payload.lastAutoRenameUserMessageId }
+              : {}),
             updatedAt: payload.updatedAt,
           }),
         })),

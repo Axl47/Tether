@@ -38,6 +38,7 @@ const readModel: OrchestrationReadModel = {
       branch: null,
       worktreePath: null,
       latestTurn: null,
+      lastAutoRenameUserMessageId: null,
       createdAt: NOW,
       updatedAt: NOW,
       deletedAt: null,

@@ -8,6 +8,7 @@
  */
 import {
   IsoDateTime,
+  MessageId,
   OrchestrationContextWindow,
   ProjectId,
   ProviderInteractionMode,
@@ -31,6 +32,7 @@ export const ProjectionThread = Schema.Struct({
   worktreePath: Schema.NullOr(Schema.String),
   contextWindow: Schema.NullOr(OrchestrationContextWindow),
   latestTurnId: Schema.NullOr(TurnId),
+  lastAutoRenameUserMessageId: Schema.NullOr(MessageId),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),

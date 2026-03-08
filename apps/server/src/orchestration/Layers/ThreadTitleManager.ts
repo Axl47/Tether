@@ -1,6 +1,5 @@
 import {
   CommandId,
-  EventId,
   type MessageId,
   type OrchestrationAutorenameProjectThreadsResult,
   type ThreadId,
@@ -44,13 +43,22 @@ function normalizeUserMessages(
 }
 
 function readAutorenameCache(
-  activities: ReadonlyArray<{
-    readonly kind: string;
-    readonly payload: unknown;
-  }>,
+  thread: {
+    readonly lastAutoRenameUserMessageId: MessageId | null;
+    readonly activities: ReadonlyArray<{
+      readonly kind: string;
+      readonly payload: unknown;
+    }>;
+  },
 ): AutorenameCache | null {
-  for (let index = activities.length - 1; index >= 0; index -= 1) {
-    const activity = activities[index];
+  if (thread.lastAutoRenameUserMessageId !== null) {
+    return {
+      lastUserMessageId: thread.lastAutoRenameUserMessageId,
+    };
+  }
+
+  for (let index = thread.activities.length - 1; index >= 0; index -= 1) {
+    const activity = thread.activities[index];
     if (activity?.kind !== "thread.autorename.completed") {
       continue;
     }
@@ -111,7 +119,7 @@ const make = Effect.gen(function* () {
           continue;
         }
 
-        const autorenameCache = readAutorenameCache(thread.activities);
+        const autorenameCache = readAutorenameCache(thread);
         if (autorenameCache?.lastUserMessageId === latestUserMessage.id) {
           skipped.push({ threadId: thread.id, reason: "up-to-date" });
           continue;
@@ -166,6 +174,7 @@ const make = Effect.gen(function* () {
             commandId: serverCommandId("thread-autorename"),
             threadId: thread.id,
             title: generatedTitle,
+            lastAutoRenameUserMessageId: latestUserMessage.id,
           })
           .pipe(
             Effect.as({ ok: true } as const),
@@ -189,28 +198,6 @@ const make = Effect.gen(function* () {
           threadId: thread.id,
           title: generatedTitle,
         });
-
-        const createdAt = new Date().toISOString();
-        yield* orchestrationEngine
-          .dispatch({
-            type: "thread.activity.append",
-            commandId: serverCommandId("thread-autorename-cache"),
-            threadId: thread.id,
-            activity: {
-              id: EventId.makeUnsafe(crypto.randomUUID()),
-              tone: "info",
-              kind: "thread.autorename.completed",
-              summary: "Auto-renamed thread title",
-              payload: {
-                title: generatedTitle,
-                lastUserMessageId: latestUserMessage.id,
-              },
-              turnId: null,
-              createdAt,
-            },
-            createdAt,
-          })
-          .pipe(Effect.catch(() => Effect.void));
       }
 
       return {
