@@ -1,9 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   extractTerminalLinks,
   isTerminalLinkActivation,
+  preferredTerminalEditor,
   resolvePathLinkTarget,
+  writePreferredTerminalEditor,
 } from "./terminal-links";
 
 describe("extractTerminalLinks", () => {
@@ -103,5 +105,49 @@ describe("isTerminalLinkActivation", () => {
         "Linux",
       ),
     ).toBe(false);
+  });
+});
+
+describe("preferredTerminalEditor", () => {
+  const storage = new Map<string, string>();
+
+  beforeEach(() => {
+    storage.clear();
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        localStorage: {
+          getItem: (key: string) => storage.get(key) ?? null,
+          setItem: (key: string, value: string) => {
+            storage.set(key, value);
+          },
+          removeItem: (key: string) => {
+            storage.delete(key);
+          },
+        },
+      },
+    });
+  });
+
+  it("uses the stored editor when it is still available", () => {
+    writePreferredTerminalEditor("zed");
+
+    expect(preferredTerminalEditor(["vscode", "zed", "file-manager"])).toBe("zed");
+  });
+
+  it("falls back to the first available editor when no preference is stored", () => {
+    expect(preferredTerminalEditor(["vscode", "file-manager"])).toBe("vscode");
+  });
+
+  it("falls back to the first available editor when the stored editor is unavailable", () => {
+    writePreferredTerminalEditor("cursor");
+
+    expect(preferredTerminalEditor(["vscode", "file-manager"])).toBe("vscode");
+  });
+
+  it("preserves a stored file manager preference", () => {
+    writePreferredTerminalEditor("file-manager");
+
+    expect(preferredTerminalEditor()).toBe("file-manager");
   });
 });

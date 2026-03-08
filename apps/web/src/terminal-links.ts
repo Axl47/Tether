@@ -14,7 +14,7 @@ const URL_PATTERN = /https?:\/\/[^\s"'`<>]+/g;
 const FILE_PATH_PATTERN =
   /(?:~\/|\.{1,2}\/|\/|[A-Za-z]:\\|\\\\)[^\s"'`<>]+|[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+(?::\d+){0,2}/g;
 const TRAILING_PUNCTUATION_PATTERN = /[.,;!?]+$/;
-const LAST_EDITOR_KEY = "tether:last-editor";
+export const LAST_EDITOR_KEY = "tether:last-editor";
 
 function trimClosingDelimiters(value: string): string {
   let output = value.replace(TRAILING_PUNCTUATION_PATTERN, "");
@@ -186,23 +186,48 @@ export function resolvePathLinkTarget(rawPath: string, cwd: string): string {
   return `${resolvedPath}:${line}${column ? `:${column}` : ""}`;
 }
 
-export function preferredTerminalEditor(): EditorId {
-  const fallback =
-    EDITORS.find((editor) => editor.command)?.id ?? EDITORS[0]?.id ?? "cursor";
+function isEditorId(value: string): value is EditorId {
+  return EDITORS.some((editor) => editor.id === value);
+}
 
+export function readPreferredTerminalEditor(): EditorId | null {
   if (typeof window === "undefined") {
-    return fallback;
+    return null;
   }
 
   const storedEditor = window.localStorage.getItem(LAST_EDITOR_KEY);
-  if (!storedEditor) {
-    return fallback;
+  if (!storedEditor || !isEditorId(storedEditor)) {
+    return null;
   }
 
-  const configured = EDITORS.find((editor) => editor.id === storedEditor);
-  if (!configured?.command) {
-    return fallback;
+  return storedEditor;
+}
+
+export function writePreferredTerminalEditor(editor: EditorId): void {
+  if (typeof window === "undefined") {
+    return;
   }
 
-  return configured.id;
+  window.localStorage.setItem(LAST_EDITOR_KEY, editor);
+}
+
+export function preferredTerminalEditor(
+  availableEditors?: ReadonlyArray<EditorId>,
+): EditorId {
+  const fallback = EDITORS.find((editor) => editor.command)?.id ?? "cursor";
+
+  const storedEditor = readPreferredTerminalEditor();
+  if (availableEditors) {
+    if (storedEditor && availableEditors.includes(storedEditor)) {
+      return storedEditor;
+    }
+    if (availableEditors.length > 0) {
+      const [firstAvailableEditor] = availableEditors;
+      if (firstAvailableEditor) {
+        return firstAvailableEditor;
+      }
+    }
+  }
+
+  return storedEditor ?? fallback;
 }

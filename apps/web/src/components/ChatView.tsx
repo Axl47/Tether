@@ -1,7 +1,6 @@
 import {
   type ApprovalRequestId,
   DEFAULT_MODEL_BY_PROVIDER,
-  EDITORS,
   type EditorId,
   type KeybindingCommand,
   type CodexReasoningEffort,
@@ -99,6 +98,10 @@ import {
   setPendingUserInputCustomAnswer,
   type PendingUserInputDraftAnswer,
 } from "../pendingUserInput";
+import {
+  preferredTerminalEditor,
+  writePreferredTerminalEditor,
+} from "../terminal-links";
 import { useStore } from "../store";
 import {
   buildPlanImplementationThreadTitle,
@@ -270,7 +273,6 @@ function formatWorkingTimer(startIso: string, endIso: string): string | null {
   return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
 }
 
-const LAST_EDITOR_KEY = "tether:last-editor";
 const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY =
   "tether:last-invoked-script-by-project";
 const MAX_VISIBLE_WORK_LOG_ENTRIES = 6;
@@ -4535,7 +4537,11 @@ const ChatHeader = memo(function ChatHeader({
           />
         )}
         {activeProjectName && (
-          <GitActionsControl gitCwd={gitCwd} activeThreadId={activeThreadId} />
+          <GitActionsControl
+            gitCwd={gitCwd}
+            activeThreadId={activeThreadId}
+            availableEditors={availableEditors}
+          />
         )}
         <Tooltip>
           <TooltipTrigger
@@ -6269,12 +6275,9 @@ const OpenInPicker = memo(function OpenInPicker({
   availableEditors: ReadonlyArray<EditorId>;
   openInCwd: string | null;
 }) {
-  const [lastEditor, setLastEditor] = useState<EditorId>(() => {
-    const stored = localStorage.getItem(LAST_EDITOR_KEY);
-    return EDITORS.some((e) => e.id === stored)
-      ? (stored as EditorId)
-      : EDITORS[0].id;
-  });
+  const [lastEditor, setLastEditor] = useState<EditorId>(() =>
+    preferredTerminalEditor(availableEditors),
+  );
 
   const allOptions = useMemo<
     Array<{ label: string; Icon: Icon; value: EditorId }>
@@ -6319,6 +6322,14 @@ const OpenInPicker = memo(function OpenInPicker({
   const primaryOption =
     options.find(({ value }) => value === effectiveEditor) ?? null;
 
+  useEffect(() => {
+    if (!effectiveEditor) return;
+    if (lastEditor !== effectiveEditor) {
+      setLastEditor(effectiveEditor);
+    }
+    writePreferredTerminalEditor(effectiveEditor);
+  }, [effectiveEditor, lastEditor]);
+
   const openInEditor = useCallback(
     (editorId: EditorId | null) => {
       const api = readNativeApi();
@@ -6326,7 +6337,7 @@ const OpenInPicker = memo(function OpenInPicker({
       const editor = editorId ?? effectiveEditor;
       if (!editor) return;
       void api.shell.openInEditor(openInCwd, editor);
-      localStorage.setItem(LAST_EDITOR_KEY, editor);
+      writePreferredTerminalEditor(editor);
       setLastEditor(editor);
     },
     [effectiveEditor, openInCwd, setLastEditor],

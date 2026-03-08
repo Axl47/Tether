@@ -1,4 +1,4 @@
-import type { GitStackedAction, GitStatusResult, ThreadId } from "@t3tools/contracts";
+import type { EditorId, GitStackedAction, GitStatusResult, ThreadId } from "@t3tools/contracts";
 import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronDownIcon, CloudUploadIcon, GitCommitIcon, InfoIcon } from "lucide-react";
@@ -46,6 +46,7 @@ import { readNativeApi } from "~/nativeApi";
 interface GitActionsControlProps {
   gitCwd: string | null;
   activeThreadId: ThreadId | null;
+  availableEditors: ReadonlyArray<EditorId>;
 }
 
 interface PendingDefaultBranchAction {
@@ -138,7 +139,11 @@ function GitQuickActionIcon({ quickAction }: { quickAction: GitQuickAction }) {
   return <InfoIcon className={iconClassName} />;
 }
 
-export default function GitActionsControl({ gitCwd, activeThreadId }: GitActionsControlProps) {
+export default function GitActionsControl({
+  gitCwd,
+  activeThreadId,
+  availableEditors,
+}: GitActionsControlProps) {
   const threadToastData = useMemo(
     () => (activeThreadId ? { threadId: activeThreadId } : undefined),
     [activeThreadId],
@@ -565,16 +570,18 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
         return;
       }
       const target = resolvePathLinkTarget(filePath, gitCwd);
-      void api.shell.openInEditor(target, preferredTerminalEditor()).catch((error) => {
-        toastManager.add({
-          type: "error",
-          title: "Unable to open file",
-          description: error instanceof Error ? error.message : "An error occurred.",
-          data: threadToastData,
-        });
-      });
+      void api.shell.openInEditor(target, preferredTerminalEditor(availableEditors)).catch(
+        (error) => {
+          toastManager.add({
+            type: "error",
+            title: "Unable to open file",
+            description: error instanceof Error ? error.message : "An error occurred.",
+            data: threadToastData,
+          });
+        },
+      );
     },
-    [gitCwd, threadToastData],
+    [availableEditors, gitCwd, threadToastData],
   );
 
   if (!gitCwd) return null;
