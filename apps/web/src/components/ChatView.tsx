@@ -150,6 +150,7 @@ import {
   DiffIcon,
   EllipsisIcon,
   FolderClosedIcon,
+  LoaderCircleIcon,
   LockIcon,
   LockOpenIcon,
   Undo2Icon,
@@ -4719,6 +4720,41 @@ interface PlanModePanelProps {
   activePlan: ReturnType<typeof deriveActivePlanState>;
 }
 
+function PlanStepStatusIndicator({
+  status,
+}: {
+  status: "pending" | "inProgress" | "completed";
+}) {
+  if (status === "inProgress") {
+    return (
+      <span
+        className="mt-0.5 inline-flex size-5 shrink-0 items-center justify-center text-muted-foreground/80"
+        aria-label="In progress"
+        title="In progress"
+      >
+        <LoaderCircleIcon className="size-4 animate-spin" />
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className={cn(
+        "mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full border",
+        status === "completed"
+          ? "border-primary/70 bg-background"
+          : "border-border/70 bg-transparent",
+      )}
+      aria-label={status === "completed" ? "Done" : "Pending"}
+      title={status === "completed" ? "Done" : "Pending"}
+    >
+      {status === "completed" ? (
+        <span className="size-2 rounded-full bg-primary" />
+      ) : null}
+    </span>
+  );
+}
+
 const PlanModePanel = memo(function PlanModePanel({
   activePlan,
 }: PlanModePanelProps) {
@@ -4744,21 +4780,7 @@ const PlanModePanel = memo(function PlanModePanel({
               key={`${step.status}:${step.step}`}
               className="flex items-start gap-3 rounded-lg border border-border/60 bg-background/80 px-3 py-2"
             >
-              <Badge
-                variant={
-                  step.status === "completed"
-                    ? "default"
-                    : step.status === "inProgress"
-                      ? "secondary"
-                      : "outline"
-                }
-              >
-                {step.status === "inProgress"
-                  ? "In progress"
-                  : step.status === "completed"
-                    ? "Done"
-                    : "Pending"}
-              </Badge>
+              <PlanStepStatusIndicator status={step.status} />
               <div className="min-w-0 flex-1 text-sm">{step.step}</div>
             </div>
           ))}
