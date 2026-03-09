@@ -19,6 +19,9 @@ export function QueuedTurnDispatcher() {
   );
   const dispatchingThreadIdsRef = useRef(new Set<string>());
   const failedDispatchSignatureByThreadIdRef = useRef(new Map<string, string>());
+  const queuedTurnCycleStateByThreadIdRef = useRef(
+    new Map<string, "awaiting-busy" | "awaiting-idle">(),
+  );
 
   useEffect(() => {
     const api = readNativeApi();
@@ -31,7 +34,34 @@ export function QueuedTurnDispatcher() {
       const queueHead = queue?.[0];
       if (!queueHead) {
         failedDispatchSignatureByThreadIdRef.current.delete(thread.id);
+        queuedTurnCycleStateByThreadIdRef.current.delete(thread.id);
+        setDispatchingQueuedMessage(thread.id, null);
         continue;
+      }
+
+      const canDispatch = canAutoDispatchQueuedTurn({
+        thread,
+        isConnecting: false,
+        isRevertingCheckpoint: false,
+        isLocalSendInFlight: false,
+      });
+      const cycleState =
+        queuedTurnCycleStateByThreadIdRef.current.get(thread.id) ?? null;
+      if (cycleState === "awaiting-busy") {
+        if (!canDispatch) {
+          queuedTurnCycleStateByThreadIdRef.current.set(
+            thread.id,
+            "awaiting-idle",
+          );
+          setDispatchingQueuedMessage(thread.id, null);
+        }
+        continue;
+      }
+      if (cycleState === "awaiting-idle") {
+        if (!canDispatch) {
+          continue;
+        }
+        queuedTurnCycleStateByThreadIdRef.current.delete(thread.id);
       }
 
       const failureSignature = `${queueHead.id}:${thread.updatedAt}:${
@@ -55,14 +85,7 @@ export function QueuedTurnDispatcher() {
       ) {
         continue;
       }
-      if (
-        !canAutoDispatchQueuedTurn({
-          thread,
-          isConnecting: false,
-          isRevertingCheckpoint: false,
-          isLocalSendInFlight: false,
-        })
-      ) {
+      if (!canDispatch) {
         continue;
       }
 
@@ -83,6 +106,10 @@ export function QueuedTurnDispatcher() {
             .getState()
             .consumeQueuedMessage(thread.id, queueHead.id);
           failedDispatchSignatureByThreadIdRef.current.delete(thread.id);
+          queuedTurnCycleStateByThreadIdRef.current.set(
+            thread.id,
+            "awaiting-busy",
+          );
         })
         .catch((error: unknown) => {
           const message =
@@ -93,12 +120,13 @@ export function QueuedTurnDispatcher() {
             thread.id,
             failureSignature,
           );
+          queuedTurnCycleStateByThreadIdRef.current.delete(thread.id);
+          setDispatchingQueuedMessage(thread.id, null);
           setThreadError(thread.id, message);
           console.error("Queued turn dispatch failed", error);
         })
         .finally(() => {
           dispatchingThreadIdsRef.current.delete(thread.id);
-          setDispatchingQueuedMessage(thread.id, null);
         });
     }
   }, [

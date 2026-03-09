@@ -1183,6 +1183,146 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("dispatches queued follow-ups one turn at a time across separate idle cycles", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createRunningSnapshot(),
+    });
+
+    try {
+      await submitQueuedPrompt("First queued follow-up");
+      await submitQueuedPrompt("Second queued follow-up");
+
+      setThreadState((thread) => ({
+        ...thread,
+        updatedAt: isoAt(95),
+        activities: [],
+        session: {
+          threadId: THREAD_ID,
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: isoAt(95),
+        },
+      }));
+
+      await vi.waitFor(
+        () => {
+          const startRequests = wsRequests.filter(
+            (request) => dispatchCommand(request)?.type === "thread.turn.start",
+          );
+          expect(startRequests).toHaveLength(1);
+          expect(dispatchCommandMessageText(startRequests[0])).toBe(
+            "First queued follow-up",
+          );
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      await new Promise((resolve) => window.setTimeout(resolve, 120));
+
+      expect(
+        wsRequests.filter(
+          (request) => dispatchCommand(request)?.type === "thread.turn.start",
+        ),
+      ).toHaveLength(1);
+
+      setThreadState((thread) => ({
+        ...thread,
+        updatedAt: isoAt(96),
+        activities: [],
+        session: {
+          threadId: THREAD_ID,
+          status: "running",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: "turn-running-second-cycle" as never,
+          lastError: null,
+          updatedAt: isoAt(96),
+        },
+      }));
+
+      await waitForLayout();
+
+      setThreadState((thread) => ({
+        ...thread,
+        updatedAt: isoAt(97),
+        activities: [],
+        session: {
+          threadId: THREAD_ID,
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: isoAt(97),
+        },
+      }));
+
+      await vi.waitFor(
+        () => {
+          const startRequests = wsRequests.filter(
+            (request) => dispatchCommand(request)?.type === "thread.turn.start",
+          );
+          expect(startRequests).toHaveLength(2);
+          expect(dispatchCommandMessageText(startRequests[1])).toBe(
+            "Second queued follow-up",
+          );
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps the thread in a working state while a queued send is handing off to the server", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createRunningSnapshot(),
+    });
+
+    try {
+      await submitQueuedPrompt("Queued handoff");
+
+      setThreadState((thread) => ({
+        ...thread,
+        updatedAt: isoAt(98),
+        activities: [],
+        session: {
+          threadId: THREAD_ID,
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: isoAt(98),
+        },
+      }));
+
+      await vi.waitFor(
+        () => {
+          const startRequest = wsRequests.find(
+            (request) => dispatchCommand(request)?.type === "thread.turn.start",
+          );
+          expect(dispatchCommandMessageText(startRequest)).toBe("Queued handoff");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      await vi.waitFor(
+        () => {
+          expect(document.body.textContent).toContain("Working...");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("does not auto-dispatch queued follow-ups while an approval is pending", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,

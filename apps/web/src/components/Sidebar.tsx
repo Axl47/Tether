@@ -49,6 +49,7 @@ import {
   selectThreadTerminalState,
   useTerminalStateStore,
 } from "../terminalStateStore";
+import { useQueuedTurnRuntimeStore } from "../queuedTurnRuntimeStore";
 import { toastManager } from "./ui/toast";
 import {
   getDesktopUpdateActionError,
@@ -145,6 +146,7 @@ function threadStatusPill(
   thread: Thread,
   hasPendingUserInput: boolean,
   hasPendingApprovals: boolean,
+  hasQueuedDispatchInFlight: boolean,
 ): ThreadStatusPill | null {
   if (hasPendingUserInput) {
     return {
@@ -164,7 +166,7 @@ function threadStatusPill(
     };
   }
 
-  if (thread.session?.status === "running") {
+  if (thread.session?.status === "running" || hasQueuedDispatchInFlight) {
     return {
       label: "Working",
       colorClass: "text-sky-600 dark:text-sky-300/80",
@@ -344,6 +346,9 @@ export default function Sidebar() {
   const renamingInputRef = useRef<HTMLInputElement | null>(null);
   const [desktopUpdateState, setDesktopUpdateState] =
     useState<DesktopUpdateState | null>(null);
+  const dispatchingQueuedMessageIdByThreadId = useQueuedTurnRuntimeStore(
+    (store) => store.dispatchingQueuedMessageIdByThreadId,
+  );
   const pendingApprovalByThreadId = useMemo(() => {
     const map = new Map<ThreadId, boolean>();
     for (const thread of threads) {
@@ -1240,6 +1245,8 @@ export default function Sidebar() {
                             thread,
                             pendingUserInputByThreadId.get(thread.id) === true,
                             pendingApprovalByThreadId.get(thread.id) === true,
+                            dispatchingQueuedMessageIdByThreadId[thread.id] !==
+                              undefined,
                           );
                           const prStatus = prStatusIndicator(
                             prByThreadId.get(thread.id) ?? null,

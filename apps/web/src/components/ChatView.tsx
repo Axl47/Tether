@@ -736,6 +736,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const dispatchingQueuedMessageId = useQueuedTurnRuntimeStore(
     (store) => store.dispatchingQueuedMessageIdByThreadId[threadId] ?? null,
   );
+  const hasQueuedDispatchInFlight = dispatchingQueuedMessageId !== null;
   const promptRef = useRef(prompt);
   const [isDragOverComposer, setIsDragOverComposer] = useState(false);
   const [expandedImage, setExpandedImage] =
@@ -1034,7 +1035,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const isSendBusy = sendPhase !== "idle";
   const isPreparingWorktree = sendPhase === "preparing-worktree";
   const isWorking =
-    phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
+    phase === "running" ||
+    hasQueuedDispatchInFlight ||
+    isSendBusy ||
+    isConnecting ||
+    isRevertingCheckpoint;
   const nowIso = new Date(nowTick).toISOString();
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
@@ -4593,6 +4598,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         <rect x="2" y="2" width="8" height="8" rx="1.5" />
                       </svg>
                     </button>
+                  ) : hasQueuedDispatchInFlight ? (
+                    <div
+                      className="flex size-8 items-center justify-center rounded-full bg-muted text-muted-foreground/75 sm:h-8 sm:w-8"
+                      aria-label="Queued message sending"
+                      title="Queued message sending"
+                    >
+                      <LoaderCircleIcon className="size-4 animate-spin" />
+                    </div>
                   ) : pendingUserInputs.length === 0 ? (
                     showPlanFollowUpPrompt ? (
                       prompt.trim().length > 0 ? (
