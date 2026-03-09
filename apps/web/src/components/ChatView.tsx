@@ -283,6 +283,7 @@ const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY =
 const MAX_VISIBLE_WORK_LOG_ENTRIES = 6;
 const ALWAYS_UNVIRTUALIZED_TAIL_ROWS = 8;
 const ATTACHMENT_PREVIEW_HANDOFF_TTL_MS = 5000;
+const MANUAL_SCROLL_SETTLE_WINDOW_MS = 180;
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
   "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
@@ -795,6 +796,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     useState<HTMLDivElement | null>(null);
   const shouldAutoScrollRef = useRef(true);
   const lastKnownScrollTopRef = useRef(0);
+  const lastManualScrollAtRef = useRef(0);
   const isPointerScrollActiveRef = useRef(false);
   const lastTouchClientYRef = useRef<number | null>(null);
   const pendingUserScrollUpIntentRef = useRef(false);
@@ -2096,11 +2098,31 @@ export default function ChatView({ threadId }: ChatViewProps) {
     scheduleStickToBottom,
     scrollMessagesToBottom,
   ]);
+  const noteManualScrollInteraction = useCallback(() => {
+    lastManualScrollAtRef.current = Date.now();
+    cancelPendingStickToBottom();
+    cancelPendingInteractionAnchorAdjustment();
+  }, [
+    cancelPendingInteractionAnchorAdjustment,
+    cancelPendingStickToBottom,
+  ]);
+  const shouldSuppressTimelineScrollAdjustment = useCallback(
+    () =>
+      isPointerScrollActiveRef.current ||
+      Date.now() - lastManualScrollAtRef.current <
+        MANUAL_SCROLL_SETTLE_WINDOW_MS,
+    [],
+  );
   const onMessagesScroll = useCallback(() => {
     const scrollContainer = messagesScrollRef.current;
     if (!scrollContainer) return;
     const currentScrollTop = scrollContainer.scrollTop;
     const isNearBottom = isScrollContainerNearBottom(scrollContainer);
+    const scrollDelta = currentScrollTop - lastKnownScrollTopRef.current;
+    const didScroll = Math.abs(scrollDelta) > 1;
+    const hasRecentManualScroll =
+      Date.now() - lastManualScrollAtRef.current <
+      MANUAL_SCROLL_SETTLE_WINDOW_MS;
 
     if (!shouldAutoScrollRef.current && isNearBottom) {
       shouldAutoScrollRef.current = true;
@@ -2109,8 +2131,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       shouldAutoScrollRef.current &&
       pendingUserScrollUpIntentRef.current
     ) {
-      const scrolledUp = currentScrollTop < lastKnownScrollTopRef.current - 1;
-      if (scrolledUp) {
+      if (scrollDelta < -1) {
         shouldAutoScrollRef.current = false;
       }
       pendingUserScrollUpIntentRef.current = false;
@@ -2118,27 +2139,36 @@ export default function ChatView({ threadId }: ChatViewProps) {
       shouldAutoScrollRef.current &&
       isPointerScrollActiveRef.current
     ) {
-      const scrolledUp = currentScrollTop < lastKnownScrollTopRef.current - 1;
-      if (scrolledUp) {
+      if (didScroll && !isNearBottom) {
+        noteManualScrollInteraction();
         shouldAutoScrollRef.current = false;
       }
     } else if (shouldAutoScrollRef.current && !isNearBottom) {
       // Catch-all for keyboard/assistive scroll interactions.
-      const scrolledUp = currentScrollTop < lastKnownScrollTopRef.current - 1;
-      if (scrolledUp) {
+      if ((didScroll && hasRecentManualScroll) || scrollDelta < -1) {
         shouldAutoScrollRef.current = false;
       }
     }
 
     lastKnownScrollTopRef.current = currentScrollTop;
-  }, []);
+  }, [noteManualScrollInteraction]);
   const onMessagesWheel = useCallback(
     (event: React.WheelEvent<HTMLDivElement>) => {
+      const scrollContainer = messagesScrollRef.current;
+      if (!scrollContainer) {
+        return;
+      }
+      noteManualScrollInteraction();
       if (event.deltaY < 0) {
         pendingUserScrollUpIntentRef.current = true;
+        shouldAutoScrollRef.current = false;
+        return;
+      }
+      if (event.deltaY > 0 && !isScrollContainerNearBottom(scrollContainer)) {
+        shouldAutoScrollRef.current = false;
       }
     },
-    [],
+    [noteManualScrollInteraction],
   );
   const onMessagesPointerDown = useCallback(
     (_event: React.PointerEvent<HTMLDivElement>) => {
@@ -2173,10 +2203,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
       const previousTouchY = lastTouchClientYRef.current;
       if (previousTouchY !== null && touch.clientY > previousTouchY + 1) {
         pendingUserScrollUpIntentRef.current = true;
+        noteManualScrollInteraction();
+        shouldAutoScrollRef.current = false;
+      } else if (
+        previousTouchY !== null &&
+        touch.clientY < previousTouchY - 1 &&
+        messagesScrollRef.current &&
+        !isScrollContainerNearBottom(messagesScrollRef.current)
+      ) {
+        noteManualScrollInteraction();
+        shouldAutoScrollRef.current = false;
       }
       lastTouchClientYRef.current = touch.clientY;
     },
-    [],
+    [noteManualScrollInteraction],
   );
   const onMessagesTouchEnd = useCallback(
     (_event: React.TouchEvent<HTMLDivElement>) => {
@@ -4034,7 +4074,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       {/* Messages */}
       <div
         ref={setMessagesScrollContainerRef}
-        className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain px-3 py-3 sm:px-5 sm:py-4"
+        className="chat-messages-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain px-3 py-3 sm:px-5 sm:py-4"
         onScroll={onMessagesScroll}
         onClickCapture={onMessagesClickCapture}
         onWheel={onMessagesWheel}
@@ -4053,6 +4093,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
           activeTurnInProgress={isWorking || !latestTurnSettled}
           activeTurnStartedAt={activeWorkStartedAt}
           scrollContainer={messagesScrollElement}
+          shouldSuppressScrollAdjustment={
+            shouldSuppressTimelineScrollAdjustment
+          }
           timelineEntries={timelineEntries}
           completionDividerBeforeEntryId={completionDividerBeforeEntryId}
           completionSummary={completionSummary}
@@ -5677,6 +5720,7 @@ interface MessagesTimelineProps {
   activeTurnInProgress: boolean;
   activeTurnStartedAt: string | null;
   scrollContainer: HTMLDivElement | null;
+  shouldSuppressScrollAdjustment: () => boolean;
   timelineEntries: ReturnType<typeof deriveTimelineEntries>;
   completionDividerBeforeEntryId: string | null;
   completionSummary: string | null;
@@ -5739,6 +5783,7 @@ const MessagesTimeline = memo(function MessagesTimeline({
   activeTurnInProgress,
   activeTurnStartedAt,
   scrollContainer,
+  shouldSuppressScrollAdjustment,
   timelineEntries,
   completionDividerBeforeEntryId,
   completionSummary,
@@ -5932,6 +5977,9 @@ const MessagesTimeline = memo(function MessagesTimeline({
       _delta,
       instance,
     ) => {
+      if (shouldSuppressScrollAdjustment()) {
+        return false;
+      }
       const viewportHeight = instance.scrollRect?.height ?? 0;
       const scrollOffset = instance.scrollOffset ?? 0;
       const remainingDistance =
@@ -5941,7 +5989,7 @@ const MessagesTimeline = memo(function MessagesTimeline({
     return () => {
       rowVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = undefined;
     };
-  }, [rowVirtualizer]);
+  }, [rowVirtualizer, shouldSuppressScrollAdjustment]);
   const pendingMeasureFrameRef = useRef<number | null>(null);
   const onTimelineImageLoad = useCallback(() => {
     if (pendingMeasureFrameRef.current !== null) return;

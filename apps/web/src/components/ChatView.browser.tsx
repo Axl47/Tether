@@ -585,6 +585,18 @@ async function waitForComposerEditor(): Promise<HTMLElement> {
   );
 }
 
+async function waitForMessageScrollContainer(
+  scope: ParentNode = document,
+): Promise<HTMLDivElement> {
+  return waitForElement(
+    () =>
+      scope.querySelector<HTMLDivElement>(
+        "div.chat-messages-scroll.overflow-y-auto.overscroll-y-contain",
+      ),
+    "Unable to find ChatView message scroll container.",
+  );
+}
+
 async function waitForInteractionModeButton(
   expectedLabel: "Chat" | "Plan",
 ): Promise<HTMLButtonElement> {
@@ -625,13 +637,7 @@ async function measureUserRow(options: {
   const { host, targetMessageId } = options;
   const rowSelector = `[data-message-id="${targetMessageId}"][data-message-role="user"]`;
 
-  const scrollContainer = await waitForElement(
-    () =>
-      host.querySelector<HTMLDivElement>(
-        "div.overflow-y-auto.overscroll-y-contain",
-      ),
-    "Unable to find ChatView message scroll container.",
-  );
+  const scrollContainer = await waitForMessageScrollContainer(host);
 
   let row: HTMLElement | null = null;
   await vi.waitFor(
@@ -1108,6 +1114,20 @@ describe("ChatView timeline estimator parity (full app)", () => {
         },
         { timeout: 8_000, interval: 16 },
       );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("disables browser scroll anchoring on the desktop message scroller", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createRunningSnapshot(),
+    });
+
+    try {
+      const scrollContainer = await waitForMessageScrollContainer();
+      expect(getComputedStyle(scrollContainer).overflowAnchor).toBe("none");
     } finally {
       await mounted.cleanup();
     }
