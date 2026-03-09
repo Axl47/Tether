@@ -10,6 +10,28 @@
 
 When writing complex features or significant refactors, use an ExecPlan (as described in `.docs/PLANS.md`) from design to implementation. Write new plans to `.docs/exec/`. If inside Plan Mode, create the plan in a multiline markdown block, and write it after initiating implementation, so you can use the plan to guide your implementation and refer back to it as needed. If outside Plan Mode, you can write the plan directly and refer to it as needed.
 
+## Rule
+
+Always prefix shell commands with `rtk`.
+
+Examples:
+
+```bash
+rtk git status
+rtk cargo test
+rtk npm run build
+rtk pytest -q
+rtk proxy <cmd>     # Run raw command without filtering
+```
+
+## RTK Verification
+
+```bash
+rtk --version
+rtk gain
+which rtk
+```
+
 ## Project Snapshot
 
 Tether is a minimal web GUI for using code agents like Codex and Claude Code (coming soon).
