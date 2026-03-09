@@ -437,6 +437,64 @@ function findButtonsByText(text: string): HTMLButtonElement[] {
   );
 }
 
+function findQueuedMessageCardById(queuedMessageId: string): HTMLDivElement | null {
+  return document.querySelector<HTMLDivElement>(
+    `[data-testid="queued-message-card-${queuedMessageId}"]`,
+  );
+}
+
+function findQueuedMessageHandleById(
+  queuedMessageId: string,
+): HTMLDivElement | null {
+  return document.querySelector<HTMLDivElement>(
+    `[data-testid="queued-message-handle-${queuedMessageId}"]`,
+  );
+}
+
+async function dragQueuedMessageToTarget(
+  sourceQueuedMessageId: string,
+  targetQueuedMessageId: string,
+): Promise<void> {
+  const sourceHandle = await waitForElement(
+    () => findQueuedMessageHandleById(sourceQueuedMessageId),
+    "Unable to find queued message drag handle.",
+  );
+  const targetCard = await waitForElement(
+    () => findQueuedMessageCardById(targetQueuedMessageId),
+    "Unable to find queued message drop target.",
+  );
+  const dataTransfer = new DataTransfer();
+  sourceHandle.dispatchEvent(
+    new DragEvent("dragstart", {
+      bubbles: true,
+      cancelable: true,
+      dataTransfer,
+    }),
+  );
+  targetCard.dispatchEvent(
+    new DragEvent("dragover", {
+      bubbles: true,
+      cancelable: true,
+      dataTransfer,
+    }),
+  );
+  targetCard.dispatchEvent(
+    new DragEvent("drop", {
+      bubbles: true,
+      cancelable: true,
+      dataTransfer,
+    }),
+  );
+  sourceHandle.dispatchEvent(
+    new DragEvent("dragend", {
+      bubbles: true,
+      cancelable: true,
+      dataTransfer,
+    }),
+  );
+  await waitForLayout();
+}
+
 function resolveWsRpc(tag: string): unknown {
   if (tag === ORCHESTRATION_WS_METHODS.getSnapshot) {
     return fixture.snapshot;
@@ -1487,6 +1545,50 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await waitForLayout();
 
       expect(useComposerDraftStore.getState().queuedMessagesByThreadId[THREAD_ID]).toBeUndefined();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("reorders queued messages through drag and drop", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createRunningSnapshot(),
+    });
+
+    try {
+      await submitQueuedPrompt("First queued");
+      await submitQueuedPrompt("Second queued");
+      await submitQueuedPrompt("Third queued");
+
+      const initialQueue =
+        useComposerDraftStore.getState().queuedMessagesByThreadId[THREAD_ID] ?? [];
+      expect(initialQueue.map((entry) => entry.prompt)).toEqual([
+        "First queued",
+        "Second queued",
+        "Third queued",
+      ]);
+
+      const sourceQueuedMessageId = initialQueue[2]?.id;
+      const targetQueuedMessageId = initialQueue[0]?.id;
+      expect(sourceQueuedMessageId).toBeTruthy();
+      expect(targetQueuedMessageId).toBeTruthy();
+
+      await dragQueuedMessageToTarget(
+        sourceQueuedMessageId!,
+        targetQueuedMessageId!,
+      );
+
+      expect(
+        useComposerDraftStore.getState().queuedMessagesByThreadId[THREAD_ID]?.map(
+          (entry) => entry.prompt,
+        ),
+      ).toEqual(["Third queued", "First queued", "Second queued"]);
+
+      const queuedCards = Array.from(
+        document.querySelectorAll<HTMLDivElement>("[data-testid^='queued-message-card-']"),
+      );
+      expect(queuedCards[0]?.textContent).toContain("Third queued");
     } finally {
       await mounted.cleanup();
     }

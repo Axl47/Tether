@@ -551,6 +551,55 @@ describe("composerDraftStore queued messages", () => {
     ).toEqual(["queued-2", "queued-1"]);
   });
 
+  it("moves queued messages to an arbitrary position without affecting other threads", () => {
+    const store = useComposerDraftStore.getState();
+
+    for (const [id, prompt] of [
+      ["queued-1", "first"],
+      ["queued-2", "second"],
+      ["queued-3", "third"],
+    ] as const) {
+      store.enqueueQueuedMessage(threadId, {
+        id,
+        createdAt: "2026-03-08T00:00:00.000Z",
+        prompt,
+        images: [],
+        nonPersistedImageIds: [],
+        provider: "codex",
+        model: "gpt-5.4",
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        effort: null,
+        codexFastMode: false,
+      });
+    }
+
+    store.enqueueQueuedMessage(otherThreadId, {
+      id: "queued-other",
+      createdAt: "2026-03-08T00:00:03.000Z",
+      prompt: "other",
+      images: [],
+      nonPersistedImageIds: [],
+      provider: "codex",
+      model: "gpt-5.4",
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      effort: null,
+      codexFastMode: false,
+    });
+
+    store.moveQueuedMessage(threadId, 2, 0);
+
+    expect(
+      useComposerDraftStore.getState().queuedMessagesByThreadId[threadId]?.map((entry) => entry.id),
+    ).toEqual(["queued-3", "queued-1", "queued-2"]);
+    expect(
+      useComposerDraftStore
+        .getState()
+        .queuedMessagesByThreadId[otherThreadId]?.map((entry) => entry.id),
+    ).toEqual(["queued-other"]);
+  });
+
   it("loads a queued message into the composer and swaps existing sendable content back into place", () => {
     const store = useComposerDraftStore.getState();
     store.setPrompt(threadId, "composer draft");

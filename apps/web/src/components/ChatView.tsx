@@ -29,6 +29,7 @@ import {
   resolveModelSlugForProvider,
 } from "@t3tools/shared/model";
 import {
+  type DragEvent,
   memo,
   useCallback,
   useEffect,
@@ -151,6 +152,7 @@ import {
   DiffIcon,
   EllipsisIcon,
   FolderClosedIcon,
+  GripVerticalIcon,
   LoaderCircleIcon,
   LockIcon,
   LockOpenIcon,
@@ -718,6 +720,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const promoteQueuedMessage = useComposerDraftStore(
     (store) => store.promoteQueuedMessage,
   );
+  const moveQueuedMessage = useComposerDraftStore(
+    (store) => store.moveQueuedMessage,
+  );
   const loadQueuedMessageIntoComposer = useComposerDraftStore(
     (store) => store.loadQueuedMessageIntoComposer,
   );
@@ -747,6 +752,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const [steeringQueuedMessageId, setSteeringQueuedMessageId] = useState<
     string | null
   >(null);
+  const [draggedQueuedMessageId, setDraggedQueuedMessageId] = useState<
+    string | null
+  >(null);
+  const [queuedDropTargetId, setQueuedDropTargetId] = useState<string | null>(
+    null,
+  );
   const optimisticUserMessagesRef = useRef(optimisticUserMessages);
   optimisticUserMessagesRef.current = optimisticUserMessages;
   const [localDraftErrorsByThreadId, setLocalDraftErrorsByThreadId] = useState<
@@ -2899,6 +2910,74 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [activeThread, phase, promoteQueuedMessage, setStoreThreadError],
   );
 
+  const clearQueuedDragState = useCallback(() => {
+    setDraggedQueuedMessageId(null);
+    setQueuedDropTargetId(null);
+  }, []);
+
+  const handleQueuedMessageDragStart = useCallback(
+    (event: DragEvent<HTMLElement>, queuedMessageId: string) => {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", queuedMessageId);
+      setDraggedQueuedMessageId(queuedMessageId);
+      setQueuedDropTargetId(null);
+    },
+    [],
+  );
+
+  const handleQueuedMessageDragOver = useCallback(
+    (event: DragEvent<HTMLElement>, queuedMessageId: string) => {
+      if (
+        draggedQueuedMessageId === null ||
+        draggedQueuedMessageId === queuedMessageId
+      ) {
+        return;
+      }
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      if (queuedDropTargetId !== queuedMessageId) {
+        setQueuedDropTargetId(queuedMessageId);
+      }
+    },
+    [draggedQueuedMessageId, queuedDropTargetId],
+  );
+
+  const handleQueuedMessageDrop = useCallback(
+    (event: DragEvent<HTMLElement>, targetQueuedMessageId: string) => {
+      event.preventDefault();
+      if (!activeThread) {
+        clearQueuedDragState();
+        return;
+      }
+      const sourceQueuedMessageId =
+        draggedQueuedMessageId ?? event.dataTransfer.getData("text/plain");
+      if (
+        sourceQueuedMessageId.length === 0 ||
+        sourceQueuedMessageId === targetQueuedMessageId
+      ) {
+        clearQueuedDragState();
+        return;
+      }
+      const fromIndex = queuedMessages.findIndex(
+        (queuedMessage) => queuedMessage.id === sourceQueuedMessageId,
+      );
+      const toIndex = queuedMessages.findIndex(
+        (queuedMessage) => queuedMessage.id === targetQueuedMessageId,
+      );
+      if (fromIndex >= 0 && toIndex >= 0 && fromIndex !== toIndex) {
+        moveQueuedMessage(activeThread.id, fromIndex, toIndex);
+      }
+      clearQueuedDragState();
+    },
+    [
+      activeThread,
+      clearQueuedDragState,
+      draggedQueuedMessageId,
+      moveQueuedMessage,
+      queuedMessages,
+    ],
+  );
+
   const onSend = async (e?: { preventDefault: () => void }) => {
     e?.preventDefault();
     const api = readNativeApi();
@@ -4207,24 +4286,46 @@ export default function ChatView({ threadId }: ChatViewProps) {
                     return (
                       <div
                         key={queuedMessage.id}
-                        className="flex items-start gap-2 rounded-2xl border border-border/75 bg-muted/18 px-3 py-2"
+                        data-testid={`queued-message-card-${queuedMessage.id}`}
+                        onDragOver={(event) =>
+                          handleQueuedMessageDragOver(event, queuedMessage.id)
+                        }
+                        onDrop={(event) =>
+                          handleQueuedMessageDrop(event, queuedMessage.id)
+                        }
+                        onDragLeave={() => {
+                          if (queuedDropTargetId === queuedMessage.id) {
+                            setQueuedDropTargetId(null);
+                          }
+                        }}
+                        className={cn(
+                          "flex items-start gap-2 rounded-2xl border border-border/75 bg-muted/18 px-3 py-2 transition-colors",
+                          queuedDropTargetId === queuedMessage.id &&
+                            draggedQueuedMessageId !== queuedMessage.id
+                            ? "border-foreground/35 bg-muted/30"
+                            : null,
+                        )}
                       >
-                        <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-background/80 text-muted-foreground">
-                          <svg
-                            width="14"
-                            height="14"
-                            viewBox="0 0 14 14"
-                            fill="none"
+                        <div
+                          data-testid={`queued-message-handle-${queuedMessage.id}`}
+                          draggable
+                          onDragStart={(event) =>
+                            handleQueuedMessageDragStart(event, queuedMessage.id)
+                          }
+                          onDragEnd={clearQueuedDragState}
+                          aria-label="Drag to reorder queued message"
+                          title="Drag to reorder queued message"
+                          className={cn(
+                            "mt-0.5 flex size-7 shrink-0 cursor-grab items-center justify-center rounded-full bg-background/80 text-muted-foreground active:cursor-grabbing",
+                            draggedQueuedMessageId === queuedMessage.id
+                              ? "bg-background text-foreground/80"
+                              : null,
+                          )}
+                        >
+                          <GripVerticalIcon
+                            className="size-3.5"
                             aria-hidden="true"
-                          >
-                            <path
-                              d="M3 4.25H8.75C10.8211 4.25 12.5 5.92893 12.5 8V9.75M12.5 9.75L10.5 7.75M12.5 9.75L10.5 11.75"
-                              stroke="currentColor"
-                              strokeWidth="1.4"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            />
-                          </svg>
+                          />
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">

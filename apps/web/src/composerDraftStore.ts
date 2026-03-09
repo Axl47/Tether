@@ -201,6 +201,11 @@ interface ComposerDraftStoreState {
   ) => void;
   removeQueuedMessage: (threadId: ThreadId, queuedMessageId: string) => void;
   promoteQueuedMessage: (threadId: ThreadId, queuedMessageId: string) => void;
+  moveQueuedMessage: (
+    threadId: ThreadId,
+    fromIndex: number,
+    toIndex: number,
+  ) => void;
   consumeQueuedMessage: (threadId: ThreadId, queuedMessageId: string) => void;
   loadQueuedMessageIntoComposer: (
     threadId: ThreadId,
@@ -1557,6 +1562,43 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             ...existingQueue.slice(0, nextIndex),
             ...existingQueue.slice(nextIndex + 1),
           ];
+          return {
+            queuedMessagesByThreadId: {
+              ...state.queuedMessagesByThreadId,
+              [threadId]: nextQueue,
+            },
+          };
+        });
+      },
+      moveQueuedMessage: (threadId, fromIndex, toIndex) => {
+        if (
+          threadId.length === 0 ||
+          !Number.isInteger(fromIndex) ||
+          !Number.isInteger(toIndex)
+        ) {
+          return;
+        }
+        set((state) => {
+          const existingQueue = state.queuedMessagesByThreadId[threadId];
+          if (!existingQueue || existingQueue.length < 2) {
+            return state;
+          }
+          if (
+            fromIndex < 0 ||
+            toIndex < 0 ||
+            fromIndex >= existingQueue.length ||
+            toIndex >= existingQueue.length ||
+            fromIndex === toIndex
+          ) {
+            return state;
+          }
+          const queuedMessage = existingQueue[fromIndex];
+          if (!queuedMessage) {
+            return state;
+          }
+          const nextQueue = [...existingQueue];
+          nextQueue.splice(fromIndex, 1);
+          nextQueue.splice(toIndex, 0, queuedMessage);
           return {
             queuedMessagesByThreadId: {
               ...state.queuedMessagesByThreadId,

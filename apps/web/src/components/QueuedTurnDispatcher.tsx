@@ -32,13 +32,6 @@ export function QueuedTurnDispatcher() {
     for (const thread of threads) {
       const queue = queuedMessagesByThreadId[thread.id];
       const queueHead = queue?.[0];
-      if (!queueHead) {
-        failedDispatchSignatureByThreadIdRef.current.delete(thread.id);
-        queuedTurnCycleStateByThreadIdRef.current.delete(thread.id);
-        setDispatchingQueuedMessage(thread.id, null);
-        continue;
-      }
-
       const canDispatch = canAutoDispatchQueuedTurn({
         thread,
         isConnecting: false,
@@ -47,6 +40,29 @@ export function QueuedTurnDispatcher() {
       });
       const cycleState =
         queuedTurnCycleStateByThreadIdRef.current.get(thread.id) ?? null;
+      if (!queueHead) {
+        failedDispatchSignatureByThreadIdRef.current.delete(thread.id);
+        if (cycleState === "awaiting-busy") {
+          if (!canDispatch) {
+            queuedTurnCycleStateByThreadIdRef.current.set(
+              thread.id,
+              "awaiting-idle",
+            );
+            setDispatchingQueuedMessage(thread.id, null);
+          }
+          continue;
+        }
+        if (cycleState === "awaiting-idle") {
+          if (canDispatch) {
+            queuedTurnCycleStateByThreadIdRef.current.delete(thread.id);
+          }
+          continue;
+        }
+        queuedTurnCycleStateByThreadIdRef.current.delete(thread.id);
+        setDispatchingQueuedMessage(thread.id, null);
+        continue;
+      }
+
       if (cycleState === "awaiting-busy") {
         if (!canDispatch) {
           queuedTurnCycleStateByThreadIdRef.current.set(
