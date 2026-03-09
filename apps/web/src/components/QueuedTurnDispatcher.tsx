@@ -113,7 +113,8 @@ export function QueuedTurnDispatcher() {
         snapshot: queueHead,
         settings: {
           enableAssistantStreaming: settings.enableAssistantStreaming,
-          codexServiceTier: settings.codexServiceTier,
+          codexBinaryPath: settings.codexBinaryPath,
+          codexHomePath: settings.codexHomePath,
         },
         setThreadError,
       })
@@ -149,7 +150,8 @@ export function QueuedTurnDispatcher() {
     queuedMessagesByThreadId,
     setDispatchingQueuedMessage,
     setThreadError,
-    settings.codexServiceTier,
+    settings.codexBinaryPath,
+    settings.codexHomePath,
     settings.enableAssistantStreaming,
     threads,
   ]);
