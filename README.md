@@ -7,22 +7,6 @@ Tether is a minimal web GUI for coding agents. Currently Codex-first, with Claud
 > [!WARNING]
 > You need to have [Codex CLI](https://github.com/openai/codex) installed and authorized for Tether to work.
 
-```bash
-npx t3
-```
+Just install the desktop app. So much better.
 
-You can also just install the desktop app. It's cooler.
-
-Install the [desktop app from the Releases page](https://github.com/pingdotgg/tether/releases)
-
-## Some notes
-
-We are very very early in this project. Expect bugs.
-
-We are not accepting contributions yet.
-
-## If you REALLY want to contribute still.... read this first
-
-Read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening an issue or PR.
-
-Need support? Join the [Discord](https://discord.gg/jn4EGJjrvv).
+Clone the repo and run `bun run dev:desktop`
