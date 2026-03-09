@@ -70,7 +70,8 @@ describe("getAppModelOptions", () => {
     const options = getAppModelOptions("gemini", []);
 
     expect(options.map((option) => option.slug)).toContain("gemini-2.5-flash-image");
-    expect(options.map((option) => option.slug)).toContain("gemini-3-pro-image-preview");
+    expect(options.map((option) => option.slug)).toContain("gemini-3-pro-preview");
+    expect(options.map((option) => option.slug)).not.toContain("gemini-3-pro-image-preview");
   });
 });
 
@@ -83,6 +84,12 @@ describe("resolveAppModelSelection", () => {
 
   it("falls back to the provider default when no model is selected", () => {
     expect(resolveAppModelSelection("codex", [], "")).toBe("gpt-5.4");
+  });
+
+  it("upgrades a stale Gemini image preview slug to the supported preview model", () => {
+    expect(resolveAppModelSelection("gemini", [], "gemini-3-pro-image-preview")).toBe(
+      "gemini-3-pro-preview",
+    );
   });
 });
 

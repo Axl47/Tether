@@ -381,7 +381,7 @@ describe("GeminiCliManager", () => {
     const manager = new GeminiCliManager({
       prewarmSessions: false,
       runtimeFactory: async (_model, handlers) => ({
-        model: "gemini-3-pro-image-preview",
+        model: "gemini-3-pro-preview",
         initialize: async () => undefined,
         newSession: vi.fn(async () => ({
           sessionId: "session-image-output",
@@ -418,7 +418,7 @@ describe("GeminiCliManager", () => {
 
     manager.startSession({
       threadId: "thread-image-output",
-      model: "gemini-3-pro-image-preview",
+      model: "gemini-3-pro-preview",
       cwd: process.cwd(),
     });
 

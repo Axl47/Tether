@@ -19,8 +19,11 @@ describe("normalizeModelSlug", () => {
 
   it("maps Nano Banana Gemini aliases to canonical slugs", () => {
     expect(normalizeModelSlug("nano banana", "gemini")).toBe("gemini-2.5-flash-image");
-    expect(normalizeModelSlug("Nano Banana 2", "gemini")).toBe("gemini-3-pro-image-preview");
-    expect(normalizeModelSlug("nano banana 2", "gemini")).toBe("gemini-3-pro-image-preview");
+    expect(normalizeModelSlug("Nano Banana 2", "gemini")).toBe("gemini-3-pro-preview");
+    expect(normalizeModelSlug("nano banana 2", "gemini")).toBe("gemini-3-pro-preview");
+    expect(normalizeModelSlug("gemini-3-pro-image-preview", "gemini")).toBe(
+      "gemini-3-pro-preview",
+    );
   });
 
   it("returns null for empty or missing values", () => {
