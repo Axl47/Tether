@@ -3,6 +3,7 @@
 ## Task Completion Requirements
 
 - Both `bun lint` and `bun typecheck` must pass before considering tasks completed.
+- In this repo environment, prefer `PATH="$HOME/.bun/bin:$PATH" ~/.bun/bin/bun -b lint` and `PATH="$HOME/.bun/bin:$PATH" ~/.bun/bin/bun typecheck` to avoid PATH/wrapper issues with the default `bun` invocation.
 - NEVER run `bun test`. Always use `bun run test` (runs Vitest).
 
 ## ExecPlans

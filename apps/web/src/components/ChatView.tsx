@@ -230,9 +230,12 @@ import {
   type DraftThreadEnvMode,
   type DraftThreadState,
   type PersistedComposerImageAttachment,
+  type QueuedComposerMessageState,
   useComposerDraftStore,
   useComposerThreadDraft,
 } from "../composerDraftStore";
+import { useQueuedTurnRuntimeStore } from "../queuedTurnRuntimeStore";
+import { queuedMessagePreview } from "../queuedTurns";
 import {
   selectThreadTerminalState,
   useTerminalStateStore,
@@ -288,10 +291,12 @@ const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
 const EMPTY_AVAILABLE_EDITORS: EditorId[] = [];
 const EMPTY_PROVIDER_STATUSES: ServerProviderStatus[] = [];
+const EMPTY_QUEUED_MESSAGES: QueuedComposerMessageState[] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<
   string,
   PendingUserInputDraftAnswer
 > = {};
+Object.freeze(EMPTY_QUEUED_MESSAGES);
 const COMPOSER_PATH_QUERY_DEBOUNCE_MS = 120;
 const SCRIPT_TERMINAL_COLS = 120;
 const SCRIPT_TERMINAL_ROWS = 30;
@@ -663,6 +668,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const prompt = composerDraft.prompt;
   const composerImages = composerDraft.images;
   const nonPersistedComposerImageIds = composerDraft.nonPersistedImageIds;
+  const persistedComposerAttachments = composerDraft.persistedAttachments;
   const setComposerDraftPrompt = useComposerDraftStore(
     (store) => store.setPrompt,
   );
@@ -702,6 +708,18 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const clearComposerDraftContent = useComposerDraftStore(
     (store) => store.clearComposerContent,
   );
+  const enqueueQueuedMessage = useComposerDraftStore(
+    (store) => store.enqueueQueuedMessage,
+  );
+  const removeQueuedMessage = useComposerDraftStore(
+    (store) => store.removeQueuedMessage,
+  );
+  const promoteQueuedMessage = useComposerDraftStore(
+    (store) => store.promoteQueuedMessage,
+  );
+  const loadQueuedMessageIntoComposer = useComposerDraftStore(
+    (store) => store.loadQueuedMessageIntoComposer,
+  );
   const clearDraftThread = useComposerDraftStore(
     (store) => store.clearDraftThread,
   );
@@ -711,6 +729,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const draftThread = useComposerDraftStore(
     (store) => store.draftThreadsByThreadId[threadId] ?? null,
   );
+  const queuedMessages =
+    useComposerDraftStore((store) => store.queuedMessagesByThreadId[threadId]) ??
+    EMPTY_QUEUED_MESSAGES;
+  const dispatchingQueuedMessageId = useQueuedTurnRuntimeStore(
+    (store) => store.dispatchingQueuedMessageIdByThreadId[threadId] ?? null,
+  );
   const promptRef = useRef(prompt);
   const [isDragOverComposer, setIsDragOverComposer] = useState(false);
   const [expandedImage, setExpandedImage] =
@@ -718,6 +742,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<
     ChatMessage[]
   >([]);
+  const [steeringQueuedMessageId, setSteeringQueuedMessageId] = useState<
+    string | null
+  >(null);
   const optimisticUserMessagesRef = useRef(optimisticUserMessages);
   optimisticUserMessagesRef.current = optimisticUserMessages;
   const [localDraftErrorsByThreadId, setLocalDraftErrorsByThreadId] = useState<
@@ -968,6 +995,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
     selectedProvider,
     supportsReasoningEffort,
   ]);
+  const composerHasSendableContent =
+    prompt.trim().length > 0 || composerImages.length > 0;
   const selectedModelForPicker = selectedModel;
   const modelOptionsByProvider = useMemo(
     () => getCustomModelOptionsByProvider(settings),
@@ -1508,6 +1537,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const nonPersistedComposerImageIdSet = useMemo(
     () => new Set(nonPersistedComposerImageIds),
     [nonPersistedComposerImageIds],
+  );
+  const queuedNonPersistedImageIdSetByQueuedMessageId = useMemo(
+    () =>
+      new Map(
+        queuedMessages.map((queuedMessage) => [
+          queuedMessage.id,
+          new Set(queuedMessage.nonPersistedImageIds),
+        ]),
+      ),
+    [queuedMessages],
   );
   const keybindings = serverConfigQuery.data?.keybindings ?? EMPTY_KEYBINDINGS;
   const availableEditors =
@@ -2474,6 +2513,27 @@ export default function ChatView({ threadId }: ChatViewProps) {
   ]);
 
   useEffect(() => {
+    if (!steeringQueuedMessageId) {
+      return;
+    }
+    const steeringStillQueued = queuedMessages.some(
+      (queuedMessage) => queuedMessage.id === steeringQueuedMessageId,
+    );
+    if (
+      !steeringStillQueued ||
+      phase !== "running" ||
+      dispatchingQueuedMessageId === steeringQueuedMessageId
+    ) {
+      setSteeringQueuedMessageId(null);
+    }
+  }, [
+    dispatchingQueuedMessageId,
+    phase,
+    queuedMessages,
+    steeringQueuedMessageId,
+  ]);
+
+  useEffect(() => {
     if (!activeThreadId) return;
     const previous = terminalOpenByThreadRef.current[activeThreadId] ?? false;
     const current = Boolean(terminalState.terminalOpen);
@@ -2742,6 +2802,58 @@ export default function ChatView({ threadId }: ChatViewProps) {
     ],
   );
 
+  const handleQueueEdit = useCallback(
+    (queuedMessageId: string) => {
+      if (!activeThread) {
+        return;
+      }
+      loadQueuedMessageIntoComposer(activeThread.id, queuedMessageId, {
+        swapComposerContent: composerHasSendableContent,
+      });
+      setComposerHighlightedItemId(null);
+      setComposerTrigger(null);
+      scheduleComposerFocus();
+    },
+    [
+      activeThread,
+      composerHasSendableContent,
+      loadQueuedMessageIntoComposer,
+      scheduleComposerFocus,
+    ],
+  );
+
+  const handleSteerQueuedMessage = useCallback(
+    async (queuedMessageId: string) => {
+      if (!activeThread) {
+        return;
+      }
+      promoteQueuedMessage(activeThread.id, queuedMessageId);
+      if (phase !== "running") {
+        return;
+      }
+      const api = readNativeApi();
+      if (!api) {
+        return;
+      }
+      setSteeringQueuedMessageId(queuedMessageId);
+      try {
+        await api.orchestration.dispatchCommand({
+          type: "thread.turn.interrupt",
+          commandId: newCommandId(),
+          threadId: activeThread.id,
+          createdAt: new Date().toISOString(),
+        });
+      } catch (error) {
+        setSteeringQueuedMessageId(null);
+        setStoreThreadError(
+          activeThread.id,
+          error instanceof Error ? error.message : "Failed to steer queued follow-up.",
+        );
+      }
+    },
+    [activeThread, phase, promoteQueuedMessage, setStoreThreadError],
+  );
+
   const onSend = async (e?: { preventDefault: () => void }) => {
     e?.preventDefault();
     const api = readNativeApi();
@@ -2758,22 +2870,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
       return;
     }
     const trimmed = prompt.trim();
-    if (showPlanFollowUpPrompt && activeProposedPlan) {
-      const followUp = resolvePlanFollowUpSubmission({
-        draftText: trimmed,
-        planMarkdown: activeProposedPlan.planMarkdown,
-      });
-      promptRef.current = "";
-      clearComposerDraftContent(activeThread.id);
-      setComposerHighlightedItemId(null);
-      setComposerCursor(0);
-      setComposerTrigger(null);
-      await onSubmitPlanFollowUp({
-        text: followUp.text,
-        interactionMode: followUp.interactionMode,
-      });
-      return;
-    }
     const standaloneSlashCommand =
       composerImages.length === 0
         ? parseStandaloneComposerSlashCommand(trimmed)
@@ -2787,7 +2883,58 @@ export default function ChatView({ threadId }: ChatViewProps) {
       setComposerTrigger(null);
       return;
     }
-    if (!trimmed && composerImages.length === 0) return;
+    const resolvedSubmission =
+      showPlanFollowUpPrompt && activeProposedPlan
+        ? resolvePlanFollowUpSubmission({
+            draftText: trimmed,
+            planMarkdown: activeProposedPlan.planMarkdown,
+          })
+        : null;
+    const sendText = resolvedSubmission?.text ?? trimmed;
+    const sendInteractionMode =
+      resolvedSubmission?.interactionMode ?? interactionMode;
+    const trimmedSendText = sendText.trim();
+    if (!trimmedSendText && composerImages.length === 0) return;
+    if (phase === "running" && isServerThread) {
+      enqueueQueuedMessage(activeThread.id, {
+        id: crypto.randomUUID(),
+        createdAt: new Date().toISOString(),
+        prompt: trimmedSendText,
+        images: [...composerImages],
+        nonPersistedImageIds: [...nonPersistedComposerImageIds],
+        persistedAttachments: [...persistedComposerAttachments],
+        provider: selectedProvider,
+        model: selectedModel,
+        runtimeMode,
+        interactionMode: sendInteractionMode,
+        effort: selectedEffort,
+        codexFastMode: selectedProvider === "codex" && selectedCodexFastModeEnabled,
+      });
+      promptRef.current = "";
+      clearComposerDraftContent(activeThread.id);
+      setComposerHighlightedItemId(null);
+      setComposerCursor(0);
+      setComposerTrigger(null);
+      scheduleComposerFocus();
+      toastManager.add({
+        type: "info",
+        title: "Follow-up queued",
+        description: "This message will send when the current run is ready.",
+      });
+      return;
+    }
+    if (resolvedSubmission) {
+      promptRef.current = "";
+      clearComposerDraftContent(activeThread.id);
+      setComposerHighlightedItemId(null);
+      setComposerCursor(0);
+      setComposerTrigger(null);
+      await onSubmitPlanFollowUp({
+        text: trimmedSendText,
+        interactionMode: sendInteractionMode,
+      });
+      return;
+    }
     if (!activeProject) return;
     const threadIdForSend = activeThread.id;
     const isFirstMessage =
@@ -2839,7 +2986,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       {
         id: messageIdForSend,
         role: "user",
-        text: trimmed,
+        text: trimmedSendText,
         ...(optimisticAttachments.length > 0
           ? { attachments: optimisticAttachments }
           : {}),
@@ -2985,7 +3132,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         message: {
           messageId: messageIdForSend,
           role: "user",
-          text: trimmed || IMAGE_ONLY_BOOTSTRAP_PROMPT,
+          text: trimmedSendText || IMAGE_ONLY_BOOTSTRAP_PROMPT,
           attachments: turnAttachments,
         },
         model: selectedModel || undefined,
@@ -3032,13 +3179,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
           );
           return next.length === existing.length ? existing : next;
         });
-        promptRef.current = trimmed;
-        setPrompt(trimmed);
-        setComposerCursor(trimmed.length);
+        promptRef.current = trimmedSendText;
+        setPrompt(trimmedSendText);
+        setComposerCursor(trimmedSendText.length);
         addComposerImagesToDraft(
           composerImagesSnapshot.map(cloneComposerImageForRetry),
         );
-        setComposerTrigger(detectComposerTrigger(trimmed, trimmed.length));
+        setComposerTrigger(
+          detectComposerTrigger(trimmedSendText, trimmedSendText.length),
+        );
       }
       setThreadError(
         threadIdForSend,
@@ -3997,6 +4146,152 @@ export default function ChatView({ threadId }: ChatViewProps) {
                 </div>
               )}
 
+              {queuedMessages.length > 0 && (
+                <div className="mb-3 space-y-2">
+                  {queuedMessages.map((queuedMessage, index) => {
+                    const isDispatching =
+                      dispatchingQueuedMessageId === queuedMessage.id;
+                    const isSteering = steeringQueuedMessageId === queuedMessage.id;
+                    const hasNonPersistedImages =
+                      (queuedNonPersistedImageIdSetByQueuedMessageId.get(
+                        queuedMessage.id,
+                      )?.size ?? 0) > 0;
+                    return (
+                      <div
+                        key={queuedMessage.id}
+                        className="flex items-start gap-2 rounded-2xl border border-border/75 bg-muted/18 px-3 py-2"
+                      >
+                        <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-background/80 text-muted-foreground">
+                          <svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 14 14"
+                            fill="none"
+                            aria-hidden="true"
+                          >
+                            <path
+                              d="M3 4.25H8.75C10.8211 4.25 12.5 5.92893 12.5 8V9.75M12.5 9.75L10.5 7.75M12.5 9.75L10.5 11.75"
+                              stroke="currentColor"
+                              strokeWidth="1.4"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground/75 uppercase">
+                              {index === 0 ? "Queued next" : "Queued"}
+                            </span>
+                            {hasNonPersistedImages ? (
+                              <Tooltip>
+                                <TooltipTrigger
+                                  render={
+                                    <span
+                                      role="img"
+                                      aria-label="Queued attachment may not persist"
+                                      className="inline-flex items-center justify-center rounded bg-background/85 p-0.5 text-amber-600"
+                                    >
+                                      <CircleAlertIcon className="size-3" />
+                                    </span>
+                                  }
+                                />
+                                <TooltipPopup
+                                  side="top"
+                                  className="max-w-64 whitespace-normal leading-tight"
+                                >
+                                  Queued attachment could not be saved locally and
+                                  may be lost on reload.
+                                </TooltipPopup>
+                              </Tooltip>
+                            ) : null}
+                          </div>
+                          <p className="mt-0.5 truncate text-sm font-medium text-foreground/95">
+                            {queuedMessagePreview(queuedMessage)}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            className="h-8 rounded-full px-3"
+                            disabled={isDispatching || isSteering}
+                            onClick={() =>
+                              void handleSteerQueuedMessage(queuedMessage.id)
+                            }
+                          >
+                            {isSteering ? "Steering..." : "Steer"}
+                          </Button>
+                          <Button
+                            type="button"
+                            size="icon-xs"
+                            variant="ghost"
+                            className="rounded-full"
+                            disabled={isDispatching}
+                            onClick={() =>
+                              handleQueueEdit(queuedMessage.id)
+                            }
+                            aria-label="Edit queued message"
+                            title="Edit queued message"
+                          >
+                            <svg
+                              width="14"
+                              height="14"
+                              viewBox="0 0 14 14"
+                              fill="none"
+                              aria-hidden="true"
+                            >
+                              <path
+                                d="M9.916 2.334a1.65 1.65 0 1 1 2.333 2.333l-6.5 6.5-2.916.583.583-2.916 6.5-6.5Z"
+                                stroke="currentColor"
+                                strokeWidth="1.2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                              <path
+                                d="M8.75 3.5 11.083 5.833"
+                                stroke="currentColor"
+                                strokeWidth="1.2"
+                                strokeLinecap="round"
+                              />
+                            </svg>
+                          </Button>
+                          <Button
+                            type="button"
+                            size="icon-xs"
+                            variant="ghost"
+                            className="rounded-full"
+                            disabled={isDispatching}
+                            onClick={() =>
+                              removeQueuedMessage(activeThread.id, queuedMessage.id)
+                            }
+                            aria-label="Delete queued message"
+                            title="Delete queued message"
+                          >
+                            <svg
+                              width="14"
+                              height="14"
+                              viewBox="0 0 14 14"
+                              fill="none"
+                              aria-hidden="true"
+                            >
+                              <path
+                                d="M2.917 3.5h8.166M5.25 3.5V2.333h3.5V3.5M4.083 3.5v7.584c0 .46.373.833.834.833h4.166a.833.833 0 0 0 .834-.833V3.5M5.833 5.25v4.667M8.167 5.25v4.667"
+                                stroke="currentColor"
+                                strokeWidth="1.2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
               {!isComposerApprovalState &&
                 pendingUserInputs.length === 0 &&
                 composerImages.length > 0 && (
@@ -4085,6 +4380,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
                       "Resolve this approval request to continue")
                     : activePendingProgress
                       ? "Type your own answer, or leave this blank to use the selected option"
+                      : phase === "running"
+                        ? "Ask for follow-up changes"
                       : showPlanFollowUpPrompt && activeProposedPlan
                         ? "Add feedback to refine the plan, or leave this blank to implement it"
                         : phase === "disconnected"

@@ -305,6 +305,138 @@ function createDraftOnlySnapshot(): OrchestrationReadModel {
   };
 }
 
+function createRunningSnapshot(): OrchestrationReadModel {
+  const snapshot = createSnapshotForTargetUser({
+    targetMessageId: "msg-user-running-target" as MessageId,
+    targetText: "running target",
+  });
+  const [thread] = snapshot.threads;
+  if (!thread) {
+    return snapshot;
+  }
+  return {
+    ...snapshot,
+    threads: [
+      {
+        ...thread,
+        session: {
+          threadId: THREAD_ID,
+          status: "running",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: "turn-running" as never,
+          lastError: null,
+          updatedAt: NOW_ISO,
+        },
+      },
+    ],
+  };
+}
+
+function setThreadState(
+  updater: (thread: OrchestrationReadModel["threads"][number]) => OrchestrationReadModel["threads"][number],
+): void {
+  const thread = fixture.snapshot.threads.find((entry) => entry.id === THREAD_ID);
+  if (!thread) {
+    return;
+  }
+  const nextThread = updater(thread);
+  fixture.snapshot = {
+    ...fixture.snapshot,
+    threads: fixture.snapshot.threads.map((entry) =>
+      entry.id === THREAD_ID ? nextThread : entry,
+    ),
+  };
+  useStore.setState((state) => ({
+    ...state,
+    threads: state.threads.map((entry) =>
+      entry.id === THREAD_ID
+        ? ({
+            ...entry,
+            model: nextThread.model,
+            runtimeMode: nextThread.runtimeMode,
+            interactionMode: nextThread.interactionMode,
+            updatedAt: nextThread.updatedAt,
+            activities: [...nextThread.activities],
+            session: nextThread.session
+              ? {
+                  provider: "codex",
+                  status:
+                    nextThread.session.status === "running"
+                      ? "running"
+                      : nextThread.session.status === "starting"
+                        ? "connecting"
+                        : "ready",
+                  orchestrationStatus: nextThread.session.status,
+                  activeTurnId: nextThread.session.activeTurnId ?? undefined,
+                  createdAt: nextThread.createdAt,
+                  updatedAt: nextThread.session.updatedAt,
+                }
+              : null,
+          } satisfies typeof entry)
+        : entry,
+    ),
+  }));
+}
+
+function dispatchCommand(request: WsRequestEnvelope["body"]): Record<string, unknown> | null {
+  if (request._tag !== ORCHESTRATION_WS_METHODS.dispatchCommand) {
+    return null;
+  }
+  const command = request.command;
+  return command && typeof command === "object"
+    ? (command as Record<string, unknown>)
+    : null;
+}
+
+function dispatchCommandMessageText(
+  request: WsRequestEnvelope["body"] | undefined,
+): string | null {
+  if (!request) {
+    return null;
+  }
+  const command = dispatchCommand(request);
+  const message = command?.message;
+  if (!message || typeof message !== "object") {
+    return null;
+  }
+  return typeof (message as Record<string, unknown>).text === "string"
+    ? ((message as Record<string, unknown>).text as string)
+    : null;
+}
+
+async function submitQueuedPrompt(prompt: string): Promise<void> {
+  useComposerDraftStore.getState().setPrompt(THREAD_ID, prompt);
+  await waitForLayout();
+  const form = await waitForElement(
+    () => document.querySelector("form"),
+    "Unable to find composer form.",
+  );
+  form.dispatchEvent(
+    new Event("submit", {
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+  await waitForLayout();
+}
+
+function findButtonByLabel(label: string): HTMLButtonElement | null {
+  return (
+    Array.from(document.querySelectorAll("button")).find(
+      (button) => button.getAttribute("aria-label") === label,
+    ) as HTMLButtonElement | null
+  );
+}
+
+function findButtonsByText(text: string): HTMLButtonElement[] {
+  return Array.from(document.querySelectorAll("button")).filter(
+    (button): button is HTMLButtonElement =>
+      button instanceof HTMLButtonElement &&
+      button.textContent?.trim() === text,
+  );
+}
+
 function resolveWsRpc(tag: string): unknown {
   if (tag === ORCHESTRATION_WS_METHODS.getSnapshot) {
     return fixture.snapshot;
@@ -657,6 +789,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     wsRequests.length = 0;
     useComposerDraftStore.setState({
       draftsByThreadId: {},
+      queuedMessagesByThreadId: {},
       draftThreadsByThreadId: {},
       projectDraftThreadIdByProjectId: {},
     });
@@ -975,6 +1108,225 @@ describe("ChatView timeline estimator parity (full app)", () => {
         },
         { timeout: 8_000, interval: 16 },
       );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("queues a follow-up while the thread is running and auto-dispatches it after the thread becomes idle", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createRunningSnapshot(),
+    });
+
+    try {
+      await submitQueuedPrompt("Queue this follow-up");
+
+      expect(
+        useComposerDraftStore.getState().queuedMessagesByThreadId[THREAD_ID]?.map((entry) => entry.prompt),
+      ).toEqual(["Queue this follow-up"]);
+      expect(document.body.textContent).toContain("Queue this follow-up");
+      expect(
+        wsRequests.some(
+          (request) => dispatchCommand(request)?.type === "thread.turn.start",
+        ),
+      ).toBe(false);
+
+      setThreadState((thread) => ({
+        ...thread,
+        updatedAt: isoAt(90),
+        activities: [],
+        session: {
+          threadId: THREAD_ID,
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: isoAt(90),
+        },
+      }));
+
+      await vi.waitFor(
+        () => {
+          const startRequest = wsRequests.find(
+            (request) => dispatchCommand(request)?.type === "thread.turn.start",
+          );
+          expect(dispatchCommandMessageText(startRequest)).toBe(
+            "Queue this follow-up",
+          );
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("does not auto-dispatch queued follow-ups while an approval is pending", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createRunningSnapshot(),
+    });
+
+    try {
+      await submitQueuedPrompt("Wait behind approval");
+
+      setThreadState((thread) => ({
+        ...thread,
+        updatedAt: isoAt(120),
+        activities: [
+          {
+            id: "activity-approval-1",
+            turnId: null,
+            tone: "approval",
+            kind: "approval.requested",
+            summary: "Approval requested",
+            createdAt: isoAt(119),
+            payload: {
+              requestId: "req-approval-1",
+              requestType: "command_execution_approval",
+            },
+          } as never,
+        ],
+        session: {
+          threadId: THREAD_ID,
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: isoAt(120),
+        },
+      }));
+
+      await waitForLayout();
+      await new Promise((resolve) => window.setTimeout(resolve, 120));
+
+      expect(
+        wsRequests.some(
+          (request) => {
+            const command = dispatchCommand(request);
+            if (command?.type !== "thread.turn.start") {
+              return false;
+            }
+            const message = command.message;
+            return (
+              !!message &&
+              typeof message === "object" &&
+              (message as Record<string, unknown>).text ===
+                "Wait behind approval"
+            );
+          },
+        ),
+      ).toBe(false);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("steers a queued message by interrupting the run and sending the promoted item next", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createRunningSnapshot(),
+    });
+
+    try {
+      await submitQueuedPrompt("First queued");
+      await submitQueuedPrompt("Second queued");
+
+      const steerButtons = findButtonsByText("Steer");
+      expect(steerButtons).toHaveLength(2);
+      steerButtons[1]?.click();
+
+      await vi.waitFor(
+        () => {
+          const interruptRequest = wsRequests.find(
+            (request) =>
+              dispatchCommand(request)?.type === "thread.turn.interrupt",
+          );
+          expect(interruptRequest).toBeTruthy();
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      expect(
+        useComposerDraftStore.getState().queuedMessagesByThreadId[THREAD_ID]?.map((entry) => entry.prompt),
+      ).toEqual(["Second queued", "First queued"]);
+
+      setThreadState((thread) => ({
+        ...thread,
+        updatedAt: isoAt(150),
+        activities: [],
+        session: {
+          threadId: THREAD_ID,
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: isoAt(150),
+        },
+      }));
+
+      await vi.waitFor(
+        () => {
+          const startRequest = wsRequests.find(
+            (request) => {
+              const command = dispatchCommand(request);
+              if (command?.type !== "thread.turn.start") {
+                return false;
+              }
+              const message = command.message;
+              return (
+                !!message &&
+                typeof message === "object" &&
+                (message as Record<string, unknown>).text === "Second queued"
+              );
+            },
+          );
+          expect(startRequest).toBeTruthy();
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("moves queued content back into the composer for editing and supports deleting queued items", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createRunningSnapshot(),
+    });
+
+    try {
+      await submitQueuedPrompt("Queued for edit");
+      useComposerDraftStore.getState().setPrompt(THREAD_ID, "Current composer");
+      await waitForLayout();
+
+      const editButton = await waitForElement(
+        () => findButtonByLabel("Edit queued message"),
+        "Unable to find queued edit button.",
+      );
+      editButton.click();
+      await waitForLayout();
+
+      expect(useComposerDraftStore.getState().draftsByThreadId[THREAD_ID]?.prompt).toBe(
+        "Queued for edit",
+      );
+      expect(
+        useComposerDraftStore.getState().queuedMessagesByThreadId[THREAD_ID]?.[0]?.prompt,
+      ).toBe("Current composer");
+
+      const deleteButton = await waitForElement(
+        () => findButtonByLabel("Delete queued message"),
+        "Unable to find queued delete button.",
+      );
+      deleteButton.click();
+      await waitForLayout();
+
+      expect(useComposerDraftStore.getState().queuedMessagesByThreadId[THREAD_ID]).toBeUndefined();
     } finally {
       await mounted.cleanup();
     }

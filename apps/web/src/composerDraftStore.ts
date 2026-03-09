@@ -28,6 +28,19 @@ export interface PersistedComposerImageAttachment {
   dataUrl: string;
 }
 
+export interface PersistedQueuedComposerMessageState {
+  id: string;
+  createdAt: string;
+  prompt: string;
+  attachments: PersistedComposerImageAttachment[];
+  provider?: ProviderKind | null;
+  model?: string | null;
+  runtimeMode?: RuntimeMode | null;
+  interactionMode?: ProviderInteractionMode | null;
+  effort?: CodexReasoningEffort | null;
+  codexFastMode?: boolean | null;
+}
+
 export interface ComposerImageAttachment extends Omit<
   ChatImageAttachment,
   "previewUrl"
@@ -60,11 +73,30 @@ interface PersistedDraftThreadState {
 
 interface PersistedComposerDraftStoreState {
   draftsByThreadId: Record<ThreadId, PersistedComposerThreadDraftState>;
+  queuedMessagesByThreadId: Record<
+    ThreadId,
+    PersistedQueuedComposerMessageState[]
+  >;
   draftThreadsByThreadId: Record<ThreadId, PersistedDraftThreadState>;
   projectDraftThreadIdByProjectId: Record<ProjectId, ThreadId>;
 }
 
-interface ComposerThreadDraftState {
+export interface ComposerThreadDraftState {
+  prompt: string;
+  images: ComposerImageAttachment[];
+  nonPersistedImageIds: string[];
+  persistedAttachments: PersistedComposerImageAttachment[];
+  provider: ProviderKind | null;
+  model: string | null;
+  runtimeMode: RuntimeMode | null;
+  interactionMode: ProviderInteractionMode | null;
+  effort: CodexReasoningEffort | null;
+  codexFastMode: boolean;
+}
+
+export interface QueuedComposerMessageState {
+  id: string;
+  createdAt: string;
   prompt: string;
   images: ComposerImageAttachment[];
   nonPersistedImageIds: string[];
@@ -93,6 +125,7 @@ interface ProjectDraftThread extends DraftThreadState {
 
 interface ComposerDraftStoreState {
   draftsByThreadId: Record<ThreadId, ComposerThreadDraftState>;
+  queuedMessagesByThreadId: Record<ThreadId, QueuedComposerMessageState[]>;
   draftThreadsByThreadId: Record<ThreadId, DraftThreadState>;
   projectDraftThreadIdByProjectId: Record<ProjectId, ThreadId>;
   getDraftThreadByProjectId: (
@@ -159,12 +192,28 @@ interface ComposerDraftStoreState {
     threadId: ThreadId,
     attachments: PersistedComposerImageAttachment[],
   ) => void;
+  enqueueQueuedMessage: (
+    threadId: ThreadId,
+    snapshot: Omit<QueuedComposerMessageState, "persistedAttachments"> & {
+      persistedAttachments?: PersistedComposerImageAttachment[];
+    },
+    options?: { index?: number },
+  ) => void;
+  removeQueuedMessage: (threadId: ThreadId, queuedMessageId: string) => void;
+  promoteQueuedMessage: (threadId: ThreadId, queuedMessageId: string) => void;
+  consumeQueuedMessage: (threadId: ThreadId, queuedMessageId: string) => void;
+  loadQueuedMessageIntoComposer: (
+    threadId: ThreadId,
+    queuedMessageId: string,
+    options: { swapComposerContent: boolean },
+  ) => void;
   clearComposerContent: (threadId: ThreadId) => void;
   clearThreadDraft: (threadId: ThreadId) => void;
 }
 
 const EMPTY_PERSISTED_DRAFT_STORE_STATE: PersistedComposerDraftStoreState = {
   draftsByThreadId: {},
+  queuedMessagesByThreadId: {},
   draftThreadsByThreadId: {},
   projectDraftThreadIdByProjectId: {},
 };
@@ -227,6 +276,14 @@ function shouldRemoveDraft(draft: ComposerThreadDraftState): boolean {
   );
 }
 
+function hasSendableDraftContent(
+  draft:
+    | Pick<ComposerThreadDraftState, "prompt" | "images">
+    | Pick<QueuedComposerMessageState, "prompt" | "images">,
+): boolean {
+  return draft.prompt.trim().length > 0 || draft.images.length > 0;
+}
+
 function normalizeProviderKind(value: unknown): ProviderKind | null {
   return value === "codex" ? value : null;
 }
@@ -274,6 +331,68 @@ function normalizePersistedAttachment(
   };
 }
 
+function normalizePersistedQueuedComposerMessageState(
+  value: unknown,
+): PersistedQueuedComposerMessageState | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const candidate = value as Record<string, unknown>;
+  const id = candidate.id;
+  const createdAt = candidate.createdAt;
+  const prompt = candidate.prompt;
+  if (
+    typeof id !== "string" ||
+    id.length === 0 ||
+    typeof createdAt !== "string" ||
+    createdAt.length === 0 ||
+    typeof prompt !== "string"
+  ) {
+    return null;
+  }
+  const attachments = Array.isArray(candidate.attachments)
+    ? candidate.attachments.flatMap((entry) => {
+        const normalized = normalizePersistedAttachment(entry);
+        return normalized ? [normalized] : [];
+      })
+    : [];
+  const provider = normalizeProviderKind(candidate.provider);
+  const model =
+    typeof candidate.model === "string"
+      ? normalizeModelSlug(candidate.model, provider ?? "codex")
+      : null;
+  const runtimeMode =
+    candidate.runtimeMode === "approval-required" ||
+    candidate.runtimeMode === "full-access"
+      ? candidate.runtimeMode
+      : null;
+  const interactionMode =
+    candidate.interactionMode === "plan" ||
+    candidate.interactionMode === "default"
+      ? candidate.interactionMode
+      : null;
+  const effortCandidate =
+    typeof candidate.effort === "string" ? candidate.effort : null;
+  const effort =
+    effortCandidate &&
+    REASONING_EFFORT_VALUES.has(effortCandidate as CodexReasoningEffort)
+      ? (effortCandidate as CodexReasoningEffort)
+      : null;
+  const codexFastMode = candidate.codexFastMode === true;
+  return {
+    id,
+    createdAt,
+    prompt,
+    attachments,
+    ...(provider ? { provider } : {}),
+    ...(model ? { model } : {}),
+    ...(runtimeMode ? { runtimeMode } : {}),
+    ...(interactionMode ? { interactionMode } : {}),
+    ...(effort ? { effort } : {}),
+    ...(codexFastMode ? { codexFastMode } : {}),
+  };
+}
+
 function normalizeDraftThreadEnvMode(
   value: unknown,
   fallbackWorktreePath: string | null,
@@ -292,6 +411,7 @@ function normalizePersistedComposerDraftState(
   }
   const candidate = value as Record<string, unknown>;
   const rawDraftMap = candidate.draftsByThreadId;
+  const rawQueuedMessagesByThreadId = candidate.queuedMessagesByThreadId;
   const rawDraftThreadsByThreadId = candidate.draftThreadsByThreadId;
   const rawProjectDraftThreadIdByProjectId =
     candidate.projectDraftThreadIdByProjectId;
@@ -383,84 +503,107 @@ function normalizePersistedComposerDraftState(
       }
     }
   }
-  if (!rawDraftMap || typeof rawDraftMap !== "object") {
-    return {
-      draftsByThreadId: {},
-      draftThreadsByThreadId,
-      projectDraftThreadIdByProjectId,
-    };
-  }
   const nextDraftsByThreadId: PersistedComposerDraftStoreState["draftsByThreadId"] =
     {};
-  for (const [threadId, draftValue] of Object.entries(
-    rawDraftMap as Record<string, unknown>,
-  )) {
-    if (typeof threadId !== "string" || threadId.length === 0) {
-      continue;
+  if (rawDraftMap && typeof rawDraftMap === "object") {
+    for (const [threadId, draftValue] of Object.entries(
+      rawDraftMap as Record<string, unknown>,
+    )) {
+      if (typeof threadId !== "string" || threadId.length === 0) {
+        continue;
+      }
+      if (!draftValue || typeof draftValue !== "object") {
+        continue;
+      }
+      const draftCandidate = draftValue as Record<string, unknown>;
+      const prompt =
+        typeof draftCandidate.prompt === "string" ? draftCandidate.prompt : "";
+      const attachments = Array.isArray(draftCandidate.attachments)
+        ? draftCandidate.attachments.flatMap((entry) => {
+            const normalized = normalizePersistedAttachment(entry);
+            return normalized ? [normalized] : [];
+          })
+        : [];
+      const provider = normalizeProviderKind(draftCandidate.provider);
+      const model =
+        typeof draftCandidate.model === "string"
+          ? normalizeModelSlug(draftCandidate.model, provider ?? "codex")
+          : null;
+      const runtimeMode =
+        draftCandidate.runtimeMode === "approval-required" ||
+        draftCandidate.runtimeMode === "full-access"
+          ? draftCandidate.runtimeMode
+          : null;
+      const interactionMode =
+        draftCandidate.interactionMode === "plan" ||
+        draftCandidate.interactionMode === "default"
+          ? draftCandidate.interactionMode
+          : null;
+      const effortCandidate =
+        typeof draftCandidate.effort === "string"
+          ? draftCandidate.effort
+          : null;
+      const effort =
+        effortCandidate &&
+        REASONING_EFFORT_VALUES.has(effortCandidate as CodexReasoningEffort)
+          ? (effortCandidate as CodexReasoningEffort)
+          : null;
+      const codexFastMode =
+        draftCandidate.codexFastMode === true ||
+        (typeof draftCandidate.serviceTier === "string" &&
+          draftCandidate.serviceTier === "fast");
+      if (
+        prompt.length === 0 &&
+        attachments.length === 0 &&
+        !provider &&
+        !model &&
+        !runtimeMode &&
+        !interactionMode &&
+        !effort &&
+        !codexFastMode
+      ) {
+        continue;
+      }
+      nextDraftsByThreadId[threadId as ThreadId] = {
+        prompt,
+        attachments,
+        ...(provider ? { provider } : {}),
+        ...(model ? { model } : {}),
+        ...(runtimeMode ? { runtimeMode } : {}),
+        ...(interactionMode ? { interactionMode } : {}),
+        ...(effort ? { effort } : {}),
+        ...(codexFastMode ? { codexFastMode } : {}),
+      };
     }
-    if (!draftValue || typeof draftValue !== "object") {
-      continue;
+  }
+  const queuedMessagesByThreadId: PersistedComposerDraftStoreState["queuedMessagesByThreadId"] =
+    {};
+  if (
+    rawQueuedMessagesByThreadId &&
+    typeof rawQueuedMessagesByThreadId === "object"
+  ) {
+    for (const [threadId, rawQueue] of Object.entries(
+      rawQueuedMessagesByThreadId as Record<string, unknown>,
+    )) {
+      if (typeof threadId !== "string" || threadId.length === 0) {
+        continue;
+      }
+      if (!Array.isArray(rawQueue)) {
+        continue;
+      }
+      const nextQueue = rawQueue.flatMap((entry) => {
+        const normalized = normalizePersistedQueuedComposerMessageState(entry);
+        return normalized ? [normalized] : [];
+      });
+      if (nextQueue.length === 0) {
+        continue;
+      }
+      queuedMessagesByThreadId[threadId as ThreadId] = nextQueue;
     }
-    const draftCandidate = draftValue as Record<string, unknown>;
-    const prompt =
-      typeof draftCandidate.prompt === "string" ? draftCandidate.prompt : "";
-    const attachments = Array.isArray(draftCandidate.attachments)
-      ? draftCandidate.attachments.flatMap((entry) => {
-          const normalized = normalizePersistedAttachment(entry);
-          return normalized ? [normalized] : [];
-        })
-      : [];
-    const provider = normalizeProviderKind(draftCandidate.provider);
-    const model =
-      typeof draftCandidate.model === "string"
-        ? normalizeModelSlug(draftCandidate.model, provider ?? "codex")
-        : null;
-    const runtimeMode =
-      draftCandidate.runtimeMode === "approval-required" ||
-      draftCandidate.runtimeMode === "full-access"
-        ? draftCandidate.runtimeMode
-        : null;
-    const interactionMode =
-      draftCandidate.interactionMode === "plan" ||
-      draftCandidate.interactionMode === "default"
-        ? draftCandidate.interactionMode
-        : null;
-    const effortCandidate =
-      typeof draftCandidate.effort === "string" ? draftCandidate.effort : null;
-    const effort =
-      effortCandidate &&
-      REASONING_EFFORT_VALUES.has(effortCandidate as CodexReasoningEffort)
-        ? (effortCandidate as CodexReasoningEffort)
-        : null;
-    const codexFastMode =
-      draftCandidate.codexFastMode === true ||
-      (typeof draftCandidate.serviceTier === "string" &&
-        draftCandidate.serviceTier === "fast");
-    if (
-      prompt.length === 0 &&
-      attachments.length === 0 &&
-      !provider &&
-      !model &&
-      !runtimeMode &&
-      !interactionMode &&
-      !effort &&
-      !codexFastMode
-    ) {
-      continue;
-    }
-    nextDraftsByThreadId[threadId as ThreadId] = {
-      prompt,
-      attachments,
-      ...(provider ? { provider } : {}),
-      ...(model ? { model } : {}),
-      ...(runtimeMode ? { runtimeMode } : {}),
-      ...(interactionMode ? { interactionMode } : {}),
-      ...(effort ? { effort } : {}),
-      ...(codexFastMode ? { codexFastMode } : {}),
-    };
   }
   return {
     draftsByThreadId: nextDraftsByThreadId,
+    queuedMessagesByThreadId,
     draftThreadsByThreadId,
     projectDraftThreadIdByProjectId,
   };
@@ -574,10 +717,66 @@ function toHydratedThreadDraft(
   };
 }
 
+function toHydratedQueuedMessage(
+  persistedMessage: PersistedQueuedComposerMessageState,
+): QueuedComposerMessageState {
+  return {
+    id: persistedMessage.id,
+    createdAt: persistedMessage.createdAt,
+    prompt: persistedMessage.prompt,
+    images: hydrateImagesFromPersisted(persistedMessage.attachments),
+    nonPersistedImageIds: [],
+    persistedAttachments: persistedMessage.attachments,
+    provider: persistedMessage.provider ?? null,
+    model: persistedMessage.model ?? null,
+    runtimeMode: persistedMessage.runtimeMode ?? null,
+    interactionMode: persistedMessage.interactionMode ?? null,
+    effort: persistedMessage.effort ?? null,
+    codexFastMode: persistedMessage.codexFastMode === true,
+  };
+}
+
+function toPersistedQueuedMessage(
+  queuedMessage: QueuedComposerMessageState,
+): PersistedQueuedComposerMessageState {
+  const persistedMessage: PersistedQueuedComposerMessageState = {
+    id: queuedMessage.id,
+    createdAt: queuedMessage.createdAt,
+    prompt: queuedMessage.prompt,
+    attachments: queuedMessage.persistedAttachments,
+  };
+  if (queuedMessage.provider) {
+    persistedMessage.provider = queuedMessage.provider;
+  }
+  if (queuedMessage.model) {
+    persistedMessage.model = queuedMessage.model;
+  }
+  if (queuedMessage.runtimeMode) {
+    persistedMessage.runtimeMode = queuedMessage.runtimeMode;
+  }
+  if (queuedMessage.interactionMode) {
+    persistedMessage.interactionMode = queuedMessage.interactionMode;
+  }
+  if (queuedMessage.effort) {
+    persistedMessage.effort = queuedMessage.effort;
+  }
+  if (queuedMessage.codexFastMode) {
+    persistedMessage.codexFastMode = true;
+  }
+  return persistedMessage;
+}
+
+function revokeComposerImages(images: ReadonlyArray<ComposerImageAttachment>): void {
+  for (const image of images) {
+    revokeObjectPreviewUrl(image.previewUrl);
+  }
+}
+
 export const useComposerDraftStore = create<ComposerDraftStoreState>()(
   persist(
     (set, get) => ({
       draftsByThreadId: {},
+      queuedMessagesByThreadId: {},
       draftThreadsByThreadId: {},
       projectDraftThreadIdByProjectId: {},
       getDraftThreadByProjectId: (projectId) => {
@@ -667,6 +866,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
               [threadId]: nextDraftThread,
             };
           let nextDraftsByThreadId = state.draftsByThreadId;
+          let nextQueuedMessagesByThreadId = state.queuedMessagesByThreadId;
           if (
             previousThreadIdForProject &&
             previousThreadIdForProject !== threadId &&
@@ -681,9 +881,24 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
               nextDraftsByThreadId = { ...state.draftsByThreadId };
               delete nextDraftsByThreadId[previousThreadIdForProject];
             }
+            if (
+              state.queuedMessagesByThreadId[previousThreadIdForProject] !==
+              undefined
+            ) {
+              revokeComposerImages(
+                state.queuedMessagesByThreadId[previousThreadIdForProject]!.flatMap(
+                  (queuedMessage) => queuedMessage.images,
+                ),
+              );
+              nextQueuedMessagesByThreadId = {
+                ...state.queuedMessagesByThreadId,
+              };
+              delete nextQueuedMessagesByThreadId[previousThreadIdForProject];
+            }
           }
           return {
             draftsByThreadId: nextDraftsByThreadId,
+            queuedMessagesByThreadId: nextQueuedMessagesByThreadId,
             draftThreadsByThreadId: nextDraftThreadsByThreadId,
             projectDraftThreadIdByProjectId:
               nextProjectDraftThreadIdByProjectId,
@@ -781,15 +996,28 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
               ...state.draftThreadsByThreadId,
             };
           let nextDraftsByThreadId = state.draftsByThreadId;
+          let nextQueuedMessagesByThreadId = state.queuedMessagesByThreadId;
           if (!Object.values(restProjectMappings).includes(threadId)) {
             delete nextDraftThreadsByThreadId[threadId];
             if (state.draftsByThreadId[threadId] !== undefined) {
               nextDraftsByThreadId = { ...state.draftsByThreadId };
               delete nextDraftsByThreadId[threadId];
             }
+            if (state.queuedMessagesByThreadId[threadId] !== undefined) {
+              revokeComposerImages(
+                state.queuedMessagesByThreadId[threadId]!.flatMap(
+                  (queuedMessage) => queuedMessage.images,
+                ),
+              );
+              nextQueuedMessagesByThreadId = {
+                ...state.queuedMessagesByThreadId,
+              };
+              delete nextQueuedMessagesByThreadId[threadId];
+            }
           }
           return {
             draftsByThreadId: nextDraftsByThreadId,
+            queuedMessagesByThreadId: nextQueuedMessagesByThreadId,
             draftThreadsByThreadId: nextDraftThreadsByThreadId,
             projectDraftThreadIdByProjectId: restProjectMappings,
           };
@@ -814,15 +1042,28 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
               ...state.draftThreadsByThreadId,
             };
           let nextDraftsByThreadId = state.draftsByThreadId;
+          let nextQueuedMessagesByThreadId = state.queuedMessagesByThreadId;
           if (!Object.values(restProjectMappings).includes(threadId)) {
             delete nextDraftThreadsByThreadId[threadId];
             if (state.draftsByThreadId[threadId] !== undefined) {
               nextDraftsByThreadId = { ...state.draftsByThreadId };
               delete nextDraftsByThreadId[threadId];
             }
+            if (state.queuedMessagesByThreadId[threadId] !== undefined) {
+              revokeComposerImages(
+                state.queuedMessagesByThreadId[threadId]!.flatMap(
+                  (queuedMessage) => queuedMessage.images,
+                ),
+              );
+              nextQueuedMessagesByThreadId = {
+                ...state.queuedMessagesByThreadId,
+              };
+              delete nextQueuedMessagesByThreadId[threadId];
+            }
           }
           return {
             draftsByThreadId: nextDraftsByThreadId,
+            queuedMessagesByThreadId: nextQueuedMessagesByThreadId,
             draftThreadsByThreadId: nextDraftThreadsByThreadId,
             projectDraftThreadIdByProjectId: restProjectMappings,
           };
@@ -835,11 +1076,19 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
         set((state) => {
           const hasDraftThread =
             state.draftThreadsByThreadId[threadId] !== undefined;
+          const hasQueuedMessages =
+            state.queuedMessagesByThreadId[threadId] !== undefined;
           const hasProjectMapping = Object.values(
             state.projectDraftThreadIdByProjectId,
           ).includes(threadId);
-          if (!hasDraftThread && !hasProjectMapping) {
+          if (!hasDraftThread && !hasQueuedMessages && !hasProjectMapping) {
             return state;
+          }
+          const queuedMessages = state.queuedMessagesByThreadId[threadId];
+          if (queuedMessages) {
+            revokeComposerImages(
+              queuedMessages.flatMap((queuedMessage) => queuedMessage.images),
+            );
           }
           const nextProjectDraftThreadIdByProjectId = Object.fromEntries(
             Object.entries(state.projectDraftThreadIdByProjectId).filter(
@@ -850,7 +1099,12 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             [threadId]: _removedDraftThread,
             ...restDraftThreadsByThreadId
           } = state.draftThreadsByThreadId;
+          const {
+            [threadId]: _removedQueuedMessages,
+            ...restQueuedMessagesByThreadId
+          } = state.queuedMessagesByThreadId;
           return {
+            queuedMessagesByThreadId: restQueuedMessagesByThreadId,
             draftThreadsByThreadId: restDraftThreadsByThreadId,
             projectDraftThreadIdByProjectId:
               nextProjectDraftThreadIdByProjectId,
@@ -1221,6 +1475,201 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           });
         });
       },
+      enqueueQueuedMessage: (threadId, snapshot, options) => {
+        if (threadId.length === 0) {
+          return;
+        }
+        const nextSnapshot: QueuedComposerMessageState = {
+          ...snapshot,
+          images: [...snapshot.images],
+          nonPersistedImageIds: [...snapshot.nonPersistedImageIds],
+          persistedAttachments: [...(snapshot.persistedAttachments ?? [])],
+        };
+        set((state) => {
+          const existingQueue = state.queuedMessagesByThreadId[threadId] ?? [];
+          const nextQueue = [...existingQueue];
+          const index = options?.index;
+          if (index === undefined || index < 0 || index >= nextQueue.length) {
+            nextQueue.push(nextSnapshot);
+          } else {
+            nextQueue.splice(index, 0, nextSnapshot);
+          }
+          return {
+            queuedMessagesByThreadId: {
+              ...state.queuedMessagesByThreadId,
+              [threadId]: nextQueue,
+            },
+          };
+        });
+      },
+      removeQueuedMessage: (threadId, queuedMessageId) => {
+        if (threadId.length === 0 || queuedMessageId.length === 0) {
+          return;
+        }
+        set((state) => {
+          const existingQueue = state.queuedMessagesByThreadId[threadId];
+          if (!existingQueue || existingQueue.length === 0) {
+            return state;
+          }
+          const nextQueue = existingQueue.filter(
+            (queuedMessage) => queuedMessage.id !== queuedMessageId,
+          );
+          if (nextQueue.length === existingQueue.length) {
+            return state;
+          }
+          revokeComposerImages(
+            existingQueue
+              .filter((queuedMessage) => queuedMessage.id === queuedMessageId)
+              .flatMap((queuedMessage) => queuedMessage.images),
+          );
+          const nextQueuedMessagesByThreadId = {
+            ...state.queuedMessagesByThreadId,
+          };
+          if (nextQueue.length === 0) {
+            delete nextQueuedMessagesByThreadId[threadId];
+          } else {
+            nextQueuedMessagesByThreadId[threadId] = nextQueue;
+          }
+          return { queuedMessagesByThreadId: nextQueuedMessagesByThreadId };
+        });
+      },
+      promoteQueuedMessage: (threadId, queuedMessageId) => {
+        if (threadId.length === 0 || queuedMessageId.length === 0) {
+          return;
+        }
+        set((state) => {
+          const existingQueue = state.queuedMessagesByThreadId[threadId];
+          if (!existingQueue || existingQueue.length < 2) {
+            return state;
+          }
+          const nextIndex = existingQueue.findIndex(
+            (queuedMessage) => queuedMessage.id === queuedMessageId,
+          );
+          if (nextIndex <= 0) {
+            return state;
+          }
+          const queuedMessage = existingQueue[nextIndex];
+          if (!queuedMessage) {
+            return state;
+          }
+          const nextQueue = [
+            queuedMessage,
+            ...existingQueue.slice(0, nextIndex),
+            ...existingQueue.slice(nextIndex + 1),
+          ];
+          return {
+            queuedMessagesByThreadId: {
+              ...state.queuedMessagesByThreadId,
+              [threadId]: nextQueue,
+            },
+          };
+        });
+      },
+      consumeQueuedMessage: (threadId, queuedMessageId) => {
+        if (threadId.length === 0 || queuedMessageId.length === 0) {
+          return;
+        }
+        set((state) => {
+          const existingQueue = state.queuedMessagesByThreadId[threadId];
+          if (!existingQueue || existingQueue.length === 0) {
+            return state;
+          }
+          const nextQueue = existingQueue.filter(
+            (queuedMessage) => queuedMessage.id !== queuedMessageId,
+          );
+          if (nextQueue.length === existingQueue.length) {
+            return state;
+          }
+          revokeComposerImages(
+            existingQueue
+              .filter((queuedMessage) => queuedMessage.id === queuedMessageId)
+              .flatMap((queuedMessage) => queuedMessage.images),
+          );
+          const nextQueuedMessagesByThreadId = {
+            ...state.queuedMessagesByThreadId,
+          };
+          if (nextQueue.length === 0) {
+            delete nextQueuedMessagesByThreadId[threadId];
+          } else {
+            nextQueuedMessagesByThreadId[threadId] = nextQueue;
+          }
+          return { queuedMessagesByThreadId: nextQueuedMessagesByThreadId };
+        });
+      },
+      loadQueuedMessageIntoComposer: (threadId, queuedMessageId, options) => {
+        if (threadId.length === 0 || queuedMessageId.length === 0) {
+          return;
+        }
+        set((state) => {
+          const existingQueue = state.queuedMessagesByThreadId[threadId];
+          if (!existingQueue || existingQueue.length === 0) {
+            return state;
+          }
+          const queuedMessageIndex = existingQueue.findIndex(
+            (queuedMessage) => queuedMessage.id === queuedMessageId,
+          );
+          if (queuedMessageIndex < 0) {
+            return state;
+          }
+          const queuedMessage = existingQueue[queuedMessageIndex];
+          if (!queuedMessage) {
+            return state;
+          }
+          const currentDraft = state.draftsByThreadId[threadId] ?? null;
+          const shouldSwapComposerContent =
+            options.swapComposerContent &&
+            currentDraft !== null &&
+            hasSendableDraftContent(currentDraft);
+          const nextQueue = existingQueue.filter(
+            (entry) => entry.id !== queuedMessageId,
+          );
+          if (currentDraft && !shouldSwapComposerContent) {
+            revokeComposerImages(currentDraft.images);
+          }
+          if (shouldSwapComposerContent && currentDraft) {
+            nextQueue.splice(queuedMessageIndex, 0, {
+              id: crypto.randomUUID(),
+              createdAt: new Date().toISOString(),
+              prompt: currentDraft.prompt,
+              images: [...currentDraft.images],
+              nonPersistedImageIds: [...currentDraft.nonPersistedImageIds],
+              persistedAttachments: [...currentDraft.persistedAttachments],
+              provider: currentDraft.provider,
+              model: currentDraft.model,
+              runtimeMode: currentDraft.runtimeMode,
+              interactionMode: currentDraft.interactionMode,
+              effort: currentDraft.effort,
+              codexFastMode: currentDraft.codexFastMode,
+            });
+          }
+          const nextQueuedMessagesByThreadId = {
+            ...state.queuedMessagesByThreadId,
+          };
+          if (nextQueue.length === 0) {
+            delete nextQueuedMessagesByThreadId[threadId];
+          } else {
+            nextQueuedMessagesByThreadId[threadId] = nextQueue;
+          }
+          return {
+            draftsByThreadId: {
+              ...state.draftsByThreadId,
+              [threadId]: {
+                prompt: queuedMessage.prompt,
+                images: [...queuedMessage.images],
+                nonPersistedImageIds: [...queuedMessage.nonPersistedImageIds],
+                persistedAttachments: [...queuedMessage.persistedAttachments],
+                provider: queuedMessage.provider,
+                model: queuedMessage.model,
+                runtimeMode: queuedMessage.runtimeMode,
+                interactionMode: queuedMessage.interactionMode,
+                effort: queuedMessage.effort,
+                codexFastMode: queuedMessage.codexFastMode,
+              },
+            },
+            queuedMessagesByThreadId: nextQueuedMessagesByThreadId,
+          };
+        });
+      },
       clearComposerContent: (threadId) => {
         if (threadId.length === 0) {
           return;
@@ -1252,25 +1701,40 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
         }
         const existing = get().draftsByThreadId[threadId];
         if (existing) {
-          for (const image of existing.images) {
-            revokeObjectPreviewUrl(image.previewUrl);
-          }
+          revokeComposerImages(existing.images);
+        }
+        const queuedMessages = get().queuedMessagesByThreadId[threadId];
+        if (queuedMessages) {
+          revokeComposerImages(
+            queuedMessages.flatMap((queuedMessage) => queuedMessage.images),
+          );
         }
         set((state) => {
           const hasComposerDraft =
             state.draftsByThreadId[threadId] !== undefined;
+          const hasQueuedMessages =
+            state.queuedMessagesByThreadId[threadId] !== undefined;
           const hasDraftThread =
             state.draftThreadsByThreadId[threadId] !== undefined;
           const hasProjectMapping = Object.values(
             state.projectDraftThreadIdByProjectId,
           ).includes(threadId);
-          if (!hasComposerDraft && !hasDraftThread && !hasProjectMapping) {
+          if (
+            !hasComposerDraft &&
+            !hasQueuedMessages &&
+            !hasDraftThread &&
+            !hasProjectMapping
+          ) {
             return state;
           }
           const {
             [threadId]: _removedComposerDraft,
             ...restComposerDraftsByThreadId
           } = state.draftsByThreadId;
+          const {
+            [threadId]: _removedQueuedMessages,
+            ...restQueuedMessagesByThreadId
+          } = state.queuedMessagesByThreadId;
           const {
             [threadId]: _removedDraftThread,
             ...restDraftThreadsByThreadId
@@ -1282,6 +1746,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           ) as Record<ProjectId, ThreadId>;
           return {
             draftsByThreadId: restComposerDraftsByThreadId,
+            queuedMessagesByThreadId: restQueuedMessagesByThreadId,
             draftThreadsByThreadId: restDraftThreadsByThreadId,
             projectDraftThreadIdByProjectId:
               nextProjectDraftThreadIdByProjectId,
@@ -1338,8 +1803,26 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           }
           persistedDraftsByThreadId[threadId as ThreadId] = persistedDraft;
         }
+        const persistedQueuedMessagesByThreadId: PersistedComposerDraftStoreState["queuedMessagesByThreadId"] =
+          {};
+        for (const [threadId, queuedMessages] of Object.entries(
+          state.queuedMessagesByThreadId,
+        )) {
+          if (typeof threadId !== "string" || threadId.length === 0) {
+            continue;
+          }
+          const persistedQueue = queuedMessages
+            .filter((queuedMessage) => hasSendableDraftContent(queuedMessage))
+            .map(toPersistedQueuedMessage);
+          if (persistedQueue.length === 0) {
+            continue;
+          }
+          persistedQueuedMessagesByThreadId[threadId as ThreadId] =
+            persistedQueue;
+        }
         return {
           draftsByThreadId: persistedDraftsByThreadId,
+          queuedMessagesByThreadId: persistedQueuedMessagesByThreadId,
           draftThreadsByThreadId: state.draftThreadsByThreadId,
           projectDraftThreadIdByProjectId:
             state.projectDraftThreadIdByProjectId,
@@ -1353,9 +1836,18 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             ([threadId, draft]) => [threadId, toHydratedThreadDraft(draft)],
           ),
         );
+        const queuedMessagesByThreadId = Object.fromEntries(
+          Object.entries(normalizedPersisted.queuedMessagesByThreadId).map(
+            ([threadId, queue]) => [
+              threadId,
+              queue.map((queuedMessage) => toHydratedQueuedMessage(queuedMessage)),
+            ],
+          ),
+        );
         return {
           ...currentState,
           draftsByThreadId,
+          queuedMessagesByThreadId,
           draftThreadsByThreadId: normalizedPersisted.draftThreadsByThreadId,
           projectDraftThreadIdByProjectId:
             normalizedPersisted.projectDraftThreadIdByProjectId,

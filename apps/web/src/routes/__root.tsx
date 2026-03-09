@@ -10,6 +10,7 @@ import { useEffect, useRef } from "react";
 import { QueryClient, useQueryClient } from "@tanstack/react-query";
 
 import { APP_DISPLAY_NAME } from "../branding";
+import { QueuedTurnDispatcher } from "../components/QueuedTurnDispatcher";
 import { Button } from "../components/ui/button";
 import { AnchoredToastProvider, ToastProvider, toastManager } from "../components/ui/toast";
 import { serverConfigQueryOptions, serverQueryKeys } from "../lib/serverReactQuery";
@@ -47,9 +48,10 @@ function RootRouteView() {
   }
 
   return (
-    <ToastProvider>
+      <ToastProvider>
       <AnchoredToastProvider>
         <EventRouter />
+        <QueuedTurnDispatcher />
         <DesktopProjectBootstrap />
         <Outlet />
       </AnchoredToastProvider>

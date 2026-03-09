@@ -1,7 +1,35 @@
 import { ProjectId, ThreadId } from "@t3tools/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createJSONStorage } from "zustand/middleware";
 
-import { type ComposerImageAttachment, useComposerDraftStore } from "./composerDraftStore";
+import {
+  COMPOSER_DRAFT_STORAGE_KEY,
+  type ComposerImageAttachment,
+  useComposerDraftStore,
+} from "./composerDraftStore";
+
+const memoryStorage = new Map<string, string>();
+const localStorageMock = {
+  get length() {
+    return memoryStorage.size;
+  },
+  getItem: vi.fn((key: string) => memoryStorage.get(key) ?? null),
+  setItem: vi.fn((key: string, value: string) => {
+    memoryStorage.set(key, value);
+  }),
+  removeItem: vi.fn((key: string) => {
+    memoryStorage.delete(key);
+  }),
+  key: vi.fn((index: number) => Array.from(memoryStorage.keys())[index] ?? null),
+  clear: vi.fn(() => {
+    memoryStorage.clear();
+  }),
+};
+
+vi.stubGlobal("localStorage", localStorageMock);
+useComposerDraftStore.persist.setOptions({
+  storage: createJSONStorage(() => localStorageMock),
+});
 
 function makeImage(input: {
   id: string;
@@ -30,6 +58,14 @@ function makeImage(input: {
   };
 }
 
+beforeEach(() => {
+  memoryStorage.clear();
+  localStorageMock.getItem.mockClear();
+  localStorageMock.setItem.mockClear();
+  localStorageMock.removeItem.mockClear();
+  localStorageMock.clear.mockClear();
+});
+
 describe("composerDraftStore addImages", () => {
   const threadId = ThreadId.makeUnsafe("thread-dedupe");
   let originalRevokeObjectUrl: typeof URL.revokeObjectURL;
@@ -38,6 +74,7 @@ describe("composerDraftStore addImages", () => {
   beforeEach(() => {
     useComposerDraftStore.setState({
       draftsByThreadId: {},
+      queuedMessagesByThreadId: {},
       draftThreadsByThreadId: {},
       projectDraftThreadIdByProjectId: {},
     });
@@ -127,6 +164,7 @@ describe("composerDraftStore clearComposerContent", () => {
   beforeEach(() => {
     useComposerDraftStore.setState({
       draftsByThreadId: {},
+      queuedMessagesByThreadId: {},
       draftThreadsByThreadId: {},
       projectDraftThreadIdByProjectId: {},
     });
@@ -163,6 +201,7 @@ describe("composerDraftStore project draft thread mapping", () => {
   beforeEach(() => {
     useComposerDraftStore.setState({
       draftsByThreadId: {},
+      queuedMessagesByThreadId: {},
       draftThreadsByThreadId: {},
       projectDraftThreadIdByProjectId: {},
     });
@@ -339,6 +378,7 @@ describe("composerDraftStore codex fast mode", () => {
   beforeEach(() => {
     useComposerDraftStore.setState({
       draftsByThreadId: {},
+      queuedMessagesByThreadId: {},
       draftThreadsByThreadId: {},
       projectDraftThreadIdByProjectId: {},
     });
@@ -366,6 +406,7 @@ describe("composerDraftStore setModel", () => {
   beforeEach(() => {
     useComposerDraftStore.setState({
       draftsByThreadId: {},
+      queuedMessagesByThreadId: {},
       draftThreadsByThreadId: {},
       projectDraftThreadIdByProjectId: {},
     });
@@ -386,6 +427,7 @@ describe("composerDraftStore setProvider", () => {
   beforeEach(() => {
     useComposerDraftStore.setState({
       draftsByThreadId: {},
+      queuedMessagesByThreadId: {},
       draftThreadsByThreadId: {},
       projectDraftThreadIdByProjectId: {},
     });
@@ -415,6 +457,7 @@ describe("composerDraftStore runtime and interaction settings", () => {
   beforeEach(() => {
     useComposerDraftStore.setState({
       draftsByThreadId: {},
+      queuedMessagesByThreadId: {},
       draftThreadsByThreadId: {},
       projectDraftThreadIdByProjectId: {},
     });
@@ -449,5 +492,187 @@ describe("composerDraftStore runtime and interaction settings", () => {
     store.setInteractionMode(threadId, null);
 
     expect(useComposerDraftStore.getState().draftsByThreadId[threadId]).toBeUndefined();
+  });
+});
+
+describe("composerDraftStore queued messages", () => {
+  const threadId = ThreadId.makeUnsafe("thread-queued");
+  const otherThreadId = ThreadId.makeUnsafe("thread-queued-other");
+  const projectId = ProjectId.makeUnsafe("project-queued");
+
+  beforeEach(() => {
+    localStorage.clear();
+    useComposerDraftStore.setState({
+      draftsByThreadId: {},
+      queuedMessagesByThreadId: {},
+      draftThreadsByThreadId: {},
+      projectDraftThreadIdByProjectId: {},
+    });
+  });
+
+  it("keeps queued messages in FIFO order and can promote items to the head", () => {
+    const store = useComposerDraftStore.getState();
+
+    store.enqueueQueuedMessage(threadId, {
+      id: "queued-1",
+      createdAt: "2026-03-08T00:00:00.000Z",
+      prompt: "first",
+      images: [],
+      nonPersistedImageIds: [],
+      provider: "codex",
+      model: "gpt-5.4",
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      effort: null,
+      codexFastMode: false,
+    });
+    store.enqueueQueuedMessage(threadId, {
+      id: "queued-2",
+      createdAt: "2026-03-08T00:00:01.000Z",
+      prompt: "second",
+      images: [],
+      nonPersistedImageIds: [],
+      provider: "codex",
+      model: "gpt-5.4",
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      effort: null,
+      codexFastMode: false,
+    });
+
+    expect(
+      useComposerDraftStore.getState().queuedMessagesByThreadId[threadId]?.map((entry) => entry.id),
+    ).toEqual(["queued-1", "queued-2"]);
+
+    store.promoteQueuedMessage(threadId, "queued-2");
+
+    expect(
+      useComposerDraftStore.getState().queuedMessagesByThreadId[threadId]?.map((entry) => entry.id),
+    ).toEqual(["queued-2", "queued-1"]);
+  });
+
+  it("loads a queued message into the composer and swaps existing sendable content back into place", () => {
+    const store = useComposerDraftStore.getState();
+    store.setPrompt(threadId, "composer draft");
+    store.enqueueQueuedMessage(threadId, {
+      id: "queued-edit",
+      createdAt: "2026-03-08T00:00:00.000Z",
+      prompt: "queued follow-up",
+      images: [],
+      nonPersistedImageIds: [],
+      provider: "codex",
+      model: "gpt-5.4",
+      runtimeMode: "approval-required",
+      interactionMode: "plan",
+      effort: null,
+      codexFastMode: true,
+    });
+
+    store.loadQueuedMessageIntoComposer(threadId, "queued-edit", {
+      swapComposerContent: true,
+    });
+
+    expect(useComposerDraftStore.getState().draftsByThreadId[threadId]).toMatchObject({
+      prompt: "queued follow-up",
+      runtimeMode: "approval-required",
+      interactionMode: "plan",
+      codexFastMode: true,
+    });
+    expect(
+      useComposerDraftStore.getState().queuedMessagesByThreadId[threadId]?.[0]?.prompt,
+    ).toBe("composer draft");
+  });
+
+  it("cleans queued messages when a project draft thread mapping is cleared or remapped", () => {
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(projectId, threadId);
+    store.enqueueQueuedMessage(threadId, {
+      id: "queued-cleanup",
+      createdAt: "2026-03-08T00:00:00.000Z",
+      prompt: "queued",
+      images: [],
+      nonPersistedImageIds: [],
+      provider: "codex",
+      model: "gpt-5.4",
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      effort: null,
+      codexFastMode: false,
+    });
+
+    store.setProjectDraftThreadId(projectId, otherThreadId);
+    expect(useComposerDraftStore.getState().queuedMessagesByThreadId[threadId]).toBeUndefined();
+
+    store.enqueueQueuedMessage(otherThreadId, {
+      id: "queued-cleanup-2",
+      createdAt: "2026-03-08T00:00:01.000Z",
+      prompt: "queued two",
+      images: [],
+      nonPersistedImageIds: [],
+      provider: "codex",
+      model: "gpt-5.4",
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      effort: null,
+      codexFastMode: false,
+    });
+    store.clearProjectDraftThreadId(projectId);
+
+    expect(useComposerDraftStore.getState().queuedMessagesByThreadId[otherThreadId]).toBeUndefined();
+  });
+
+  it("persists queued messages to storage and rehydrates them", async () => {
+    const store = useComposerDraftStore.getState();
+    const image = makeImage({
+      id: "queued-image",
+      previewUrl: "data:image/png;base64,AAAA",
+      sizeBytes: 4,
+    });
+
+    store.enqueueQueuedMessage(threadId, {
+      id: "queued-persisted",
+      createdAt: "2026-03-08T00:00:00.000Z",
+      prompt: "persist me",
+      images: [image],
+      nonPersistedImageIds: [],
+      persistedAttachments: [
+        {
+          id: "queued-image",
+          name: image.name,
+          mimeType: image.mimeType,
+          sizeBytes: image.sizeBytes,
+          dataUrl: "data:image/png;base64,AAAA",
+        },
+      ],
+      provider: "codex",
+      model: "gpt-5.4",
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      effort: null,
+      codexFastMode: false,
+    });
+
+    const raw = localStorage.getItem(COMPOSER_DRAFT_STORAGE_KEY);
+    expect(raw).toContain("queued-persisted");
+
+    useComposerDraftStore.setState({
+      draftsByThreadId: {},
+      queuedMessagesByThreadId: {},
+      draftThreadsByThreadId: {},
+      projectDraftThreadIdByProjectId: {},
+    });
+    localStorage.setItem(COMPOSER_DRAFT_STORAGE_KEY, raw as string);
+
+    await useComposerDraftStore.persist.rehydrate();
+
+    expect(useComposerDraftStore.getState().queuedMessagesByThreadId[threadId]?.[0]).toMatchObject({
+      id: "queued-persisted",
+      prompt: "persist me",
+      persistedAttachments: [
+        expect.objectContaining({
+          id: "queued-image",
+        }),
+      ],
+    });
   });
 });
