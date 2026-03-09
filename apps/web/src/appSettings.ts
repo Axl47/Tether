@@ -1,42 +1,13 @@
 import { useCallback, useSyncExternalStore } from "react";
 import { Option, Schema } from "effect";
-import {
-  type ProviderKind,
-  type ProviderServiceTier,
-} from "@t3tools/contracts";
-import {
-  getDefaultModel,
-  getModelOptions,
-  normalizeModelSlug,
-} from "@t3tools/shared/model";
+import { type ProviderKind } from "@t3tools/contracts";
+import { getDefaultModel, getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
 
 const APP_SETTINGS_STORAGE_KEY = "tether:app-settings:v1";
+const LEGACY_APP_SETTINGS_STORAGE_KEYS = ["t3code:app-settings:v1"] as const;
 const MAX_CUSTOM_MODEL_COUNT = 32;
 export const MAX_CUSTOM_MODEL_LENGTH = 256;
-export const APP_SERVICE_TIER_OPTIONS = [
-  {
-    value: "auto",
-    label: "Automatic",
-    description: "Use Codex defaults without forcing a service tier.",
-  },
-  {
-    value: "fast",
-    label: "Fast",
-    description: "Request the fast service tier when the model supports it.",
-  },
-  {
-    value: "flex",
-    label: "Flex",
-    description: "Request the flex service tier when the model supports it.",
-  },
-] as const;
-export type AppServiceTier = (typeof APP_SERVICE_TIER_OPTIONS)[number]["value"];
-const AppServiceTierSchema = Schema.Literals(["auto", "fast", "flex"]);
-const MODELS_WITH_FAST_SUPPORT = new Set(["gpt-5.4"]);
-const BUILT_IN_MODEL_SLUGS_BY_PROVIDER: Record<
-  ProviderKind,
-  ReadonlySet<string>
-> = {
+const BUILT_IN_MODEL_SLUGS_BY_PROVIDER: Record<ProviderKind, ReadonlySet<string>> = {
   codex: new Set(getModelOptions("codex").map((option) => option.slug)),
 };
 
@@ -53,9 +24,6 @@ const AppSettingsSchema = Schema.Struct({
   enableAssistantStreaming: Schema.Boolean.pipe(
     Schema.withConstructorDefault(() => Option.some(false)),
   ),
-  codexServiceTier: AppServiceTierSchema.pipe(
-    Schema.withConstructorDefault(() => Option.some("auto")),
-  ),
   customCodexModels: Schema.Array(Schema.String).pipe(
     Schema.withConstructorDefault(() => Option.some([])),
   ),
@@ -66,25 +34,6 @@ export interface AppModelOption {
   name: string;
   isCustom: boolean;
 }
-
-export function resolveAppServiceTier(
-  serviceTier: AppServiceTier,
-): ProviderServiceTier | null {
-  return serviceTier === "auto" ? null : serviceTier;
-}
-
-export function shouldShowFastTierIcon(
-  model: string | null | undefined,
-  serviceTier: AppServiceTier,
-): boolean {
-  const normalizedModel = normalizeModelSlug(model);
-  return (
-    resolveAppServiceTier(serviceTier) === "fast" &&
-    normalizedModel !== null &&
-    MODELS_WITH_FAST_SUPPORT.has(normalizedModel)
-  );
-}
-
 const DEFAULT_APP_SETTINGS = AppSettingsSchema.makeUnsafe({});
 
 let listeners: Array<() => void> = [];
@@ -246,12 +195,26 @@ function parsePersistedSettings(value: string | null): AppSettings {
   }
 }
 
+function readPersistedSettingsRaw(): string | null {
+  const current = window.localStorage.getItem(APP_SETTINGS_STORAGE_KEY);
+  if (current !== null) {
+    return current;
+  }
+  for (const legacyKey of LEGACY_APP_SETTINGS_STORAGE_KEYS) {
+    const legacy = window.localStorage.getItem(legacyKey);
+    if (legacy !== null) {
+      return legacy;
+    }
+  }
+  return null;
+}
+
 export function getAppSettingsSnapshot(): AppSettings {
   if (typeof window === "undefined") {
     return DEFAULT_APP_SETTINGS;
   }
 
-  const raw = window.localStorage.getItem(APP_SETTINGS_STORAGE_KEY);
+  const raw = readPersistedSettingsRaw();
   if (raw === cachedRawSettings) {
     return cachedSnapshot;
   }
@@ -269,6 +232,9 @@ function persistSettings(next: AppSettings): void {
     if (raw !== cachedRawSettings) {
       window.localStorage.setItem(APP_SETTINGS_STORAGE_KEY, raw);
     }
+    for (const legacyKey of LEGACY_APP_SETTINGS_STORAGE_KEYS) {
+      window.localStorage.removeItem(legacyKey);
+    }
   } catch {
     // Best-effort persistence only.
   }
@@ -281,7 +247,13 @@ function subscribe(listener: () => void): () => void {
   listeners.push(listener);
 
   const onStorage = (event: StorageEvent) => {
-    if (event.key === APP_SETTINGS_STORAGE_KEY) {
+    if (
+      event.key === APP_SETTINGS_STORAGE_KEY ||
+      (typeof event.key === "string" &&
+        LEGACY_APP_SETTINGS_STORAGE_KEYS.includes(
+          event.key as (typeof LEGACY_APP_SETTINGS_STORAGE_KEYS)[number],
+        ))
+    ) {
       emitChange();
     }
   };

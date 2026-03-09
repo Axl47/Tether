@@ -108,9 +108,10 @@ import {
   buildPlanImplementationThreadTitle,
   buildPlanImplementationPrompt,
   buildProposedPlanMarkdownFilename,
+  downloadPlanAsTextFile,
+  normalizePlanMarkdownForExport,
   proposedPlanTitle,
   resolvePlanFollowUpSubmission,
-  summarizeCollapsedPlan,
 } from "../proposedPlan";
 import { truncateTitle } from "../truncateTitle";
 import {
@@ -139,8 +140,9 @@ import {
   shortcutLabelForCommand,
 } from "../keybindings";
 import ChatMarkdown from "./ChatMarkdown";
+import PlanSidebar from "./PlanSidebar";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
-import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert";
 import {
   BotIcon,
   ChevronDownIcon,
@@ -154,13 +156,13 @@ import {
   FolderClosedIcon,
   GripVerticalIcon,
   LoaderCircleIcon,
+  ListTodoIcon,
   LockIcon,
   LockOpenIcon,
   Undo2Icon,
   XIcon,
   CopyIcon,
   CheckIcon,
-  ZapIcon,
 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -222,9 +224,6 @@ import { readNativeApi } from "~/nativeApi";
 import {
   getAppModelOptions,
   resolveAppModelSelection,
-  resolveAppServiceTier,
-  shouldShowFastTierIcon,
-  type AppServiceTier,
   useAppSettings,
 } from "../appSettings";
 import {
@@ -330,21 +329,7 @@ function workToneClass(tone: "thinking" | "tool" | "info" | "error"): string {
   return "text-muted-foreground/40";
 }
 
-function normalizePlanMarkdownForExport(planMarkdown: string): string {
-  return `${planMarkdown.trimEnd()}\n`;
-}
 
-function downloadTextFile(filename: string, contents: string): void {
-  const blob = new Blob([contents], { type: "text/markdown;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  window.setTimeout(() => {
-    URL.revokeObjectURL(url);
-  }, 0);
-}
 
 interface ExpandedImageItem {
   src: string;
@@ -472,7 +457,6 @@ type ComposerCommandItem =
       model: ModelSlug;
       label: string;
       description: string;
-      showFastBadge: boolean;
     };
 
 type SendPhase = "idle" | "preparing-worktree" | "sending-turn";
@@ -589,9 +573,6 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
         </Badge>
       ) : null}
       <span className="flex min-w-0 items-center gap-1.5 truncate">
-        {props.item.type === "model" && props.item.showFastBadge ? (
-          <ZapIcon className="size-3.5 shrink-0 text-amber-500" />
-        ) : null}
         <span className="truncate">{props.item.label}</span>
       </span>
       <span className="truncate text-muted-foreground/70 text-xs">
@@ -783,8 +764,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const [expandedWorkGroups, setExpandedWorkGroups] = useState<
     Record<string, boolean>
   >({});
-  const [dismissedPlanCreatedAtByThreadId, setDismissedPlanCreatedAtByThreadId] =
-    useState<Record<string, string>>({});
+  const [planSidebarOpen, setPlanSidebarOpen] = useState(false);
+  // Tracks whether the user explicitly dismissed the sidebar for the active turn.
+  const planSidebarDismissedForTurnRef = useRef<string | null>(null);
+  // When set, the thread-change reset effect will open the sidebar instead of closing it.
+  // Used by "Implement in new thread" to carry the sidebar-open intent across navigation.
+  const planSidebarOpenOnNextThreadRef = useRef(false);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [terminalFocusRequestId, setTerminalFocusRequestId] = useState(0);
   const [composerHighlightedItemId, setComposerHighlightedItemId] = useState<
@@ -912,11 +897,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     DEFAULT_INTERACTION_MODE;
   const isServerThread = serverThread !== undefined;
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
-  const diffSearch = useMemo(
-    () => parseDiffRouteSearch(rawSearch as Record<string, unknown>),
-    [rawSearch],
-  );
-  const diffOpen = diffSearch.diff === "1";
+  const diffOpen = rawSearch.diff === "1";
   const activeThreadId = activeThread?.id ?? null;
   const activeLatestTurn = activeThread?.latestTurn ?? null;
   const latestTurnSettled = isLatestTurnSettled(
@@ -954,8 +935,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
       activeThread.messages.length > 0 ||
       activeThread.session !== null),
   );
-  const selectedServiceTierSetting = settings.codexServiceTier;
-  const selectedServiceTier = resolveAppServiceTier(selectedServiceTierSetting);
   const lockedProvider: ProviderKind | null = hasThreadStarted
     ? (sessionProvider ?? selectedProviderByThreadId ?? null)
     : null;
@@ -1009,6 +988,19 @@ export default function ChatView({ threadId }: ChatViewProps) {
     selectedProvider,
     supportsReasoningEffort,
   ]);
+  const providerOptionsForDispatch = useMemo(() => {
+    if (!settings.codexBinaryPath && !settings.codexHomePath) {
+      return undefined;
+    }
+    return {
+      codex: {
+        ...(settings.codexBinaryPath
+          ? { binaryPath: settings.codexBinaryPath }
+          : {}),
+        ...(settings.codexHomePath ? { homePath: settings.codexHomePath } : {}),
+      },
+    };
+  }, [settings.codexBinaryPath, settings.codexHomePath]);
   const composerHasSendableContent =
     prompt.trim().length > 0 || composerImages.length > 0;
   const selectedModelForPicker = selectedModel;
@@ -1142,23 +1134,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
       ),
     [activeLatestTurn?.turnId, threadActivities],
   );
-  const visibleActivePlan = useMemo(() => {
-    if (!activePlan || !activeThreadId) {
-      return activePlan;
-    }
-    return dismissedPlanCreatedAtByThreadId[activeThreadId] === activePlan.createdAt
-      ? null
-      : activePlan;
-  }, [activePlan, activeThreadId, dismissedPlanCreatedAtByThreadId]);
-  const dismissActivePlan = useCallback(() => {
-    if (!activePlan || !activeThreadId) {
-      return;
-    }
-    setDismissedPlanCreatedAtByThreadId((existing) => ({
-      ...existing,
-      [activeThreadId]: activePlan.createdAt,
-    }));
-  }, [activePlan, activeThreadId]);
   const showPlanFollowUpPrompt =
     pendingUserInputs.length === 0 &&
     interactionMode === "plan" &&
@@ -1531,16 +1506,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
         model: slug,
         label: name,
         description: `${providerLabel} · ${slug}`,
-        showFastBadge:
-          provider === "codex" &&
-          shouldShowFastTierIcon(slug, selectedServiceTierSetting),
       }));
-  }, [
-    composerTrigger,
-    searchableModelOptions,
-    selectedServiceTierSetting,
-    workspaceEntries,
-  ]);
+  }, [composerTrigger, searchableModelOptions, workspaceEntries]);
   const composerMenuOpen = Boolean(composerTrigger);
   const activeComposerMenuItem = useMemo(
     () =>
@@ -1927,6 +1894,36 @@ export default function ChatView({ threadId }: ChatViewProps) {
     },
     [activeProject, persistProjectScripts],
   );
+  const deleteProjectScript = useCallback(
+    async (scriptId: string) => {
+      if (!activeProject) return;
+      const nextScripts = activeProject.scripts.filter((script) => script.id !== scriptId);
+
+      const deletedName = activeProject.scripts.find((s) => s.id === scriptId)?.name;
+
+      try {
+        await persistProjectScripts({
+          projectId: activeProject.id,
+          projectCwd: activeProject.cwd,
+          previousScripts: activeProject.scripts,
+          nextScripts,
+          keybinding: null,
+          keybindingCommand: commandForProjectScript(scriptId),
+        });
+        toastManager.add({
+          type: "success",
+          title: `Deleted action "${deletedName ?? "Unknown"}"`,
+        });
+      } catch (error) {
+        toastManager.add({
+          type: "error",
+          title: "Could not delete action",
+          description: error instanceof Error ? error.message : "An unexpected error occurred.",
+        });
+      }
+    },
+    [activeProject, persistProjectScripts],
+  );
 
   const handleRuntimeModeChange = useCallback(
     (mode: RuntimeMode) => {
@@ -2074,6 +2071,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         "button, summary, [role='button'], [data-scroll-anchor-target]",
       );
       if (!trigger || !scrollContainer.contains(trigger)) return;
+      if (trigger.closest("[data-scroll-anchor-ignore]")) return;
 
       pendingInteractionAnchorRef.current = {
         element: trigger,
@@ -2298,7 +2296,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
   useEffect(() => {
     setExpandedWorkGroups({});
+    if (planSidebarOpenOnNextThreadRef.current) {
+      planSidebarOpenOnNextThreadRef.current = false;
+      setPlanSidebarOpen(true);
+    } else {
+      setPlanSidebarOpen(false);
+    }
+    planSidebarDismissedForTurnRef.current = null;
   }, [activeThread?.id]);
+
+
 
   useEffect(() => {
     if (!composerMenuOpen) {
@@ -3260,9 +3267,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
           attachments: turnAttachments,
         },
         model: selectedModel || undefined,
-        serviceTier: selectedServiceTier,
         ...(selectedModelOptionsForDispatch
           ? { modelOptions: selectedModelOptionsForDispatch }
+          : {}),
+        ...(providerOptionsForDispatch
+          ? { providerOptions: providerOptionsForDispatch }
           : {}),
         provider: selectedProvider,
         assistantDeliveryMode: settings.enableAssistantStreaming
@@ -3575,13 +3584,21 @@ export default function ChatView({ threadId }: ChatViewProps) {
           ...(selectedModelOptionsForDispatch
             ? { modelOptions: selectedModelOptionsForDispatch }
             : {}),
-          assistantDeliveryMode: settings.enableAssistantStreaming
-            ? "streaming"
-            : "buffered",
+          ...(providerOptionsForDispatch
+            ? { providerOptions: providerOptionsForDispatch }
+            : {}),
+          assistantDeliveryMode: settings.enableAssistantStreaming ? "streaming" : "buffered",
           runtimeMode,
           interactionMode: nextInteractionMode,
           createdAt: messageCreatedAt,
         });
+        // Optimistically open the plan sidebar when implementing (not refining).
+        // "default" mode here means the agent is executing the plan, which produces
+        // step-tracking activities that the sidebar will display.
+        if (nextInteractionMode === "default") {
+          planSidebarDismissedForTurnRef.current = null;
+          setPlanSidebarOpen(true);
+        }
         sendInFlightRef.current = false;
       } catch (err) {
         setOptimisticUserMessages((existing) =>
@@ -3607,6 +3624,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       runtimeMode,
       selectedModel,
       selectedModelOptionsForDispatch,
+      providerOptionsForDispatch,
       selectedProvider,
       setComposerDraftInteractionMode,
       setThreadError,
@@ -3663,8 +3681,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
         worktreePath: activeThread.worktreePath,
         createdAt,
       })
-      .then(() =>
-        api.orchestration.dispatchCommand({
+      .then(() => {
+        return api.orchestration.dispatchCommand({
           type: "thread.turn.start",
           commandId: newCommandId(),
           threadId: nextThreadId,
@@ -3679,17 +3697,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
           ...(selectedModelOptionsForDispatch
             ? { modelOptions: selectedModelOptionsForDispatch }
             : {}),
-          assistantDeliveryMode: settings.enableAssistantStreaming
-            ? "streaming"
-            : "buffered",
+          ...(providerOptionsForDispatch
+            ? { providerOptions: providerOptionsForDispatch }
+            : {}),
+          assistantDeliveryMode: settings.enableAssistantStreaming ? "streaming" : "buffered",
           runtimeMode,
           interactionMode: "default",
           createdAt,
-        }),
-      )
+        });
+      })
       .then(() => api.orchestration.getSnapshot())
       .then((snapshot) => {
         syncServerReadModel(snapshot);
+        // Signal that the plan sidebar should open on the new thread.
+        planSidebarOpenOnNextThreadRef.current = true;
         return navigate({
           to: "/$threadId",
           params: { threadId: nextThreadId },
@@ -3732,6 +3753,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     runtimeMode,
     selectedModel,
     selectedModelOptionsForDispatch,
+    providerOptionsForDispatch,
     selectedProvider,
     settings.enableAssistantStreaming,
     syncServerReadModel,
@@ -4146,14 +4168,21 @@ export default function ChatView({ threadId }: ChatViewProps) {
           }}
           onAddProjectScript={saveProjectScript}
           onUpdateProjectScript={updateProjectScript}
+          onDeleteProjectScript={deleteProjectScript}
           onToggleDiff={onToggleDiff}
         />
       </header>
 
       {/* Error banner */}
       <ProviderHealthBanner status={activeProviderStatus} />
-      <ThreadErrorBanner error={activeThread.error} />
-      <PlanModePanel activePlan={visibleActivePlan} onDismiss={dismissActivePlan} />
+      <ThreadErrorBanner
+        error={activeThread.error}
+        onDismiss={() => setThreadError(activeThread.id, null)}
+      />
+      {/* Main content area with optional plan sidebar */}
+      <div className="flex min-h-0 flex-1">
+        {/* Chat column */}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
 
       {/* Messages */}
       <div
@@ -4239,6 +4268,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                   answers={activePendingDraftAnswers}
                   questionIndex={activePendingQuestionIndex}
                   onSelectOption={onSelectActivePendingUserInputOption}
+                  onAdvance={onAdvanceActivePendingUserInput}
                 />
               </div>
             ) : showPlanFollowUpPrompt && activeProposedPlan ? (
@@ -4561,7 +4591,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
                     model={selectedModelForPickerWithCustomFallback}
                     lockedProvider={lockedProvider}
                     modelOptionsByProvider={modelOptionsByProvider}
-                    serviceTierSetting={selectedServiceTierSetting}
                     onProviderModelChange={onProviderModelSelect}
                   />
 
@@ -4642,6 +4671,43 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         : "Supervised"}
                     </span>
                   </Button>
+
+                  {/* Plan sidebar toggle */}
+                  {(activePlan || activeProposedPlan || planSidebarOpen) ? (
+                    <>
+                      <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
+                      <Button
+                        variant="ghost"
+                        className={cn(
+                          "shrink-0 whitespace-nowrap px-2 sm:px-3",
+                          planSidebarOpen
+                            ? "text-blue-400 hover:text-blue-300"
+                            : "text-muted-foreground/70 hover:text-foreground/80",
+                        )}
+                        size="sm"
+                        type="button"
+                        onClick={() => {
+                          setPlanSidebarOpen((open) => {
+                            if (open) {
+                              // Closing: track dismissal for current turn
+                              const turnKey = activePlan?.turnId ?? activeProposedPlan?.turnId ?? null;
+                              if (turnKey) {
+                                planSidebarDismissedForTurnRef.current = turnKey;
+                              }
+                            } else {
+                              // Re-opening: clear dismissal tracking
+                              planSidebarDismissedForTurnRef.current = null;
+                            }
+                            return !open;
+                          });
+                        }}
+                        title={planSidebarOpen ? "Hide plan sidebar" : "Show plan sidebar"}
+                      >
+                        <ListTodoIcon />
+                        <span className="sr-only sm:not-sr-only">Plan</span>
+                      </Button>
+                    </>
+                  ) : null}
                 </div>
 
                 {/* Right side: send / stop button */}
@@ -4822,6 +4888,27 @@ export default function ChatView({ threadId }: ChatViewProps) {
         </form>
       </div>
 
+        </div>{/* end chat column */}
+
+        {/* Plan sidebar */}
+        {planSidebarOpen ? (
+          <PlanSidebar
+            activePlan={activePlan}
+            activeProposedPlan={activeProposedPlan}
+            markdownCwd={gitCwd ?? undefined}
+            workspaceRoot={activeProject?.cwd ?? undefined}
+            onClose={() => {
+              setPlanSidebarOpen(false);
+              // Track that the user explicitly dismissed for this turn so auto-open won't fight them.
+              const turnKey = activePlan?.turnId ?? activeProposedPlan?.turnId ?? null;
+              if (turnKey) {
+                planSidebarDismissedForTurnRef.current = turnKey;
+              }
+            }}
+          />
+        ) : null}
+      </div>{/* end horizontal flex container */}
+
       {isGitRepo && (
         <BranchToolbar
           threadId={activeThread.id}
@@ -4945,10 +5032,8 @@ interface ChatHeaderProps {
   diffOpen: boolean;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<void>;
-  onUpdateProjectScript: (
-    scriptId: string,
-    input: NewProjectScriptInput,
-  ) => Promise<void>;
+  onUpdateProjectScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void>;
+  onDeleteProjectScript: (scriptId: string) => Promise<void>;
   onToggleDiff: () => void;
 }
 
@@ -4968,6 +5053,7 @@ const ChatHeader = memo(function ChatHeader({
   onRunProjectScript,
   onAddProjectScript,
   onUpdateProjectScript,
+  onDeleteProjectScript,
   onToggleDiff,
 }: ChatHeaderProps) {
   return (
@@ -5003,6 +5089,7 @@ const ChatHeader = memo(function ChatHeader({
             onRunScript={onRunProjectScript}
             onAddScript={onAddProjectScript}
             onUpdateScript={onUpdateProjectScript}
+            onDeleteScript={onDeleteProjectScript}
           />
         )}
         {activeProjectName && (
@@ -5050,8 +5137,10 @@ const ChatHeader = memo(function ChatHeader({
 
 const ThreadErrorBanner = memo(function ThreadErrorBanner({
   error,
+  onDismiss,
 }: {
   error: string | null;
+  onDismiss?: () => void;
 }) {
   if (!error) return null;
   return (
@@ -5061,6 +5150,18 @@ const ThreadErrorBanner = memo(function ThreadErrorBanner({
         <AlertDescription className="line-clamp-3" title={error}>
           {error}
         </AlertDescription>
+        {onDismiss && (
+          <AlertAction>
+            <button
+              type="button"
+              aria-label="Dismiss error"
+              className="inline-flex size-6 items-center justify-center rounded-md text-destructive/60 transition-colors hover:text-destructive"
+              onClick={onDismiss}
+            >
+              <XIcon className="size-3.5" />
+            </button>
+          </AlertAction>
+        )}
       </Alert>
     </div>
   );
@@ -5191,211 +5292,181 @@ const ComposerPendingApprovalActions = memo(
   },
 );
 
-interface PlanModePanelProps {
-  activePlan: ReturnType<typeof deriveActivePlanState>;
-  onDismiss: () => void;
-}
-
-function PlanStepStatusIndicator({
-  status,
-}: {
-  status: "pending" | "inProgress" | "completed";
-}) {
-  if (status === "inProgress") {
-    return (
-      <span
-        className="mt-0.5 inline-flex size-5 shrink-0 items-center justify-center text-muted-foreground/80"
-        aria-label="In progress"
-        title="In progress"
-      >
-        <LoaderCircleIcon className="size-4 animate-spin" />
-      </span>
-    );
-  }
-
-  return (
-    <span
-      className={cn(
-        "mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full border",
-        status === "completed"
-          ? "border-primary/70 bg-background"
-          : "border-border/70 bg-transparent",
-      )}
-      aria-label={status === "completed" ? "Done" : "Pending"}
-      title={status === "completed" ? "Done" : "Pending"}
-    >
-      {status === "completed" ? (
-        <span className="size-2 rounded-full bg-primary" />
-      ) : null}
-    </span>
-  );
-}
-
-const PlanModePanel = memo(function PlanModePanel({
-  activePlan,
-  onDismiss,
-}: PlanModePanelProps) {
-  const [collapsed, setCollapsed] = useState(false);
-  if (!activePlan) return null;
-  const collapsedSummary = summarizeCollapsedPlan({
-    explanation: activePlan.explanation,
-    steps: activePlan.steps,
-  });
-
-  return (
-    <div className="pt-3 mx-auto max-w-3xl">
-      <div className="relative rounded-xl border border-border/70 bg-transparent p-4">
-        <div className="absolute top-3 right-3 z-10 flex items-center gap-1">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            className="border-0 bg-transparent text-muted-foreground/70 shadow-none before:hidden hover:bg-transparent hover:text-foreground data-pressed:bg-transparent"
-            onClick={() => {
-              setCollapsed((current) => !current);
-            }}
-            aria-label={collapsed ? "Expand plan steps" : "Collapse plan steps"}
-            title={collapsed ? "Expand plan steps" : "Collapse plan steps"}
-          >
-            {collapsed ? (
-              <ChevronRightIcon className="size-3.5" />
-            ) : (
-              <ChevronDownIcon className="size-3.5" />
-            )}
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            className="border-0 bg-transparent text-muted-foreground/70 shadow-none before:hidden hover:bg-transparent hover:text-foreground data-pressed:bg-transparent"
-            onClick={onDismiss}
-            aria-label="Dismiss plan steps"
-            title="Dismiss plan steps"
-          >
-            <XIcon />
-          </Button>
-        </div>
-        <div className="flex items-center gap-2 pr-16">
-          <Badge variant="secondary">Plan</Badge>
-          <span className="text-xs text-muted-foreground">
-            Updated {formatTimestamp(activePlan.createdAt)}
-          </span>
-        </div>
-        {collapsed && collapsedSummary ? (
-          <p className="mt-2 text-sm text-muted-foreground">
-            {collapsedSummary}
-          </p>
-        ) : activePlan.explanation ? (
-          <p className="mt-2 text-sm text-muted-foreground">
-            {activePlan.explanation}
-          </p>
-        ) : null}
-        {!collapsed ? (
-          <div className="mt-3 space-y-2">
-            {activePlan.steps.map((step) => (
-              <div
-                key={`${step.status}:${step.step}`}
-                className="flex items-start gap-3 rounded-lg border border-border/60 bg-transparent px-3 py-2"
-              >
-                <PlanStepStatusIndicator status={step.status} />
-                <div className="min-w-0 flex-1 text-sm">{step.step}</div>
-              </div>
-            ))}
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-});
-
 interface PendingUserInputPanelProps {
   pendingUserInputs: PendingUserInput[];
   respondingRequestIds: ApprovalRequestId[];
   answers: Record<string, PendingUserInputDraftAnswer>;
   questionIndex: number;
   onSelectOption: (questionId: string, optionLabel: string) => void;
+  onAdvance: () => void;
 }
 
-const ComposerPendingUserInputPanel = memo(
-  function ComposerPendingUserInputPanel({
-    pendingUserInputs,
-    respondingRequestIds,
-    answers,
-    questionIndex,
-    onSelectOption,
-  }: PendingUserInputPanelProps) {
-    if (pendingUserInputs.length === 0) return null;
-    const activePrompt = pendingUserInputs[0];
-    if (!activePrompt) return null;
+const ComposerPendingUserInputPanel = memo(function ComposerPendingUserInputPanel({
+  pendingUserInputs,
+  respondingRequestIds,
+  answers,
+  questionIndex,
+  onSelectOption,
+  onAdvance,
+}: PendingUserInputPanelProps) {
+  if (pendingUserInputs.length === 0) return null;
+  const activePrompt = pendingUserInputs[0];
+  if (!activePrompt) return null;
 
-    return (
-      <ComposerPendingUserInputCard
-        key={activePrompt.requestId}
-        prompt={activePrompt}
-        isResponding={respondingRequestIds.includes(activePrompt.requestId)}
-        answers={answers}
-        questionIndex={questionIndex}
-        onSelectOption={onSelectOption}
-      />
-    );
-  },
-);
+  return (
+    <ComposerPendingUserInputCard
+      key={activePrompt.requestId}
+      prompt={activePrompt}
+      isResponding={respondingRequestIds.includes(activePrompt.requestId)}
+      answers={answers}
+      questionIndex={questionIndex}
+      onSelectOption={onSelectOption}
+      onAdvance={onAdvance}
+    />
+  );
+});
 
-const ComposerPendingUserInputCard = memo(
-  function ComposerPendingUserInputCard({
-    prompt,
-    isResponding,
-    answers,
-    questionIndex,
-    onSelectOption,
-  }: {
-    prompt: PendingUserInput;
-    isResponding: boolean;
-    answers: Record<string, PendingUserInputDraftAnswer>;
-    questionIndex: number;
-    onSelectOption: (questionId: string, optionLabel: string) => void;
-  }) {
-    const progress = derivePendingUserInputProgress(
-      prompt.questions,
-      answers,
-      questionIndex,
-    );
-    const activeQuestion = progress.activeQuestion;
+const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard({
+  prompt,
+  isResponding,
+  answers,
+  questionIndex,
+  onSelectOption,
+  onAdvance,
+}: {
+  prompt: PendingUserInput;
+  isResponding: boolean;
+  answers: Record<string, PendingUserInputDraftAnswer>;
+  questionIndex: number;
+  onSelectOption: (questionId: string, optionLabel: string) => void;
+  onAdvance: () => void;
+}) {
+  const progress = derivePendingUserInputProgress(prompt.questions, answers, questionIndex);
+  const activeQuestion = progress.activeQuestion;
+  const autoAdvanceTimerRef = useRef<number | null>(null);
 
-    if (!activeQuestion) {
-      return null;
-    }
+  // Clear auto-advance timer on unmount
+  useEffect(() => {
+    return () => {
+      if (autoAdvanceTimerRef.current !== null) {
+        window.clearTimeout(autoAdvanceTimerRef.current);
+      }
+    };
+  }, []);
 
-    return (
-      <div className="px-4 py-4 sm:px-5">
-        <div className="flex gap-2">
-          <span className="uppercase text-sm tracking-[0.2em]">
-            {questionIndex + 1}/{prompt.questions.length}{" "}
+  const selectOptionAndAutoAdvance = useCallback(
+    (questionId: string, optionLabel: string) => {
+      onSelectOption(questionId, optionLabel);
+      if (autoAdvanceTimerRef.current !== null) {
+        window.clearTimeout(autoAdvanceTimerRef.current);
+      }
+      autoAdvanceTimerRef.current = window.setTimeout(() => {
+        autoAdvanceTimerRef.current = null;
+        onAdvance();
+      }, 200);
+    },
+    [onSelectOption, onAdvance],
+  );
+
+  // Keyboard shortcut: number keys 1-9 select corresponding option and auto-advance.
+  // Works even when the Lexical composer (contenteditable) has focus — the composer
+  // doubles as a custom-answer field during user input, and when it's empty the digit
+  // keys should pick options instead of typing into the editor.
+  useEffect(() => {
+    if (!activeQuestion || isResponding) return;
+    const handler = (event: globalThis.KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement
+      ) {
+        return;
+      }
+      // If the user has started typing a custom answer in the contenteditable
+      // composer, let digit keys pass through so they can type numbers.
+      if (target instanceof HTMLElement && target.isContentEditable) {
+        const hasCustomText = progress.customAnswer.length > 0;
+        if (hasCustomText) return;
+      }
+      const digit = Number.parseInt(event.key, 10);
+      if (Number.isNaN(digit) || digit < 1 || digit > 9) return;
+      const optionIndex = digit - 1;
+      if (optionIndex >= activeQuestion.options.length) return;
+      const option = activeQuestion.options[optionIndex];
+      if (!option) return;
+      event.preventDefault();
+      selectOptionAndAutoAdvance(activeQuestion.id, option.label);
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [activeQuestion, isResponding, selectOptionAndAutoAdvance, progress.customAnswer.length]);
+
+  if (!activeQuestion) {
+    return null;
+  }
+
+  return (
+    <div className="px-4 py-3 sm:px-5">
+      <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
+          {prompt.questions.length > 1 ? (
+            <span className="flex h-5 items-center rounded-md bg-muted/60 px-1.5 text-[10px] font-medium tabular-nums text-muted-foreground/60">
+              {questionIndex + 1}/{prompt.questions.length}
+            </span>
+          ) : null}
+          <span className="text-[11px] font-semibold tracking-widest text-muted-foreground/50 uppercase">
             {activeQuestion.header}
           </span>
-          <div className="text-sm font-medium">{activeQuestion.question}</div>
-        </div>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {activeQuestion.options.map((option) => {
-            const isSelected = progress.selectedOptionLabel === option.label;
-            return (
-              <Button
-                key={`${activeQuestion.id}:${option.label}`}
-                size="sm"
-                variant={isSelected ? "default" : "outline"}
-                disabled={isResponding}
-                onClick={() => onSelectOption(activeQuestion.id, option.label)}
-                title={option.description}
-              >
-                {option.label}
-              </Button>
-            );
-          })}
         </div>
       </div>
-    );
-  },
-);
+      <p className="mt-1.5 text-sm text-foreground/90">{activeQuestion.question}</p>
+      <div className="mt-3 space-y-1">
+        {activeQuestion.options.map((option, index) => {
+          const isSelected = progress.selectedOptionLabel === option.label;
+          const shortcutKey = index < 9 ? index + 1 : null;
+          return (
+            <button
+              key={`${activeQuestion.id}:${option.label}`}
+              type="button"
+              disabled={isResponding}
+              onClick={() => selectOptionAndAutoAdvance(activeQuestion.id, option.label)}
+              className={cn(
+                "group flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left transition-all duration-150",
+                isSelected
+                  ? "border-blue-500/40 bg-blue-500/8 text-foreground"
+                  : "border-transparent bg-muted/20 text-foreground/80 hover:bg-muted/40 hover:border-border/40",
+                isResponding && "opacity-50 cursor-not-allowed",
+              )}
+            >
+              {shortcutKey !== null ? (
+                <kbd
+                  className={cn(
+                    "flex size-5 shrink-0 items-center justify-center rounded text-[11px] font-medium tabular-nums transition-colors duration-150",
+                    isSelected
+                      ? "bg-blue-500/20 text-blue-400"
+                      : "bg-muted/40 text-muted-foreground/50 group-hover:bg-muted/60 group-hover:text-muted-foreground/70",
+                  )}
+                >
+                  {shortcutKey}
+                </kbd>
+              ) : null}
+              <div className="min-w-0 flex-1">
+                <span className="text-sm font-medium">{option.label}</span>
+                {option.description && option.description !== option.label ? (
+                  <span className="ml-2 text-xs text-muted-foreground/50">{option.description}</span>
+                ) : null}
+              </div>
+              {isSelected ? (
+                <CheckIcon className="size-3.5 shrink-0 text-blue-400" />
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+});
 
 const ComposerPlanFollowUpBanner = memo(function ComposerPlanFollowUpBanner({
   planTitle,
@@ -5650,7 +5721,7 @@ const ProposedPlanCard = memo(function ProposedPlanCard({
   const saveContents = normalizePlanMarkdownForExport(planMarkdown);
 
   const handleDownload = () => {
-    downloadTextFile(downloadFilename, saveContents);
+    downloadPlanAsTextFile(downloadFilename, saveContents);
   };
 
   const openSaveDialog = () => {
@@ -5766,6 +5837,7 @@ const ProposedPlanCard = memo(function ProposedPlanCard({
             <Button
               size="sm"
               variant="outline"
+              data-scroll-anchor-ignore
               onClick={() => setExpanded((value) => !value)}
             >
               {expanded ? "Collapse plan" : "Expand plan"}
@@ -6438,8 +6510,7 @@ const MessagesTimeline = memo(function MessagesTimeline({
       )}
 
       {row.kind === "working" && (
-        <div className="flex items-center gap-2 py-0.5 pl-1.5">
-          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/30" />
+        <div className="py-0.5 pl-1.5">
           <div className="flex items-center gap-2 pt-1 text-[11px] text-muted-foreground/70">
             <span className="inline-flex items-center gap-[3px]">
               <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse" />
@@ -6582,7 +6653,6 @@ const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     ProviderKind,
     ReadonlyArray<{ slug: string; name: string }>
   >;
-  serviceTierSetting: AppServiceTier;
   disabled?: boolean;
   onProviderModelChange: (provider: ProviderKind, model: ModelSlug) => void;
 }) {
@@ -6615,14 +6685,7 @@ const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         }
       >
         <span className="flex min-w-0 items-center gap-2">
-          <ProviderIcon
-            aria-hidden="true"
-            className="size-4 shrink-0 text-muted-foreground/70"
-          />
-          {props.provider === "codex" &&
-          shouldShowFastTierIcon(props.model, props.serviceTierSetting) ? (
-            <ZapIcon className="size-3.5 shrink-0 text-amber-500" />
-          ) : null}
+          <ProviderIcon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground/70" />
           <span className="truncate">{selectedModelLabel}</span>
           <ChevronDownIcon aria-hidden="true" className="size-3 opacity-60" />
         </span>
@@ -6660,24 +6723,15 @@ const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                       setIsMenuOpen(false);
                     }}
                   >
-                    {props.modelOptionsByProvider[option.value].map(
-                      (modelOption) => (
-                        <MenuRadioItem
-                          key={`${option.value}:${modelOption.slug}`}
-                          value={modelOption.slug}
-                          onClick={() => setIsMenuOpen(false)}
-                        >
-                          {option.value === "codex" &&
-                          shouldShowFastTierIcon(
-                            modelOption.slug,
-                            props.serviceTierSetting,
-                          ) ? (
-                            <ZapIcon className="size-3.5 shrink-0 text-amber-500" />
-                          ) : null}
-                          {modelOption.name}
-                        </MenuRadioItem>
-                      ),
-                    )}
+                    {props.modelOptionsByProvider[option.value].map((modelOption) => (
+                      <MenuRadioItem
+                        key={`${option.value}:${modelOption.slug}`}
+                        value={modelOption.slug}
+                        onClick={() => setIsMenuOpen(false)}
+                      >
+                        {modelOption.name}
+                      </MenuRadioItem>
+                    ))}
                   </MenuRadioGroup>
                 </MenuGroup>
               </MenuSubPopup>

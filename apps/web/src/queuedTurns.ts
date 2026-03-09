@@ -6,7 +6,6 @@ import type {
 } from "@t3tools/contracts";
 import { getDefaultReasoningEffort } from "@t3tools/shared/model";
 
-import { resolveAppServiceTier, type AppServiceTier } from "./appSettings";
 import { type QueuedComposerMessageState } from "./composerDraftStore";
 import {
   derivePendingApprovals,
@@ -72,6 +71,25 @@ function queuedModelOptions(snapshot: QueuedComposerMessageState): {
   return Object.keys(codexOptions).length > 0
     ? { codex: codexOptions }
     : undefined;
+}
+
+function queuedProviderOptions(input: {
+  provider: ProviderKind;
+  codexBinaryPath: string;
+  codexHomePath: string;
+}) {
+  if (input.provider !== "codex") {
+    return undefined;
+  }
+  if (!input.codexBinaryPath && !input.codexHomePath) {
+    return undefined;
+  }
+  return {
+    codex: {
+      ...(input.codexBinaryPath ? { binaryPath: input.codexBinaryPath } : {}),
+      ...(input.codexHomePath ? { homePath: input.codexHomePath } : {}),
+    },
+  };
 }
 
 async function persistQueuedThreadSettings(input: {
@@ -166,7 +184,8 @@ export async function dispatchQueuedTurn(input: {
   snapshot: QueuedComposerMessageState;
   settings: {
     enableAssistantStreaming: boolean;
-    codexServiceTier: AppServiceTier;
+    codexBinaryPath: string;
+    codexHomePath: string;
   };
   setThreadError: (threadId: ThreadId, error: string | null) => void;
 }): Promise<void> {
@@ -187,6 +206,11 @@ export async function dispatchQueuedTurn(input: {
   const modelOptions = queuedModelOptions({
     ...input.snapshot,
     provider,
+  });
+  const providerOptions = queuedProviderOptions({
+    provider,
+    codexBinaryPath: input.settings.codexBinaryPath,
+    codexHomePath: input.settings.codexHomePath,
   });
 
   input.setThreadError(input.thread.id, null);
@@ -214,11 +238,8 @@ export async function dispatchQueuedTurn(input: {
     },
     provider,
     model: input.snapshot.model ?? undefined,
-    serviceTier:
-      provider === "codex"
-        ? resolveAppServiceTier(input.settings.codexServiceTier)
-        : null,
     ...(modelOptions ? { modelOptions } : {}),
+    ...(providerOptions ? { providerOptions } : {}),
     assistantDeliveryMode: input.settings.enableAssistantStreaming
       ? "streaming"
       : "buffered",

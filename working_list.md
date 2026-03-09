@@ -1,14 +1,16 @@
 # Working List
 
 ## Pending
+- [ ] Finalize the merge commit or hand off the staged merge state
 
 ## In Progress
+- [~] Review the final git state for unrelated local changes before closing out the branch
 
 ## Done
-- [x] Create the ExecPlan and initialize this working list
-- [x] Add queued message persistence and actions to `apps/web/src/composerDraftStore.ts`
-- [x] Extract queued-turn helpers in `apps/web/src/queuedTurns.ts`
-- [x] Add a root queued dispatcher and mount it from `apps/web/src/routes/__root.tsx`
-- [x] Update `apps/web/src/components/ChatView.tsx` for queue-on-send and queued cards
-- [x] Add and fix tests in `apps/web/src/composerDraftStore.test.ts` and `apps/web/src/components/ChatView.browser.tsx`
-- [x] Run lint, typecheck, and targeted tests
+- [x] Confirm the worktree is clean and create `codex/merge-upstream-pingdotgg-main` from local `main`
+- [x] Fetch `https://github.com/pingdotgg/t3code.git` into `refs/remotes/upstream-pingdotgg/main` and compare divergence against local `main`
+- [x] Inspect `pr-1` and decide not to use it as the integration base because its work is already upstream or superseded
+- [x] Merge `refs/remotes/upstream-pingdotgg/main` into `codex/merge-upstream-pingdotgg-main` and capture the exact conflict set
+- [x] Resolve merge conflicts while preserving the `Tether` rename and intended local behavior
+- [x] Run `PATH="$HOME/.bun/bin:$PATH" ~/.bun/bin/bun -b lint`
+- [x] Run `PATH="$HOME/.bun/bin:$PATH" ~/.bun/bin/bun typecheck`
