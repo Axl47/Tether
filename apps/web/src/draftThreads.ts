@@ -26,6 +26,13 @@ function firstDraftAttachmentName(draft: DraftThreadTitleState | null | undefine
   return null;
 }
 
+export function hasDraftThreadContent(
+  draft: DraftThreadTitleState | null | undefined,
+): boolean {
+  const trimmedPrompt = draft?.prompt.trim() ?? "";
+  return trimmedPrompt.length > 0 || firstDraftAttachmentName(draft) !== null;
+}
+
 export function deriveDraftThreadTitle(draft: DraftThreadTitleState | null | undefined): string {
   const trimmedPrompt = draft?.prompt.trim() ?? "";
   if (trimmedPrompt.length > 0) {

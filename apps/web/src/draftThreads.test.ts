@@ -1,7 +1,39 @@
 import { describe, expect, it } from "vitest";
 import { ProjectId, ThreadId } from "@t3tools/contracts";
 
-import { buildLocalDraftThread, deriveDraftThreadTitle } from "./draftThreads";
+import { buildLocalDraftThread, deriveDraftThreadTitle, hasDraftThreadContent } from "./draftThreads";
+
+describe("hasDraftThreadContent", () => {
+  it("returns true when the draft has prompt text", () => {
+    expect(
+      hasDraftThreadContent({
+        prompt: "Need to finish this",
+        images: [],
+        persistedAttachments: [],
+      }),
+    ).toBe(true);
+  });
+
+  it("returns true when the draft has attachments", () => {
+    expect(
+      hasDraftThreadContent({
+        prompt: "   ",
+        images: [{ name: "wireframe.png" }],
+        persistedAttachments: [],
+      }),
+    ).toBe(true);
+  });
+
+  it("returns false for settings-only draft state", () => {
+    expect(
+      hasDraftThreadContent({
+        prompt: "   ",
+        images: [],
+        persistedAttachments: [],
+      }),
+    ).toBe(false);
+  });
+});
 
 describe("deriveDraftThreadTitle", () => {
   it("uses the prompt when available", () => {

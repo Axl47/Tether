@@ -316,6 +316,68 @@ function createSnapshotWithExecutingPlan(): OrchestrationReadModel {
   };
 }
 
+function createSnapshotWithPendingUserInput(): OrchestrationReadModel {
+  const snapshot = createSnapshotForTargetUser({
+    targetMessageId: "msg-user-pending-input-target" as MessageId,
+    targetText: "pending input target",
+  });
+  const thread = snapshot.threads[0];
+
+  if (!thread?.session) {
+    throw new Error("Expected browser test snapshot to include a thread session.");
+  }
+
+  return {
+    ...snapshot,
+    threads: [
+      {
+        ...thread,
+        activities: [
+          {
+            id: "event-user-input-browser-1" as EventId,
+            tone: "info",
+            kind: "user-input.requested",
+            summary: "User input requested",
+            payload: {
+              requestId: "req-user-input-browser-1",
+              questions: [
+                {
+                  id: "hosting",
+                  header: "Hosting",
+                  question: "How should the Railway deployment be structured for this site?",
+                  options: [
+                    {
+                      label: "Pure static (Recommended)",
+                      description: "Export a static site with no Node runtime.",
+                    },
+                    {
+                      label: "Static + explicit config",
+                      description: "Keep it static but define the Railway deployment config manually.",
+                    },
+                    {
+                      label: "Small Node server",
+                      description: "Serve through a small Node runtime.",
+                    },
+                  ],
+                },
+              ],
+            },
+            turnId: null,
+            sequence: 1,
+            createdAt: isoAt(122),
+          },
+        ],
+        session: {
+          ...thread.session,
+          status: "ready",
+          activeTurnId: null,
+          updatedAt: isoAt(123),
+        },
+      },
+    ],
+  };
+}
+
 function resolveWsRpc(tag: string): unknown {
   if (tag === ORCHESTRATION_WS_METHODS.getSnapshot) {
     return fixture.snapshot;
@@ -473,6 +535,25 @@ async function waitForComposerImageInput(): Promise<HTMLInputElement> {
   );
 }
 
+async function waitForEnabledSendButton(): Promise<HTMLButtonElement> {
+  return waitForElement(
+    () =>
+      Array.from(document.querySelectorAll("button")).find(
+        (button) =>
+          button.getAttribute("aria-label") === "Send message" &&
+          !(button as HTMLButtonElement).disabled,
+      ) as HTMLButtonElement | null,
+    "Unable to find enabled send button.",
+  );
+}
+
+async function waitForStopButton(): Promise<HTMLButtonElement> {
+  return waitForElement(
+    () => document.querySelector<HTMLButtonElement>('button[aria-label="Stop generation"]'),
+    "Unable to find stop generation button.",
+  );
+}
+
 async function waitForInteractionModeButton(expectedLabel: "Chat" | "Plan"): Promise<HTMLButtonElement> {
   return waitForElement(
     () =>
@@ -489,6 +570,24 @@ async function waitForInteractionModeToggle(mode: "chat" | "plan"): Promise<HTML
       document.querySelector<HTMLButtonElement>(`button[data-interaction-mode="${mode}"]`),
     `Unable to find ${mode} interaction mode toggle.`,
   );
+}
+
+async function waitForPendingUserInputOption(label: string): Promise<HTMLButtonElement> {
+  return waitForElement(
+    () =>
+      Array.from(document.querySelectorAll("button")).find(
+        (button) => button.textContent?.trim() === label,
+      ) as HTMLButtonElement | null,
+    `Unable to find pending user input option "${label}".`,
+  );
+}
+
+function elementOwnsCenterPoint(element: HTMLElement): boolean {
+  const rect = element.getBoundingClientRect();
+  const centerX = rect.left + rect.width / 2;
+  const centerY = rect.top + rect.height / 2;
+  const hit = document.elementFromPoint(centerX, centerY);
+  return hit === element || (hit instanceof Node && element.contains(hit));
 }
 
 async function waitForThreadContextJumpButton(): Promise<HTMLButtonElement> {
@@ -1155,6 +1254,150 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await vi.waitFor(
         () => {
           expect(document.querySelectorAll("[data-composer-image-chip='true']").length).toBe(2);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("inserts a newline instead of sending when Enter is pressed in the mobile composer", async () => {
+    useComposerDraftStore.getState().setPrompt(THREAD_ID, "Mobile draft");
+
+    const mounted = await mountChatView({
+      viewport: MOBILE_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-target-mobile-enter" as MessageId,
+        targetText: "mobile enter target",
+      }),
+    });
+
+    try {
+      const composerEditor = await waitForComposerEditor();
+      await waitForEnabledSendButton();
+      composerEditor.focus();
+      composerEditor.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Enter",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+
+      await vi.waitFor(
+        () => {
+          const prompt = useComposerDraftStore.getState().draftsByThreadId[THREAD_ID]?.prompt ?? "";
+          expect(prompt).toContain("\n");
+          expect(prompt.replaceAll("\n", "")).toBe("Mobile draft");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      await waitForLayout();
+      expect(
+        wsRequests.find(
+          (request) =>
+            request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+            request.type === "thread.turn.start",
+        ),
+      ).toBeUndefined();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps the composer editable while a turn is running", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotWithExecutingPlan(),
+    });
+
+    try {
+      const composerEditor = await waitForComposerEditor();
+      const stopButton = await waitForStopButton();
+
+      expect(stopButton.getAttribute("aria-label")).toBe("Stop generation");
+      expect(composerEditor.getAttribute("contenteditable")).toBe("true");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("inserts a newline instead of sending when Enter is pressed during a running turn", async () => {
+    useComposerDraftStore.getState().setPrompt(THREAD_ID, "Draft while running");
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotWithExecutingPlan(),
+    });
+
+    try {
+      const composerEditor = await waitForComposerEditor();
+      await waitForStopButton();
+      composerEditor.focus();
+      composerEditor.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Enter",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+
+      await vi.waitFor(
+        () => {
+          const prompt = useComposerDraftStore.getState().draftsByThreadId[THREAD_ID]?.prompt ?? "";
+          expect(prompt).toContain("\n");
+          expect(prompt.replaceAll("\n", "")).toBe("Draft while running");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      await waitForLayout();
+      expect(
+        wsRequests.find(
+          (request) =>
+            request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+            request.type === "thread.turn.start",
+        ),
+      ).toBeUndefined();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("allows changing the selected pending user input option", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotWithPendingUserInput(),
+    });
+
+    try {
+      const recommendedOption = await waitForPendingUserInputOption("Pure static (Recommended)");
+      const explicitConfigOption = await waitForPendingUserInputOption("Static + explicit config");
+
+      expect(recommendedOption.dataset.slot).toBe("button");
+      expect(elementOwnsCenterPoint(recommendedOption)).toBe(true);
+      expect(elementOwnsCenterPoint(explicitConfigOption)).toBe(true);
+
+      recommendedOption.click();
+
+      await vi.waitFor(
+        () => {
+          expect(recommendedOption.className).toContain("bg-primary");
+          expect(explicitConfigOption.className).not.toContain("bg-primary");
+          expect(document.activeElement).toBe(recommendedOption);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      explicitConfigOption.click();
+
+      await vi.waitFor(
+        () => {
+          expect(explicitConfigOption.className).toContain("bg-primary");
+          expect(recommendedOption.className).not.toContain("bg-primary");
+          expect(document.activeElement).toBe(explicitConfigOption);
         },
         { timeout: 8_000, interval: 16 },
       );

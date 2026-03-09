@@ -1,3 +1,5 @@
+import { extractInlineAssistantImage } from "../assistantInlineImage";
+
 const ASSISTANT_CHARS_PER_LINE_FALLBACK = 72;
 const USER_CHARS_PER_LINE_FALLBACK = 56;
 const LINE_HEIGHT_PX = 22;
@@ -69,9 +71,11 @@ export function estimateTimelineMessageHeight(
   layout: TimelineHeightEstimateLayout = { timelineWidthPx: null },
 ): number {
   if (message.role === "assistant") {
+    const inlineAssistantImage =
+      (message.attachments?.length ?? 0) === 0 ? extractInlineAssistantImage(message.text) : null;
     const charsPerLine = estimateCharsPerLineForAssistant(layout.timelineWidthPx);
-    const estimatedLines = estimateWrappedLineCount(message.text, charsPerLine);
-    const attachmentCount = message.attachments?.length ?? 0;
+    const estimatedLines = estimateWrappedLineCount(inlineAssistantImage ? "" : message.text, charsPerLine);
+    const attachmentCount = Math.max(message.attachments?.length ?? 0, inlineAssistantImage ? 1 : 0);
     const attachmentRows = Math.ceil(attachmentCount / ATTACHMENTS_PER_ROW);
     const attachmentHeight = attachmentRows * ASSISTANT_ATTACHMENT_ROW_HEIGHT_PX;
     return ASSISTANT_BASE_HEIGHT_PX + estimatedLines * LINE_HEIGHT_PX + attachmentHeight;

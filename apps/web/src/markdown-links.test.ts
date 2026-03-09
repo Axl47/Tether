@@ -1,6 +1,9 @@
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import ReactMarkdown from "react-markdown";
 import { describe, expect, it } from "vitest";
 
-import { resolveMarkdownFileLinkTarget } from "./markdown-links";
+import { normalizeMarkdownFileLinks, resolveMarkdownFileLinkTarget } from "./markdown-links";
 
 describe("resolveMarkdownFileLinkTarget", () => {
   it("resolves absolute posix file paths", () => {
@@ -33,6 +36,12 @@ describe("resolveMarkdownFileLinkTarget", () => {
     );
   });
 
+  it("normalizes browser-style windows drive paths", () => {
+    expect(resolveMarkdownFileLinkTarget("/C:/Users/julius/project/src/main.ts#L42C7")).toBe(
+      "C:/Users/julius/project/src/main.ts:42:7",
+    );
+  });
+
   it("ignores external urls", () => {
     expect(resolveMarkdownFileLinkTarget("https://example.com/docs")).toBeNull();
   });
@@ -45,5 +54,50 @@ describe("resolveMarkdownFileLinkTarget", () => {
 
   it("does not treat app routes as file links", () => {
     expect(resolveMarkdownFileLinkTarget("/chat/settings")).toBeNull();
+  });
+});
+
+describe("normalizeMarkdownFileLinks", () => {
+  it("repairs markdown file links whose windows paths include spaces", () => {
+    const input =
+      "[site/assets/site.css#L302](/C:/Users/Adam/Workspaces/My Roblox/site/assets/site.css#L302)";
+
+    expect(normalizeMarkdownFileLinks(input)).toBe(
+      "[site/assets/site.css#L302](</C:/Users/Adam/Workspaces/My Roblox/site/assets/site.css#L302>)",
+    );
+  });
+
+  it("leaves external links with titles unchanged", () => {
+    const input = '[docs](https://example.com "Example")';
+
+    expect(normalizeMarkdownFileLinks(input)).toBe(input);
+  });
+
+  it("produces parseable markdown for repaired file links", () => {
+    const input =
+      "[site/assets/site.css#L302](/C:/Users/Adam/Workspaces/My Roblox/site/assets/site.css#L302)";
+    const html = renderToStaticMarkup(
+      React.createElement(ReactMarkdown, null, normalizeMarkdownFileLinks(input)),
+    );
+
+    expect(html).toContain(
+      '<a href="/C:/Users/Adam/Workspaces/My%20Roblox/site/assets/site.css#L302">',
+    );
+  });
+
+  it("does not rewrite inline code spans", () => {
+    const input = "`[site/assets/site.css#L302](/C:/Users/Adam/Workspaces/My Roblox/site/assets/site.css#L302)`";
+
+    expect(normalizeMarkdownFileLinks(input)).toBe(input);
+  });
+
+  it("does not rewrite fenced code blocks", () => {
+    const input = [
+      "```md",
+      "[site/assets/site.css#L302](/C:/Users/Adam/Workspaces/My Roblox/site/assets/site.css#L302)",
+      "```",
+    ].join("\n");
+
+    expect(normalizeMarkdownFileLinks(input)).toBe(input);
   });
 });

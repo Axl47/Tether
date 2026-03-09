@@ -2,6 +2,7 @@ import { resolvePathLinkTarget } from "./terminal-links";
 
 const WINDOWS_DRIVE_PATH_PATTERN = /^[A-Za-z]:[\\/]/;
 const WINDOWS_UNC_PATH_PATTERN = /^\\\\/;
+const WINDOWS_BROWSER_DRIVE_PATH_PATTERN = /^\/[A-Za-z]:[\\/]/;
 const EXTERNAL_SCHEME_PATTERN = /^([A-Za-z][A-Za-z0-9+.-]*):(.*)$/;
 const RELATIVE_PATH_PREFIX_PATTERN = /^(~\/|\.{1,2}\/)/;
 const RELATIVE_FILE_PATH_PATTERN = /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+(?::\d+){0,2}$/;
@@ -65,6 +66,10 @@ function looksLikePosixFilesystemPath(path: string): boolean {
   return /\.[A-Za-z0-9_-]+$/.test(basename);
 }
 
+function normalizeWindowsDrivePath(path: string): string {
+  return WINDOWS_BROWSER_DRIVE_PATH_PATTERN.test(path) ? path.slice(1) : path;
+}
+
 function appendLineColumnFromHash(path: string, hash: string): string {
   if (!hash || POSITION_SUFFIX_PATTERN.test(path)) return path;
   const match = hash.match(/^#L(\d+)(?:C(\d+))?$/i);
@@ -110,7 +115,9 @@ export function resolveMarkdownFileLinkTarget(
     ? parseFileUrlHref(rawHref)
     : null;
   const source = fileUrlTarget ?? stripSearchAndHash(rawHref);
-  const decodedPath = fileUrlTarget ? source.path.trim() : safeDecode(source.path.trim());
+  const decodedPath = normalizeWindowsDrivePath(
+    fileUrlTarget ? source.path.trim() : safeDecode(source.path.trim()),
+  );
   const decodedHash = safeDecode(source.hash.trim());
 
   if (decodedPath.length === 0) return null;
@@ -131,4 +138,134 @@ export function resolveMarkdownFileLinkTarget(
 
   if (!cwd) return null;
   return resolvePathLinkTarget(pathWithPosition, cwd);
+}
+
+export function normalizeMarkdownFileLinks(markdown: string, cwd?: string): string {
+  let cursor = 0;
+  let normalized = "";
+
+  while (cursor < markdown.length) {
+    const fencedBlockEnd = readFencedCodeBlockEnd(markdown, cursor);
+    if (fencedBlockEnd !== null) {
+      normalized += markdown.slice(cursor, fencedBlockEnd);
+      cursor = fencedBlockEnd;
+      continue;
+    }
+
+    const inlineCodeEnd = readInlineCodeSpanEnd(markdown, cursor);
+    if (inlineCodeEnd !== null) {
+      normalized += markdown.slice(cursor, inlineCodeEnd);
+      cursor = inlineCodeEnd;
+      continue;
+    }
+
+    const link = readMarkdownLink(markdown, cursor);
+    if (link) {
+      const trimmedDestination = link.destination.trim();
+      if (
+        trimmedDestination.length > 0 &&
+        /\s/.test(trimmedDestination) &&
+        !(trimmedDestination.startsWith("<") && trimmedDestination.endsWith(">")) &&
+        resolveMarkdownFileLinkTarget(trimmedDestination, cwd)
+      ) {
+        normalized += `[${link.label}](<${trimmedDestination}>)`;
+      } else {
+        normalized += link.raw;
+      }
+      cursor = link.end;
+      continue;
+    }
+
+    normalized += markdown[cursor];
+    cursor += 1;
+  }
+
+  return normalized;
+}
+
+function readMarkdownLink(
+  markdown: string,
+  start: number,
+): { raw: string; label: string; destination: string; end: number } | null {
+  if (markdown[start] !== "[" || markdown[start - 1] === "!") {
+    return null;
+  }
+
+  const match = /^\[([^\]\n]+)\]\(([^)\n]+)\)/.exec(markdown.slice(start));
+  if (!match?.[0] || !match[1] || !match[2]) {
+    return null;
+  }
+
+  return {
+    raw: match[0],
+    label: match[1],
+    destination: match[2],
+    end: start + match[0].length,
+  };
+}
+
+function readInlineCodeSpanEnd(markdown: string, start: number): number | null {
+  if (markdown[start] !== "`") {
+    return null;
+  }
+
+  let tickCount = 1;
+  while (markdown[start + tickCount] === "`") {
+    tickCount += 1;
+  }
+
+  const fence = "`".repeat(tickCount);
+  const closingIndex = markdown.indexOf(fence, start + tickCount);
+  return closingIndex === -1 ? null : closingIndex + tickCount;
+}
+
+function readFencedCodeBlockEnd(markdown: string, start: number): number | null {
+  const fenceChar = markdown[start];
+  if ((fenceChar !== "`" && fenceChar !== "~") || !isFenceLineStart(markdown, start)) {
+    return null;
+  }
+
+  let fenceLength = 1;
+  while (markdown[start + fenceLength] === fenceChar) {
+    fenceLength += 1;
+  }
+  if (fenceLength < 3) {
+    return null;
+  }
+
+  const contentStart = findLineEnd(markdown, start);
+  if (contentStart === markdown.length) {
+    return markdown.length;
+  }
+
+  let lineStart = contentStart;
+  while (lineStart < markdown.length) {
+    const lineEnd = findLineEnd(markdown, lineStart);
+    if (isFenceLineClose(markdown.slice(lineStart, lineEnd), fenceChar, fenceLength)) {
+      return lineEnd;
+    }
+    lineStart = lineEnd;
+  }
+
+  return markdown.length;
+}
+
+function isFenceLineStart(markdown: string, start: number): boolean {
+  const lineStart = markdown.lastIndexOf("\n", start - 1) + 1;
+  return /^[ \t]{0,3}$/.test(markdown.slice(lineStart, start));
+}
+
+function isFenceLineClose(line: string, fenceChar: string, fenceLength: number): boolean {
+  const trimmedLine = line.trimStart();
+  let actualFenceLength = 0;
+  while (trimmedLine[actualFenceLength] === fenceChar) {
+    actualFenceLength += 1;
+  }
+
+  return actualFenceLength >= fenceLength && trimmedLine.slice(actualFenceLength).trim().length === 0;
+}
+
+function findLineEnd(markdown: string, start: number): number {
+  const nextNewline = markdown.indexOf("\n", start);
+  return nextNewline === -1 ? markdown.length : nextNewline + 1;
 }

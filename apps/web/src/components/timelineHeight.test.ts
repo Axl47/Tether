@@ -22,6 +22,15 @@ describe("estimateTimelineMessageHeight", () => {
     ).toBe(328);
   });
 
+  it("treats standalone assistant SVG replies like image rows", () => {
+    expect(
+      estimateTimelineMessageHeight({
+        role: "assistant",
+        text: '```svg\n<svg xmlns="http://www.w3.org/2000/svg"><rect width="4" height="4"/></svg>\n```',
+      }),
+    ).toBe(328);
+  });
+
   it("uses assistant sizing rules for system messages", () => {
     expect(
       estimateTimelineMessageHeight({

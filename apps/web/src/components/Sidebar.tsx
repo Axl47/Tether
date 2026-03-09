@@ -23,7 +23,7 @@ import { useNavigate, useParams } from "@tanstack/react-router";
 import { useAppSettings } from "../appSettings";
 import { isElectron } from "../env";
 import { APP_STAGE_LABEL } from "../branding";
-import { buildLocalDraftThread } from "../draftThreads";
+import { buildLocalDraftThread, hasDraftThreadContent } from "../draftThreads";
 import { copyTextToClipboard } from "../lib/clipboard";
 import { newCommandId, newProjectId, newThreadId } from "../lib/utils";
 import {
@@ -1318,7 +1318,8 @@ export default function Sidebar() {
                             pendingRunPhase: pendingRun?.phase ?? null,
                           });
                           const isDraftThread =
-                            draftThreadIdSet.has(thread.id) || draftsByThreadId[thread.id] !== undefined;
+                            draftThreadIdSet.has(thread.id) ||
+                            hasDraftThreadContent(draftsByThreadId[thread.id]);
                           const prStatus = prStatusIndicator(prByThreadId.get(thread.id) ?? null);
                           const terminalStatus = terminalStatusFromRunningIds(
                             selectThreadTerminalState(terminalStateByThreadId, thread.id)

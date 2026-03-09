@@ -63,6 +63,7 @@ import {
   parseStandaloneComposerSlashCommand,
   replaceTextRange,
 } from "../composer-logic";
+import { shouldSubmitComposerOnEnter } from "../composerKeyBehavior";
 import {
   derivePendingApprovals,
   derivePendingUserInputs,
@@ -114,6 +115,7 @@ import {
 } from "../types";
 import { basenameOfPath, getVscodeIconUrlForEntry } from "../vscode-icons";
 import { useTheme } from "../hooks/useTheme";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { summarizeTurnDiffStats } from "../lib/turnDiffTree";
 import BranchToolbar from "./BranchToolbar";
@@ -213,6 +215,7 @@ import {
   type AppServiceTier,
   useAppSettings,
 } from "../appSettings";
+import { extractInlineAssistantImage } from "../assistantInlineImage";
 import {
   type ComposerImageAttachment,
   type DraftThreadEnvMode,
@@ -602,6 +605,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     select: (params) => parseDiffRouteSearch(params),
   });
   const { resolvedTheme } = useTheme();
+  const isMobileViewport = useMediaQuery("(max-width: 767px)");
   const queryClient = useQueryClient();
   const createWorktreeMutation = useMutation(gitCreateWorktreeMutationOptions({ queryClient }));
   const composerDraft = useComposerThreadDraft(threadId);
@@ -999,7 +1003,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
     isConnecting ||
     isPendingThreadRun ||
     isComposerApprovalState ||
-    phase === "running" ||
     isSendBusy ||
     isRevertingCheckpoint;
   const hasComposerHeader =
@@ -3334,6 +3337,37 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
     return { value: promptRef.current, cursor: composerCursor };
   }, [composerCursor]);
+  const focusPendingUserInputOptionFromComposer = useCallback(
+    (preferLast: boolean): boolean => {
+      const composerForm = composerFormRef.current;
+      if (!composerForm) {
+        return false;
+      }
+      const optionButtons = Array.from(
+        composerForm.querySelectorAll<HTMLButtonElement>(
+          "button[data-pending-user-input-option]:not(:disabled)",
+        ),
+      );
+      if (optionButtons.length === 0) {
+        return false;
+      }
+      const selectedLabel = activePendingProgress?.selectedOptionLabel;
+      const selectedButton =
+        selectedLabel === undefined
+          ? null
+          : optionButtons.find(
+              (button) => button.dataset.pendingUserInputOption === selectedLabel,
+            ) ?? null;
+      const targetButton =
+        selectedButton ?? (preferLast ? optionButtons.at(-1) ?? null : optionButtons[0] ?? null);
+      if (!targetButton) {
+        return false;
+      }
+      targetButton.focus({ preventScroll: true });
+      return true;
+    },
+    [activePendingProgress?.selectedOptionLabel],
+  );
 
   const resolveActiveComposerTrigger = useCallback((): {
     snapshot: { value: string; cursor: number };
@@ -3465,6 +3499,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
     key: "ArrowDown" | "ArrowUp" | "Enter" | "Tab",
     event: KeyboardEvent,
   ) => {
+    if (activePendingProgress?.activeQuestion && key === "Tab") {
+      return focusPendingUserInputOptionFromComposer(event.shiftKey);
+    }
+
     if (key === "Tab" && event.shiftKey) {
       toggleInteractionMode();
       return true;
@@ -3492,7 +3530,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
       }
     }
 
-    if (key === "Enter" && !event.shiftKey) {
+    if (
+      key === "Enter" &&
+      shouldSubmitComposerOnEnter({
+        isMobileViewport,
+        shiftKey: event.shiftKey,
+        canSubmit: phase !== "running",
+      })
+    ) {
       void onSend();
       return true;
     }
@@ -3646,6 +3691,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             liveWorkEntries={workLogEntries}
             optimisticRunPhase={optimisticThreadRun?.phase ?? null}
             scrollContainer={messagesScrollElement}
+            scrollContainerPaddingTopPx={floatingThreadCardsHeight + 16}
             timelineEntries={timelineEntries}
             jumpToMessageId={threadContextJumpRequest?.messageId ?? null}
             jumpToMessageRequestKey={threadContextJumpRequest?.key ?? 0}
@@ -4725,7 +4771,18 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
               size="sm"
               variant={isSelected ? "default" : "outline"}
               disabled={isResponding}
-              onClick={() => onSelectOption(activeQuestion.id, option.label)}
+              data-pending-user-input-option={option.label}
+              aria-pressed={isSelected}
+              onMouseDown={(event) => {
+                event.preventDefault();
+              }}
+              onClick={(event) => {
+                onSelectOption(activeQuestion.id, option.label);
+                const targetButton = event.currentTarget;
+                window.requestAnimationFrame(() => {
+                  targetButton.focus({ preventScroll: true });
+                });
+              }}
               title={option.description}
             >
               {option.label}
@@ -4999,6 +5056,8 @@ interface MessagesTimelineProps {
   liveWorkEntries: ReadonlyArray<WorkLogEntry>;
   optimisticRunPhase: "sending-turn" | "preparing-worktree" | null;
   scrollContainer: HTMLDivElement | null;
+  /** Scroll container's top padding in px so the flagger rail can extend into it. */
+  scrollContainerPaddingTopPx: number;
   timelineEntries: ReturnType<typeof deriveTimelineEntries>;
   jumpToMessageId: MessageId | null;
   jumpToMessageRequestKey: number;
@@ -5423,6 +5482,7 @@ const MessagesTimeline = memo(function MessagesTimeline({
   liveWorkEntries,
   optimisticRunPhase,
   scrollContainer,
+  scrollContainerPaddingTopPx,
   timelineEntries,
   jumpToMessageId,
   jumpToMessageRequestKey,
@@ -5993,9 +6053,23 @@ const MessagesTimeline = memo(function MessagesTimeline({
         row.message.role === "assistant" &&
         (() => {
           const assistantImages = row.message.attachments ?? [];
+          const inlineAssistantImage =
+            assistantImages.length === 0 ? extractInlineAssistantImage(row.message.text) : null;
+          const renderableAssistantImages =
+            assistantImages.length > 0
+              ? assistantImages
+              : inlineAssistantImage
+                ? [
+                    {
+                      id: `${row.message.id}:inline-svg`,
+                      name: inlineAssistantImage.name,
+                      previewUrl: inlineAssistantImage.previewUrl,
+                    },
+                  ]
+                : [];
           const messageText =
-            row.message.text ||
-            (row.message.streaming || assistantImages.length > 0 ? "" : "(empty response)");
+            (inlineAssistantImage ? "" : row.message.text) ||
+            (row.message.streaming || renderableAssistantImages.length > 0 ? "" : "(empty response)");
           return (
             <>
               {row.showCompletionDivider && (
@@ -6008,9 +6082,9 @@ const MessagesTimeline = memo(function MessagesTimeline({
                 </div>
               )}
               <div className="min-w-0 px-1 py-0.5">
-                {assistantImages.length > 0 && (
+                {renderableAssistantImages.length > 0 && (
                   <div className="mb-3 grid max-w-[520px] grid-cols-2 gap-2">
-                    {assistantImages.map((image) => (
+                    {renderableAssistantImages.map((image) => (
                       <div
                         key={image.id}
                         className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
@@ -6021,7 +6095,7 @@ const MessagesTimeline = memo(function MessagesTimeline({
                             className="h-full w-full cursor-zoom-in"
                             aria-label={`Preview ${image.name}`}
                             onClick={() => {
-                              const preview = buildExpandedImagePreview(assistantImages, image.id);
+                              const preview = buildExpandedImagePreview(renderableAssistantImages, image.id);
                               if (!preview) return;
                               onImageExpand(preview);
                             }}
@@ -6116,37 +6190,46 @@ const MessagesTimeline = memo(function MessagesTimeline({
   }
 
   return (
-    <div className="relative">
+    <div
+      className="relative -mb-3 sm:-mb-4"
+      style={{ marginTop: `-${scrollContainerPaddingTopPx}px` }}
+    >
+      {/* Inner wrapper restores the padding so message content stays in place */}
       <div
-        ref={timelineRootRef}
-        data-timeline-root="true"
-        className="relative mx-auto w-full min-w-0 max-w-3xl overflow-x-hidden"
+        className="pb-3 sm:pb-4"
+        style={{ paddingTop: `${scrollContainerPaddingTopPx}px` }}
       >
-        <div className="min-w-0">
-          {virtualizedRowCount > 0 && (
-            <div className="relative" style={{ height: `${rowVirtualizer.getTotalSize()}px` }}>
-              {virtualRows.map((virtualRow: VirtualItem) => {
-                const row = rows[virtualRow.index];
-                if (!row) return null;
+        <div
+          ref={timelineRootRef}
+          data-timeline-root="true"
+          className="relative mx-auto w-full min-w-0 max-w-3xl overflow-x-hidden"
+        >
+          <div className="min-w-0">
+            {virtualizedRowCount > 0 && (
+              <div className="relative" style={{ height: `${rowVirtualizer.getTotalSize()}px` }}>
+                {virtualRows.map((virtualRow: VirtualItem) => {
+                  const row = rows[virtualRow.index];
+                  if (!row) return null;
 
-                return (
-                  <div
-                    key={`virtual-row:${row.id}`}
-                    data-index={virtualRow.index}
-                    ref={rowVirtualizer.measureElement}
-                    className="absolute left-0 top-0 w-full"
-                    style={{ transform: `translateY(${virtualRow.start}px)` }}
-                  >
-                    {renderRowContent(row)}
-                  </div>
-                );
-              })}
-            </div>
-          )}
+                  return (
+                    <div
+                      key={`virtual-row:${row.id}`}
+                      data-index={virtualRow.index}
+                      ref={rowVirtualizer.measureElement}
+                      className="absolute left-0 top-0 w-full"
+                      style={{ transform: `translateY(${virtualRow.start}px)` }}
+                    >
+                      {renderRowContent(row)}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
 
-          {nonVirtualizedRows.map((row) => (
-            <div key={`non-virtual-row:${row.id}`}>{renderRowContent(row)}</div>
-          ))}
+            {nonVirtualizedRows.map((row) => (
+              <div key={`non-virtual-row:${row.id}`}>{renderRowContent(row)}</div>
+            ))}
+          </div>
         </div>
       </div>
       {/* Overview ruler — positioned at the right edge of the scroll container, next to the scrollbar */}
