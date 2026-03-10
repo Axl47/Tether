@@ -954,6 +954,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const activePendingIsResponding = activePendingUserInput
     ? respondingUserInputRequestIds.includes(activePendingUserInput.requestId)
     : false;
+  const hasActivePendingUserInput = activePendingProgress !== null;
   const activeProposedPlan = useMemo(() => {
     if (!latestTurnSettled) {
       return null;
@@ -2595,7 +2596,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     if (
       !api ||
       !activeThread ||
-      phase === "running" ||
+      (phase === "running" && !hasActivePendingUserInput) ||
       isPendingThreadRun ||
       isSendBusy ||
       isConnecting ||
@@ -3557,7 +3558,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       shouldSubmitComposerOnEnter({
         isMobileViewport,
         shiftKey: event.shiftKey,
-        canSubmit: phase !== "running",
+        canSubmit: phase !== "running" || hasActivePendingUserInput,
       })
     ) {
       void onSend();

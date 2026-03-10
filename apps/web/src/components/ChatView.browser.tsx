@@ -316,12 +316,16 @@ function createSnapshotWithExecutingPlan(): OrchestrationReadModel {
   };
 }
 
-function createSnapshotWithPendingUserInput(): OrchestrationReadModel {
+function createSnapshotWithPendingUserInput(options?: {
+  sessionStatus?: "ready" | "running";
+}): OrchestrationReadModel {
   const snapshot = createSnapshotForTargetUser({
     targetMessageId: "msg-user-pending-input-target" as MessageId,
     targetText: "pending input target",
   });
   const thread = snapshot.threads[0];
+  const sessionStatus = options?.sessionStatus ?? "ready";
+  const turnId = "turn-browser-user-input-1" as TurnId;
 
   if (!thread?.session) {
     throw new Error("Expected browser test snapshot to include a thread session.");
@@ -362,15 +366,26 @@ function createSnapshotWithPendingUserInput(): OrchestrationReadModel {
                 },
               ],
             },
-            turnId: null,
+            turnId: sessionStatus === "running" ? turnId : null,
             sequence: 1,
             createdAt: isoAt(122),
           },
         ],
+        latestTurn:
+          sessionStatus === "running"
+            ? {
+                turnId,
+                state: "running",
+                requestedAt: isoAt(120),
+                startedAt: isoAt(121),
+                completedAt: null,
+                assistantMessageId: null,
+              }
+            : null,
         session: {
           ...thread.session,
-          status: "ready",
-          activeTurnId: null,
+          status: sessionStatus,
+          activeTurnId: sessionStatus === "running" ? turnId : null,
           updatedAt: isoAt(123),
         },
       },
@@ -580,6 +595,30 @@ async function waitForPendingUserInputOption(label: string): Promise<HTMLButtonE
       ) as HTMLButtonElement | null,
     `Unable to find pending user input option "${label}".`,
   );
+}
+
+async function waitForPendingUserInputSubmitButton(): Promise<HTMLButtonElement> {
+  return waitForElement(
+    () =>
+      Array.from(document.querySelectorAll("button")).find(
+        (button) =>
+          button.textContent?.trim() === "Submit answers" && !(button as HTMLButtonElement).disabled,
+      ) as HTMLButtonElement | null,
+    "Unable to find enabled pending user input submit button.",
+  );
+}
+
+function findDispatchedCommand(type: string): WsRequestEnvelope["body"] | undefined {
+  return wsRequests.find((request) => {
+    if (request._tag !== ORCHESTRATION_WS_METHODS.dispatchCommand) {
+      return false;
+    }
+    const command =
+      request.command && typeof request.command === "object"
+        ? (request.command as Record<string, unknown>)
+        : null;
+    return command?.type === type;
+  });
 }
 
 function elementOwnsCenterPoint(element: HTMLElement): boolean {
@@ -1398,6 +1437,83 @@ describe("ChatView timeline estimator parity (full app)", () => {
           expect(explicitConfigOption.className).toContain("bg-primary");
           expect(recommendedOption.className).not.toContain("bg-primary");
           expect(document.activeElement).toBe(explicitConfigOption);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("submits pending user input from the composer button while the thread is still running", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotWithPendingUserInput({ sessionStatus: "running" }),
+    });
+
+    try {
+      const recommendedOption = await waitForPendingUserInputOption("Pure static (Recommended)");
+      recommendedOption.click();
+
+      const submitButton = await waitForPendingUserInputSubmitButton();
+      submitButton.click();
+
+      await vi.waitFor(
+        () => {
+          const submitRequest = findDispatchedCommand("thread.user-input.respond");
+          expect(submitRequest).toMatchObject({
+            _tag: ORCHESTRATION_WS_METHODS.dispatchCommand,
+            command: {
+              type: "thread.user-input.respond",
+              threadId: THREAD_ID,
+              requestId: "req-user-input-browser-1",
+              answers: {
+                hosting: "Pure static (Recommended)",
+              },
+            },
+          });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("submits pending user input with Enter while the thread is still running", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotWithPendingUserInput({ sessionStatus: "running" }),
+    });
+
+    try {
+      const recommendedOption = await waitForPendingUserInputOption("Pure static (Recommended)");
+      recommendedOption.click();
+
+      const composerEditor = await waitForComposerEditor();
+      composerEditor.focus();
+      composerEditor.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Enter",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+
+      await vi.waitFor(
+        () => {
+          const submitRequest = findDispatchedCommand("thread.user-input.respond");
+          expect(submitRequest).toMatchObject({
+            _tag: ORCHESTRATION_WS_METHODS.dispatchCommand,
+            command: {
+              type: "thread.user-input.respond",
+              threadId: THREAD_ID,
+              requestId: "req-user-input-browser-1",
+              answers: {
+                hosting: "Pure static (Recommended)",
+              },
+            },
+          });
         },
         { timeout: 8_000, interval: 16 },
       );
