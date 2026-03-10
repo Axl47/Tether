@@ -47,6 +47,8 @@ export function randomUuid(): string {
   return fallbackRandomUuid();
 }
 
+export const randomUUID = randomUuid;
+
 export const newCommandId = (): CommandId => CommandId.makeUnsafe(randomUuid());
 
 export const newProjectId = (): ProjectId => ProjectId.makeUnsafe(randomUuid());

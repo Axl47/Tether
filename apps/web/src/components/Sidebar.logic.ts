@@ -4,6 +4,8 @@ import type { PendingThreadRunPhase } from "../threadRunStateStore";
 import { resolveLatestThreadContextMessage, resolveThreadContextMessage } from "../threadContext";
 import type { Thread } from "../types";
 
+export const THREAD_SELECTION_SAFE_SELECTOR = "[data-thread-item], [data-thread-selection-safe]";
+
 export interface ThreadStatusPill {
   label:
     | "Working"
@@ -50,6 +52,11 @@ function buildPlanReadyPill(): ThreadStatusPill {
     dotClass: "bg-violet-500 dark:bg-violet-300/90",
     pulse: false,
   };
+}
+
+export function shouldClearThreadSelectionOnMouseDown(target: HTMLElement | null): boolean {
+  if (target === null) return true;
+  return !target.closest(THREAD_SELECTION_SAFE_SELECTOR);
 }
 
 export function resolveThreadStatusPill(input: {

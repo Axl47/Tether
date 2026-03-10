@@ -14,6 +14,7 @@ import {
   checkpointRefForThreadTurn,
   resolveThreadWorkspaceCwd,
 } from "../../checkpointing/Utils.ts";
+import { clearWorkspaceIndexCache } from "../../workspaceEntries.ts";
 import { CheckpointStore } from "../../checkpointing/Services/CheckpointStore.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { CheckpointReactor, type CheckpointReactorShape } from "../Services/CheckpointReactor.ts";
@@ -115,9 +116,7 @@ const make = Effect.gen(function* () {
 
   const resolveSessionRuntimeForThread = Effect.fnUntraced(function* (
     threadId: ThreadId,
-  ): Effect.fn.Return<
-    Option.Option<{ readonly threadId: ThreadId; readonly cwd: string }>
-  > {
+  ): Effect.fn.Return<Option.Option<{ readonly threadId: ThreadId; readonly cwd: string }>> {
     const readModel = yield* orchestrationEngine.getReadModel();
     const thread = readModel.threads.find((entry) => entry.id === threadId);
 
@@ -133,9 +132,7 @@ const make = Effect.gen(function* () {
     };
 
     if (thread) {
-      const projectedSession = sessions.find(
-        (session) => session.threadId === thread.id,
-      );
+      const projectedSession = sessions.find((session) => session.threadId === thread.id);
       const fromProjected = findSessionWithCwd(projectedSession);
       if (Option.isSome(fromProjected)) {
         return fromProjected;
@@ -222,6 +219,10 @@ const make = Effect.gen(function* () {
       checkpointRef: targetCheckpointRef,
     });
 
+    // Invalidate the workspace entry cache so the @-mention file picker
+    // reflects files created or deleted during this turn.
+    clearWorkspaceIndexCache(checkpointCwd);
+
     const files = yield* checkpointStore
       .diffCheckpoints({
         cwd: checkpointCwd,
@@ -306,9 +307,7 @@ const make = Effect.gen(function* () {
     }
 
     const readModel = yield* orchestrationEngine.getReadModel();
-    const thread = readModel.threads.find(
-      (entry) => entry.id === event.threadId,
-    );
+    const thread = readModel.threads.find((entry) => entry.id === event.threadId);
     if (!thread) {
       return;
     }
@@ -498,6 +497,10 @@ const make = Effect.gen(function* () {
       }).pipe(Effect.catch(() => Effect.void));
       return;
     }
+
+    // Invalidate the workspace entry cache so the @-mention file picker
+    // reflects the reverted filesystem state.
+    clearWorkspaceIndexCache(sessionRuntime.value.cwd);
 
     const rolledBackTurns = Math.max(0, currentTurnCount - event.payload.turnCount);
     if (rolledBackTurns > 0) {

@@ -7,6 +7,7 @@ import {
   getThreadLatestActivityAt,
   hasUnseenCompletion,
   resolveThreadStatusPill,
+  shouldClearThreadSelectionOnMouseDown,
   sortSidebarThreads,
   threadMatchesSidebarSearch,
 } from "./Sidebar.logic";
@@ -83,6 +84,34 @@ describe("hasUnseenCompletion", () => {
         lastVisitedAt: "2026-03-09T10:04:00.000Z",
       }),
     ).toBe(true);
+  });
+});
+
+describe("shouldClearThreadSelectionOnMouseDown", () => {
+  it("preserves selection for thread items", () => {
+    const child = {
+      closest: (selector: string) =>
+        selector.includes("[data-thread-item]") ? ({} as Element) : null,
+    } as unknown as HTMLElement;
+
+    expect(shouldClearThreadSelectionOnMouseDown(child)).toBe(false);
+  });
+
+  it("preserves selection for thread list toggle controls", () => {
+    const selectionSafe = {
+      closest: (selector: string) =>
+        selector.includes("[data-thread-selection-safe]") ? ({} as Element) : null,
+    } as unknown as HTMLElement;
+
+    expect(shouldClearThreadSelectionOnMouseDown(selectionSafe)).toBe(false);
+  });
+
+  it("clears selection for unrelated sidebar clicks", () => {
+    const unrelated = {
+      closest: () => null,
+    } as unknown as HTMLElement;
+
+    expect(shouldClearThreadSelectionOnMouseDown(unrelated)).toBe(true);
   });
 });
 
