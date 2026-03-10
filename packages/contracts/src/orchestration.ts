@@ -18,6 +18,7 @@ import {
 export const ORCHESTRATION_WS_METHODS = {
   getSnapshot: "orchestration.getSnapshot",
   dispatchCommand: "orchestration.dispatchCommand",
+  forceDeleteThread: "orchestration.forceDeleteThread",
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   autorenameProjectThreads: "orchestration.autorenameProjectThreads",
@@ -991,6 +992,14 @@ export type OrchestrationGetTurnDiffInput = typeof OrchestrationGetTurnDiffInput
 export const OrchestrationGetTurnDiffResult = ThreadTurnDiff;
 export type OrchestrationGetTurnDiffResult = typeof OrchestrationGetTurnDiffResult.Type;
 
+export const OrchestrationForceDeleteThreadInput = Schema.Struct({
+  threadId: ThreadId,
+});
+export type OrchestrationForceDeleteThreadInput = typeof OrchestrationForceDeleteThreadInput.Type;
+
+export const OrchestrationForceDeleteThreadResult = OrchestrationReadModel;
+export type OrchestrationForceDeleteThreadResult = typeof OrchestrationForceDeleteThreadResult.Type;
+
 export const OrchestrationGetFullThreadDiffInput = Schema.Struct({
   threadId: ThreadId,
   toTurnCount: NonNegativeInt,
@@ -1053,6 +1062,10 @@ export const OrchestrationRpcSchemas = {
   dispatchCommand: {
     input: ClientOrchestrationCommand,
     output: DispatchResult,
+  },
+  forceDeleteThread: {
+    input: OrchestrationForceDeleteThreadInput,
+    output: OrchestrationForceDeleteThreadResult,
   },
   getTurnDiff: {
     input: OrchestrationGetTurnDiffInput,

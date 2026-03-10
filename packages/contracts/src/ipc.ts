@@ -35,6 +35,8 @@ import type {
   OrchestrationAutorenameProjectThreadsInput,
   OrchestrationAutorenameProjectThreadsResult,
   ClientOrchestrationCommand,
+  OrchestrationForceDeleteThreadInput,
+  OrchestrationForceDeleteThreadResult,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
   OrchestrationGetTurnDiffInput,
@@ -154,6 +156,9 @@ export interface NativeApi {
   orchestration: {
     getSnapshot: () => Promise<OrchestrationReadModel>;
     dispatchCommand: (command: ClientOrchestrationCommand) => Promise<{ sequence: number }>;
+    forceDeleteThread: (
+      input: OrchestrationForceDeleteThreadInput,
+    ) => Promise<OrchestrationForceDeleteThreadResult>;
     getTurnDiff: (input: OrchestrationGetTurnDiffInput) => Promise<OrchestrationGetTurnDiffResult>;
     getFullThreadDiff: (
       input: OrchestrationGetFullThreadDiffInput,

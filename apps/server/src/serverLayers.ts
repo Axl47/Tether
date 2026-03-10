@@ -17,6 +17,7 @@ import { ProviderCommandReactorLive } from "./orchestration/Layers/ProviderComma
 import { OrchestrationProjectionPipelineLive } from "./orchestration/Layers/ProjectionPipeline";
 import { OrchestrationProjectionSnapshotQueryLive } from "./orchestration/Layers/ProjectionSnapshotQuery";
 import { ProviderRuntimeIngestionLive } from "./orchestration/Layers/ProviderRuntimeIngestion";
+import { ThreadForceDeleteLive } from "./orchestration/Layers/ThreadForceDelete";
 import { ThreadTitleManagerLive } from "./orchestration/Layers/ThreadTitleManager";
 import { ProviderUnsupportedError } from "./provider/Errors";
 import { makeClaudeCodeAdapterLive } from "./provider/Layers/ClaudeCodeAdapter";
@@ -105,6 +106,9 @@ export function makeServerRuntimeServicesLayer() {
     Layer.provideMerge(gitCoreLayer),
     Layer.provideMerge(textGenerationLayer),
   );
+  const threadForceDeleteLayer = ThreadForceDeleteLive.pipe(
+    Layer.provideMerge(runtimeServicesLayer),
+  );
   const threadTitleManagerLayer = ThreadTitleManagerLive.pipe(
     Layer.provideMerge(runtimeServicesLayer),
     Layer.provideMerge(textGenerationLayer),
@@ -134,6 +138,7 @@ export function makeServerRuntimeServicesLayer() {
 
   return Layer.mergeAll(
     orchestrationReactorLayer,
+    threadForceDeleteLayer,
     threadTitleManagerLayer,
     gitCoreLayer,
     gitManagerLayer,

@@ -225,6 +225,7 @@ export default function Sidebar() {
   const projects = useStore((store) => store.projects);
   const threads = useStore((store) => store.threads);
   const markThreadUnread = useStore((store) => store.markThreadUnread);
+  const syncServerReadModel = useStore((store) => store.syncServerReadModel);
   const toggleProject = useStore((store) => store.toggleProject);
   const clearComposerDraftForThread = useComposerDraftStore((store) => store.clearThreadDraft);
   const draftsByThreadId = useComposerDraftStore((store) => store.draftsByThreadId);
@@ -232,6 +233,7 @@ export default function Sidebar() {
   const getDraftThread = useComposerDraftStore((store) => store.getDraftThread);
   const terminalStateByThreadId = useTerminalStateStore((state) => state.terminalStateByThreadId);
   const pendingRunByThreadId = useThreadRunStateStore((state) => state.pendingRunByThreadId);
+  const clearPendingRun = useThreadRunStateStore((state) => state.clearPendingRun);
   const clearTerminalState = useTerminalStateStore((state) => state.clearTerminalState);
   const setProjectDraftThreadId = useComposerDraftStore((store) => store.setProjectDraftThreadId);
   const clearProjectDraftThreadId = useComposerDraftStore(
@@ -657,6 +659,7 @@ export default function Sidebar() {
               { id: "mark-unread", label: "Mark unread" },
               { id: "copy-thread-id", label: "Copy Thread ID" },
               { id: "delete", label: "Delete", destructive: true },
+              { id: "force-delete", label: "Force delete", destructive: true },
             ],
         position,
       );
@@ -689,6 +692,62 @@ export default function Sidebar() {
         }
         return;
       }
+      if (clicked === "force-delete" && !isDraftThread) {
+        const confirmed = await api.dialogs.confirm(
+          [
+            `Force delete thread "${thread.title}"?`,
+            "This hard-deletes the thread record, messages, attachments, and checkpoints from local app state.",
+            "It does not delete your code or worktree files.",
+          ].join("\n"),
+        );
+        if (!confirmed) {
+          return;
+        }
+
+        const shouldNavigateToFallback = routeThreadId === threadId;
+        const fallbackThreadId = sidebarThreads.find((entry) => entry.id !== threadId)?.id ?? null;
+
+        try {
+          await api.terminal.close({
+            threadId,
+            deleteHistory: true,
+          });
+        } catch {
+          // Terminal may already be closed
+        }
+
+        try {
+          const snapshot = await api.orchestration.forceDeleteThread({ threadId });
+          syncServerReadModel(snapshot);
+          clearComposerDraftForThread(threadId);
+          clearProjectDraftThreadById(thread.projectId, thread.id);
+          clearPendingRun(threadId);
+          clearTerminalState(threadId);
+          if (shouldNavigateToFallback) {
+            if (fallbackThreadId) {
+              void navigate({
+                to: "/$threadId",
+                params: { threadId: fallbackThreadId },
+                replace: true,
+              });
+            } else {
+              void navigate({ to: "/", replace: true });
+            }
+          }
+          toastManager.add({
+            type: "success",
+            title: "Thread force deleted",
+          });
+        } catch (error) {
+          toastManager.add({
+            type: "error",
+            title: "Failed to force delete thread",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          });
+        }
+        return;
+      }
+
       if (clicked !== "delete") return;
       if (appSettings.confirmThreadDelete) {
         const confirmed = await api.dialogs.confirm(
@@ -778,6 +837,7 @@ export default function Sidebar() {
       });
       clearComposerDraftForThread(threadId);
       clearProjectDraftThreadById(thread.projectId, thread.id);
+      clearPendingRun(threadId);
       clearTerminalState(threadId);
       if (shouldNavigateToFallback) {
         if (fallbackThreadId) {
@@ -820,6 +880,7 @@ export default function Sidebar() {
       appSettings.confirmThreadDelete,
       clearComposerDraftForThread,
       clearProjectDraftThreadById,
+      clearPendingRun,
       clearTerminalState,
       markThreadUnread,
       navigate,
@@ -828,6 +889,7 @@ export default function Sidebar() {
       routeThreadId,
       sidebarThreadById,
       sidebarThreads,
+      syncServerReadModel,
       draftThreadIdSet,
       threads,
     ],

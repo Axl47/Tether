@@ -4,6 +4,7 @@ import { ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas";
 import {
   OrchestrationAutorenameProjectThreadsInput,
   ClientOrchestrationCommand,
+  OrchestrationForceDeleteThreadInput,
   OrchestrationGetFullThreadDiffInput,
   ORCHESTRATION_WS_METHODS,
   OrchestrationGetSnapshotInput,
@@ -97,6 +98,7 @@ const WebSocketRequestBody = Schema.Union([
     Schema.Struct({ command: ClientOrchestrationCommand }),
   ),
   tagRequestBody(ORCHESTRATION_WS_METHODS.getSnapshot, OrchestrationGetSnapshotInput),
+  tagRequestBody(ORCHESTRATION_WS_METHODS.forceDeleteThread, OrchestrationForceDeleteThreadInput),
   tagRequestBody(ORCHESTRATION_WS_METHODS.getTurnDiff, OrchestrationGetTurnDiffInput),
   tagRequestBody(ORCHESTRATION_WS_METHODS.getFullThreadDiff, OrchestrationGetFullThreadDiffInput),
   tagRequestBody(
