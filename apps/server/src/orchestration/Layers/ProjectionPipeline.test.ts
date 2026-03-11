@@ -1064,6 +1064,129 @@ projectionLayer("OrchestrationProjectionPipeline", (it) => {
     ),
   );
 
+  it.effect("preserves thread attachment directory when thread is archived", () =>
+    Effect.sync(() =>
+      fs.mkdtempSync(path.join(os.tmpdir(), "t3-projection-attachments-archive-")),
+    ).pipe(
+      Effect.flatMap((stateDir) =>
+        Effect.gen(function* () {
+          const projectionPipeline = yield* OrchestrationProjectionPipeline;
+          const eventStore = yield* OrchestrationEventStore;
+          const now = new Date().toISOString();
+          const threadId = ThreadId.makeUnsafe("Thread Archive.Files");
+          const attachmentId = "thread-archive-files-00000000-0000-4000-8000-000000000001";
+
+          const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+            eventStore
+              .append(event)
+              .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+
+          yield* appendAndProject({
+            type: "project.created",
+            eventId: EventId.makeUnsafe("evt-archive-files-1"),
+            aggregateKind: "project",
+            aggregateId: ProjectId.makeUnsafe("project-archive-files"),
+            occurredAt: now,
+            commandId: CommandId.makeUnsafe("cmd-archive-files-1"),
+            causationEventId: null,
+            correlationId: CorrelationId.makeUnsafe("cmd-archive-files-1"),
+            metadata: {},
+            payload: {
+              projectId: ProjectId.makeUnsafe("project-archive-files"),
+              title: "Project Archive Files",
+              workspaceRoot: "/tmp/project-archive-files",
+              defaultModel: null,
+              scripts: [],
+              createdAt: now,
+              updatedAt: now,
+            },
+          });
+
+          yield* appendAndProject({
+            type: "thread.created",
+            eventId: EventId.makeUnsafe("evt-archive-files-2"),
+            aggregateKind: "thread",
+            aggregateId: threadId,
+            occurredAt: now,
+            commandId: CommandId.makeUnsafe("cmd-archive-files-2"),
+            causationEventId: null,
+            correlationId: CorrelationId.makeUnsafe("cmd-archive-files-2"),
+            metadata: {},
+            payload: {
+              threadId,
+              projectId: ProjectId.makeUnsafe("project-archive-files"),
+              title: "Thread Archive Files",
+              model: "gpt-5-codex",
+              runtimeMode: "full-access",
+              interactionMode: "default",
+              branch: null,
+              worktreePath: null,
+              createdAt: now,
+              updatedAt: now,
+            },
+          });
+
+          yield* appendAndProject({
+            type: "thread.message-sent",
+            eventId: EventId.makeUnsafe("evt-archive-files-3"),
+            aggregateKind: "thread",
+            aggregateId: threadId,
+            occurredAt: now,
+            commandId: CommandId.makeUnsafe("cmd-archive-files-3"),
+            causationEventId: null,
+            correlationId: CorrelationId.makeUnsafe("cmd-archive-files-3"),
+            metadata: {},
+            payload: {
+              threadId,
+              messageId: MessageId.makeUnsafe("message-archive-files"),
+              role: "user",
+              text: "Archive",
+              attachments: [
+                {
+                  type: "image",
+                  id: attachmentId,
+                  name: "archive.png",
+                  mimeType: "image/png",
+                  sizeBytes: 5,
+                },
+              ],
+              turnId: null,
+              streaming: false,
+              createdAt: now,
+              updatedAt: now,
+            },
+          });
+
+          const threadAttachmentPath = path.join(stateDir, "attachments", `${attachmentId}.png`);
+          fs.mkdirSync(path.join(stateDir, "attachments"), { recursive: true });
+          fs.writeFileSync(threadAttachmentPath, Buffer.from("archive"));
+          assert.equal(fs.existsSync(threadAttachmentPath), true);
+
+          yield* appendAndProject({
+            type: "thread.archived",
+            eventId: EventId.makeUnsafe("evt-archive-files-4"),
+            aggregateKind: "thread",
+            aggregateId: threadId,
+            occurredAt: now,
+            commandId: CommandId.makeUnsafe("cmd-archive-files-4"),
+            causationEventId: null,
+            correlationId: CorrelationId.makeUnsafe("cmd-archive-files-4"),
+            metadata: {},
+            payload: {
+              threadId,
+              archivedAt: now,
+            },
+          });
+
+          assert.equal(fs.existsSync(threadAttachmentPath), true);
+        }).pipe(
+          (effect) => runWithProjectionPipelineLayer(stateDir, effect),
+          Effect.ensuring(Effect.sync(() => fs.rmSync(stateDir, { recursive: true, force: true }))),
+        ),
+      ),
+    ),
+  );
+
   it.effect("ignores unsafe thread ids for attachment cleanup paths", () =>
     Effect.sync(() =>
       fs.mkdtempSync(path.join(os.tmpdir(), "t3-projection-attachments-unsafe-")),

@@ -104,7 +104,10 @@ const make = Effect.gen(function* () {
       const failed: Array<{ threadId: ThreadId; message: string }> = [];
 
       const threads = readModel.threads.filter(
-        (thread) => thread.projectId === projectId && thread.deletedAt === null,
+        (thread) =>
+          thread.projectId === projectId &&
+          thread.deletedAt === null &&
+          thread.archivedAt === null,
       );
 
       for (const thread of threads) {

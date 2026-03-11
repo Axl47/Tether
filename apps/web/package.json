@@ -36,8 +36,10 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",
+    "recharts": "^3.8.0",
     "remark-gfm": "^4.0.1",
     "tailwind-merge": "^3.4.0",
+    "workbox-window": "^7.4.0",
     "zustand": "^5.0.11"
   },
   "devDependencies": {
@@ -54,6 +56,7 @@
     "tailwindcss": "^4.0.0",
     "typescript": "catalog:",
     "vite": "^8.0.0-beta.12",
+    "vite-plugin-pwa": "^1.2.0",
     "vitest": "catalog:",
     "vitest-browser-react": "^2.0.5"
   }

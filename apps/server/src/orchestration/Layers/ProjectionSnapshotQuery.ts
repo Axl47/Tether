@@ -170,7 +170,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           last_autorename_user_message_id AS "lastAutoRenameUserMessageId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
-          deleted_at AS "deletedAt"
+          deleted_at AS "deletedAt",
+          archived_at AS "archivedAt"
         FROM projection_threads
         ORDER BY created_at ASC, thread_id ASC
       `,
@@ -544,6 +545,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             createdAt: row.createdAt,
             updatedAt: row.updatedAt,
             deletedAt: row.deletedAt,
+            archivedAt: row.archivedAt,
             messages: messagesByThread.get(row.threadId) ?? [],
             proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
             contextWindow: row.contextWindow,

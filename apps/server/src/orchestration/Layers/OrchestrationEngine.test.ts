@@ -218,6 +218,67 @@ describe("OrchestrationEngine", () => {
     await system.dispose();
   });
 
+  it("replays archive lifecycle events in order", async () => {
+    const system = await createOrchestrationSystem();
+    const { engine } = system;
+    const createdAt = now();
+
+    await system.run(
+      engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.makeUnsafe("cmd-project-archive-create"),
+        projectId: asProjectId("project-archive"),
+        title: "Archive Project",
+        workspaceRoot: "/tmp/project-archive",
+        defaultModel: "gpt-5-codex",
+        createdAt,
+      }),
+    );
+    await system.run(
+      engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.makeUnsafe("cmd-thread-archive-create"),
+        threadId: ThreadId.makeUnsafe("thread-archive"),
+        projectId: asProjectId("project-archive"),
+        title: "archive",
+        model: "gpt-5-codex",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        branch: null,
+        worktreePath: null,
+        createdAt,
+      }),
+    );
+    await system.run(
+      engine.dispatch({
+        type: "thread.archive",
+        commandId: CommandId.makeUnsafe("cmd-thread-archive"),
+        threadId: ThreadId.makeUnsafe("thread-archive"),
+      }),
+    );
+    await system.run(
+      engine.dispatch({
+        type: "thread.unarchive",
+        commandId: CommandId.makeUnsafe("cmd-thread-unarchive"),
+        threadId: ThreadId.makeUnsafe("thread-archive"),
+      }),
+    );
+
+    const events = await system.run(
+      Stream.runCollect(engine.readEvents(0)).pipe(
+        Effect.map((chunk): OrchestrationEvent[] => Array.from(chunk)),
+      ),
+    );
+
+    expect(events.map((event) => event.type)).toEqual([
+      "project.created",
+      "thread.created",
+      "thread.archived",
+      "thread.unarchived",
+    ]);
+    await system.dispose();
+  });
+
   it("stores completed checkpoint summaries even when no files changed", async () => {
     const system = await createOrchestrationSystem();
     const { engine } = system;

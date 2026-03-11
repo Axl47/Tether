@@ -3,6 +3,7 @@ import { it } from "@effect/vitest";
 import { Effect, Schema } from "effect";
 
 import {
+  ClientOrchestrationCommand,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   OrchestrationContextWindow,
@@ -27,6 +28,7 @@ const decodeOrchestrationSession = Schema.decodeUnknownEffect(OrchestrationSessi
 const decodeOrchestrationContextWindow = Schema.decodeUnknownSync(OrchestrationContextWindow);
 const decodeOrchestrationThread = Schema.decodeUnknownSync(OrchestrationThread);
 const decodeThreadCreatedPayload = Schema.decodeUnknownEffect(ThreadCreatedPayload);
+const decodeClientOrchestrationCommand = Schema.decodeUnknownEffect(ClientOrchestrationCommand);
 
 it.effect("parses turn diff input when fromTurnCount <= toTurnCount", () =>
   Effect.gen(function* () {
@@ -255,6 +257,7 @@ it.effect("accepts orchestration threads with null or populated context windows"
       createdAt: "2026-03-07T00:00:00.000Z",
       updatedAt: "2026-03-07T00:00:00.000Z",
       deletedAt: null,
+      archivedAt: null,
       messages: [],
       proposedPlans: [],
       activities: [],
@@ -280,5 +283,51 @@ it.effect("accepts orchestration threads with null or populated context windows"
 
     assert.strictEqual(withoutContextWindow.contextWindow, null);
     assert.strictEqual(withContextWindow.contextWindow?.usedPercent, 46);
+  }),
+);
+
+it.effect("defaults orchestration thread archivedAt to null for pre-archive snapshots", () =>
+  Effect.sync(() => {
+    const parsed = decodeOrchestrationThread({
+      id: "thread-1",
+      projectId: "project-1",
+      title: "Thread",
+      model: "gpt-5-codex",
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      latestTurn: null,
+      createdAt: "2026-03-07T00:00:00.000Z",
+      updatedAt: "2026-03-07T00:00:00.000Z",
+      deletedAt: null,
+      archivedAt: null,
+      messages: [],
+      proposedPlans: [],
+      contextWindow: null,
+      activities: [],
+      checkpoints: [],
+      session: null,
+    });
+
+    assert.strictEqual(parsed.archivedAt, null);
+  }),
+);
+
+it.effect("decodes thread archive lifecycle commands", () =>
+  Effect.gen(function* () {
+    const archive = yield* decodeClientOrchestrationCommand({
+      type: "thread.archive",
+      commandId: "cmd-archive",
+      threadId: "thread-1",
+    });
+    const unarchive = yield* decodeClientOrchestrationCommand({
+      type: "thread.unarchive",
+      commandId: "cmd-unarchive",
+      threadId: "thread-1",
+    });
+
+    assert.strictEqual(archive.type, "thread.archive");
+    assert.strictEqual(unarchive.type, "thread.unarchive");
   }),
 );

@@ -181,12 +181,31 @@ describe("pending user input question progress", () => {
       questionIndex: 0,
       activeQuestion: questions[0],
       selectedOptionLabel: "Orchestration-first",
+      selectedOptionDescription: "Focus on orchestration first",
       customAnswer: "",
       resolvedAnswer: "Orchestration-first",
       answeredQuestionCount: 1,
       isLastQuestion: false,
       isComplete: false,
       canAdvance: true,
+    });
+  });
+
+  it("clears the selected option description when a custom answer overrides the option", () => {
+    expect(
+      derivePendingUserInputProgress(
+        questions,
+        {
+          scope: {
+            customAnswer: "Target orchestration, but keep the current wire format for now",
+          },
+        },
+        0,
+      ),
+    ).toMatchObject({
+      selectedOptionLabel: undefined,
+      selectedOptionDescription: null,
+      usingCustomAnswer: true,
     });
   });
 });

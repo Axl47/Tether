@@ -284,6 +284,7 @@ export const OrchestrationThread = Schema.Struct({
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
+  archivedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(() => null)),
   messages: Schema.Array(OrchestrationMessage),
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(
     Schema.withDecodingDefault(() => []),
@@ -349,6 +350,18 @@ const ThreadCreateCommand = Schema.Struct({
 
 const ThreadDeleteCommand = Schema.Struct({
   type: Schema.Literal("thread.delete"),
+  commandId: CommandId,
+  threadId: ThreadId,
+});
+
+const ThreadArchiveCommand = Schema.Struct({
+  type: Schema.Literal("thread.archive"),
+  commandId: CommandId,
+  threadId: ThreadId,
+});
+
+const ThreadUnarchiveCommand = Schema.Struct({
+  type: Schema.Literal("thread.unarchive"),
   commandId: CommandId,
   threadId: ThreadId,
 });
@@ -469,6 +482,8 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectDeleteCommand,
   ThreadCreateCommand,
   ThreadDeleteCommand,
+  ThreadArchiveCommand,
+  ThreadUnarchiveCommand,
   ThreadMetaUpdateCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
@@ -488,6 +503,8 @@ export const ClientOrchestrationCommand = Schema.Union([
   ProjectDeleteCommand,
   ThreadCreateCommand,
   ThreadDeleteCommand,
+  ThreadArchiveCommand,
+  ThreadUnarchiveCommand,
   ThreadMetaUpdateCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
@@ -599,6 +616,8 @@ export const OrchestrationEventType = Schema.Literals([
   "project.deleted",
   "thread.created",
   "thread.deleted",
+  "thread.archived",
+  "thread.unarchived",
   "thread.meta-updated",
   "thread.runtime-mode-set",
   "thread.interaction-mode-set",
@@ -664,6 +683,16 @@ export const ThreadCreatedPayload = Schema.Struct({
 export const ThreadDeletedPayload = Schema.Struct({
   threadId: ThreadId,
   deletedAt: IsoDateTime,
+});
+
+export const ThreadArchivedPayload = Schema.Struct({
+  threadId: ThreadId,
+  archivedAt: IsoDateTime,
+});
+
+export const ThreadUnarchivedPayload = Schema.Struct({
+  threadId: ThreadId,
+  unarchivedAt: IsoDateTime,
 });
 
 export const ThreadMetaUpdatedPayload = Schema.Struct({
@@ -830,6 +859,16 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.deleted"),
     payload: ThreadDeletedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.archived"),
+    payload: ThreadArchivedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.unarchived"),
+    payload: ThreadUnarchivedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

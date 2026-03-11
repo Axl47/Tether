@@ -22,11 +22,13 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { render } from "vitest-browser-react";
 
 import { useComposerDraftStore } from "../composerDraftStore";
+import { usePlanModePanelStore } from "../planModePanelStore";
 import { getRouter } from "../router";
 import { useStore } from "../store";
 import { estimateTimelineMessageHeight } from "./timelineHeight";
 
 const THREAD_ID = "thread-browser-test" as ThreadId;
+const SECOND_THREAD_ID = "thread-browser-test-2" as ThreadId;
 const PROJECT_ID = "project-1" as ProjectId;
 const NOW_ISO = "2026-03-04T12:00:00.000Z";
 const BASE_TIME_MS = Date.parse(NOW_ISO);
@@ -87,6 +89,7 @@ interface UserRowMeasurement {
 interface MountedChatView {
   cleanup: () => Promise<void>;
   measureUserRow: (targetMessageId: MessageId) => Promise<UserRowMeasurement>;
+  navigateToThread: (threadId: ThreadId) => Promise<void>;
   setViewport: (viewport: ViewportSpec) => Promise<void>;
 }
 
@@ -217,6 +220,7 @@ function createSnapshotForTargetUser(options: {
         createdAt: NOW_ISO,
         updatedAt: NOW_ISO,
         deletedAt: null,
+        archivedAt: null,
         messages,
         contextWindow: null,
         activities: [],
@@ -316,6 +320,52 @@ function createSnapshotWithExecutingPlan(): OrchestrationReadModel {
   };
 }
 
+function createSnapshotWithExecutingPlanAndSiblingThread(): OrchestrationReadModel {
+  const snapshot = createSnapshotWithExecutingPlan();
+  const primaryThread = snapshot.threads[0];
+
+  if (!primaryThread) {
+    throw new Error("Expected browser test snapshot to include a primary thread.");
+  }
+  const primarySession = primaryThread.session;
+  if (!primarySession) {
+    throw new Error("Expected browser test snapshot to include a primary thread session.");
+  }
+
+  return {
+    ...snapshot,
+    threads: [
+      primaryThread,
+      {
+        ...primaryThread,
+        id: SECOND_THREAD_ID,
+        title: "Second browser test thread",
+        latestTurn: null,
+        activities: [],
+        proposedPlans: [],
+        session: {
+          ...primarySession,
+          status: "ready",
+          activeTurnId: null,
+          updatedAt: isoAt(140),
+        },
+        messages: [
+          createUserMessage({
+            id: "msg-user-second-thread" as MessageId,
+            text: "secondary thread body",
+            offsetSeconds: 140,
+          }),
+          createAssistantMessage({
+            id: "msg-assistant-second-thread" as MessageId,
+            text: "secondary thread assistant",
+            offsetSeconds: 141,
+          }),
+        ],
+      },
+    ],
+  };
+}
+
 function createSnapshotWithPendingUserInput(options?: {
   sessionStatus?: "ready" | "running";
 }): OrchestrationReadModel {
@@ -388,6 +438,28 @@ function createSnapshotWithPendingUserInput(options?: {
           activeTurnId: sessionStatus === "running" ? turnId : null,
           updatedAt: isoAt(123),
         },
+      },
+    ],
+  };
+}
+
+function createArchivedSnapshot(): OrchestrationReadModel {
+  const snapshot = createSnapshotForTargetUser({
+    targetMessageId: "msg-user-archived-target" as MessageId,
+    targetText: "archived target",
+  });
+  const thread = snapshot.threads[0];
+
+  if (!thread) {
+    throw new Error("Expected browser test snapshot to include a thread.");
+  }
+
+  return {
+    ...snapshot,
+    threads: [
+      {
+        ...thread,
+        archivedAt: isoAt(180),
       },
     ],
   };
@@ -769,11 +841,10 @@ async function mountChatView(options: {
   host.style.overflow = "hidden";
   document.body.append(host);
 
-  const router = getRouter(
-    createMemoryHistory({
-      initialEntries: [`/${THREAD_ID}`],
-    }),
-  );
+  const history = createMemoryHistory({
+    initialEntries: [`/${THREAD_ID}`],
+  });
+  const router = getRouter(history);
 
   const screen = await render(<RouterProvider router={router} />, {
     container: host,
@@ -787,6 +858,10 @@ async function mountChatView(options: {
       host.remove();
     },
     measureUserRow: async (targetMessageId: MessageId) => measureUserRow({ host, targetMessageId }),
+    navigateToThread: async (threadId: ThreadId) => {
+      history.push(`/${threadId}`);
+      await waitForLayout();
+    },
     setViewport: async (viewport: ViewportSpec) => {
       await setViewport(viewport);
       await waitForProductionStyles();
@@ -841,6 +916,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
       draftsByThreadId: {},
       draftThreadsByThreadId: {},
       projectDraftThreadIdByProjectId: {},
+    });
+    usePlanModePanelStore.setState({
+      panelStateByThreadId: {},
     });
     useStore.setState({
       projects: [],
@@ -1409,9 +1487,17 @@ describe("ChatView timeline estimator parity (full app)", () => {
     try {
       const composerEditor = await waitForComposerEditor();
       const stopButton = await waitForStopButton();
+      const composerForm = document.querySelector<HTMLFormElement>("[data-chat-composer-form='true']");
 
       expect(stopButton.getAttribute("aria-label")).toBe("Stop generation");
       expect(composerEditor.getAttribute("contenteditable")).toBe("true");
+      expect(composerEditor.getAttribute("autocomplete")).toBe("off");
+      expect(composerEditor.getAttribute("autocorrect")).toBe("off");
+      expect(composerEditor.getAttribute("autocapitalize")).toBe("off");
+      expect(composerEditor.getAttribute("inputmode")).toBe("text");
+      expect(composerEditor.getAttribute("spellcheck")).toBe("false");
+      expect(composerEditor.getAttribute("data-form-type")).toBe("other");
+      expect(composerForm?.getAttribute("autocomplete")).toBe("off");
     } finally {
       await mounted.cleanup();
     }
@@ -1685,6 +1771,57 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("keeps the active plan card minimized when switching away from and back to the thread", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotWithExecutingPlanAndSiblingThread(),
+    });
+
+    try {
+      await vi.waitFor(
+        () => {
+          expect(document.querySelector("[data-plan-mode-panel-body='true']")).toBeTruthy();
+          expect(document.body.textContent).toContain("Add a minimize toggle");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const toggle = await waitForPlanModePanelToggle();
+      toggle.click();
+
+      await vi.waitFor(
+        () => {
+          expect(document.querySelector("[data-plan-mode-panel-body='true']")).toBeNull();
+          expect(document.body.textContent).toContain("3 steps, 1 in progress, 1 done, 1 pending");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      await mounted.navigateToThread(SECOND_THREAD_ID);
+
+      await vi.waitFor(
+        () => {
+          expect(document.body.textContent).toContain("secondary thread body");
+          expect(document.querySelector("[data-plan-mode-panel='true']")).toBeNull();
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      await mounted.navigateToThread(THREAD_ID);
+
+      await vi.waitFor(
+        () => {
+          expect(document.querySelector("[data-plan-mode-panel-body='true']")).toBeNull();
+          expect(document.body.textContent).toContain("3 steps, 1 in progress, 1 done, 1 pending");
+          expect(document.body.textContent).not.toContain("Add a minimize toggle");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("floats the thread cards above the message scroller", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
@@ -1790,6 +1927,44 @@ describe("ChatView timeline estimator parity (full app)", () => {
         (button) => button.getAttribute("aria-label") === "Context window usage",
       );
       expect(badge).toBeUndefined();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("unarchives a thread before sending a new message", async () => {
+    useComposerDraftStore.getState().setPrompt(THREAD_ID, "Restore and send");
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createArchivedSnapshot(),
+    });
+
+    try {
+      const sendButton = await waitForEnabledSendButton();
+      sendButton.click();
+
+      await vi.waitFor(
+        () => {
+          const dispatchedTypes = wsRequests
+            .filter(
+              (request) => request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand,
+            )
+            .map((request) => {
+              const command =
+                request.command && typeof request.command === "object"
+                  ? (request.command as Record<string, unknown>)
+                  : null;
+              return command?.type;
+            });
+          expect(dispatchedTypes).toContain("thread.unarchive");
+          expect(dispatchedTypes).toContain("thread.turn.start");
+          expect(dispatchedTypes.indexOf("thread.unarchive")).toBeLessThan(
+            dispatchedTypes.indexOf("thread.turn.start"),
+          );
+        },
+        { timeout: 8_000, interval: 16 },
+      );
     } finally {
       await mounted.cleanup();
     }

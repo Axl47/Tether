@@ -26,6 +26,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     proposedPlans: [],
     error: null,
     createdAt: "2026-02-13T00:00:00.000Z",
+    archivedAt: null,
     latestTurn: null,
     branch: null,
     worktreePath: null,
@@ -66,6 +67,7 @@ function makeReadModelThread(overrides: Partial<OrchestrationReadModel["threads"
     createdAt: "2026-02-27T00:00:00.000Z",
     updatedAt: "2026-02-27T00:00:00.000Z",
     deletedAt: null,
+    archivedAt: null,
     messages: [],
     activities: [],
     proposedPlans: [],
@@ -251,6 +253,31 @@ describe("store read model sync", () => {
 
     expect(next.threads[0]?.model).toBe("gemini-3-flash-preview");
     expect(next.threads[0]?.session?.provider).toBe("gemini");
+  });
+
+  it("keeps archived threads in local state while still filtering deleted threads", () => {
+    const initialState = makeState(makeThread());
+    const archivedThread = makeReadModelThread({
+      id: ThreadId.makeUnsafe("thread-archived"),
+      archivedAt: "2026-02-28T00:00:00.000Z",
+      title: "Archived thread",
+    });
+    const deletedThread = makeReadModelThread({
+      id: ThreadId.makeUnsafe("thread-deleted"),
+      deletedAt: "2026-02-28T00:00:00.000Z",
+      title: "Deleted thread",
+    });
+    const readModel: OrchestrationReadModel = {
+      snapshotSequence: 2,
+      updatedAt: "2026-02-28T00:00:00.000Z",
+      projects: [makeReadModelProject({})],
+      threads: [archivedThread, deletedThread],
+    };
+
+    const next = syncServerReadModel(initialState, readModel);
+
+    expect(next.threads.map((thread) => thread.id)).toEqual([archivedThread.id]);
+    expect(next.threads[0]?.archivedAt).toBe("2026-02-28T00:00:00.000Z");
   });
 
   it("preserves the current project order when syncing incoming read model updates", () => {

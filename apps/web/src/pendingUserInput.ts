@@ -10,6 +10,7 @@ export interface PendingUserInputProgress {
   activeQuestion: UserInputQuestion | null;
   activeDraft: PendingUserInputDraftAnswer | undefined;
   selectedOptionLabel: string | undefined;
+  selectedOptionDescription: string | null;
   customAnswer: string;
   resolvedAnswer: string | null;
   usingCustomAnswer: boolean;
@@ -100,6 +101,9 @@ export function derivePendingUserInputProgress(
   const activeDraft = activeQuestion ? draftAnswers[activeQuestion.id] : undefined;
   const resolvedAnswer = resolvePendingUserInputAnswer(activeDraft);
   const customAnswer = activeDraft?.customAnswer ?? "";
+  const selectedOptionDescription =
+    activeQuestion?.options.find((option) => option.label === activeDraft?.selectedOptionLabel)
+      ?.description ?? null;
   const answeredQuestionCount = countAnsweredPendingUserInputQuestions(questions, draftAnswers);
   const isLastQuestion =
     questions.length === 0 ? true : normalizedQuestionIndex >= questions.length - 1;
@@ -109,6 +113,7 @@ export function derivePendingUserInputProgress(
     activeQuestion,
     activeDraft,
     selectedOptionLabel: activeDraft?.selectedOptionLabel,
+    selectedOptionDescription,
     customAnswer,
     resolvedAnswer,
     usingCustomAnswer: customAnswer.trim().length > 0,

@@ -54,6 +54,7 @@ interface ChatMarkdownProps {
   text: string;
   cwd: string | undefined;
   isStreaming?: boolean;
+  copyable?: boolean;
 }
 
 const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
@@ -167,6 +168,7 @@ function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNo
       <button
         type="button"
         className="chat-markdown-copy-button"
+        data-thread-noncopyable="true"
         onClick={handleCopy}
         title={copied ? "Copied" : "Copy code"}
         aria-label={copied ? "Copied" : "Copy code"}
@@ -229,7 +231,7 @@ function SuspenseShikiCodeBlock({
   );
 }
 
-function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
+function ChatMarkdown({ text, cwd, isStreaming = false, copyable = false }: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
   const normalizedText = useMemo(() => normalizeMarkdownFileLinks(text, cwd), [cwd, text]);
@@ -284,7 +286,10 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
   );
 
   return (
-    <div className="chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80">
+    <div
+      className="chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80"
+      data-thread-copyable={copyable ? "true" : undefined}
+    >
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
         {normalizedText}
       </ReactMarkdown>

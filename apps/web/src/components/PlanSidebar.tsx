@@ -178,7 +178,10 @@ const PlanSidebar = memo(function PlanSidebar({
         <div className="p-3 space-y-4">
           {/* Explanation */}
           {activePlan?.explanation ? (
-            <p className="text-[13px] leading-relaxed text-muted-foreground/80">
+            <p
+              className="text-[13px] leading-relaxed text-muted-foreground/80"
+              data-thread-copyable="true"
+            >
               {activePlan.explanation}
             </p>
           ) : null}
@@ -206,8 +209,9 @@ const PlanSidebar = memo(function PlanSidebar({
                         ? "text-muted-foreground/50 line-through decoration-muted-foreground/20"
                         : step.status === "inProgress"
                           ? "text-foreground/90"
-                          : "text-muted-foreground/70",
+                        : "text-muted-foreground/70",
                     )}
+                    data-thread-copyable="true"
                   >
                     {step.step}
                   </p>
@@ -239,6 +243,7 @@ const PlanSidebar = memo(function PlanSidebar({
                     text={displayedPlanMarkdown ?? ""}
                     cwd={markdownCwd}
                     isStreaming={false}
+                    copyable
                   />
                 </div>
               ) : null}

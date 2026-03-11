@@ -42,6 +42,7 @@ const readModel: OrchestrationReadModel = {
       createdAt: NOW,
       updatedAt: NOW,
       deletedAt: null,
+      archivedAt: null,
       messages: [],
       proposedPlans: [],
       contextWindow: null,
@@ -53,6 +54,96 @@ const readModel: OrchestrationReadModel = {
 };
 
 describe("decideOrchestrationCommand", () => {
+  it("emits thread.archived for archive commands", async () => {
+    const event = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: {
+          type: "thread.archive",
+          commandId: CommandId.makeUnsafe("cmd-archive"),
+          threadId: ThreadId.makeUnsafe("thread-1"),
+        },
+        readModel,
+      }),
+    );
+
+    expect(Array.isArray(event)).toBe(false);
+    expect(event).toMatchObject({
+      type: "thread.archived",
+      aggregateKind: "thread",
+      aggregateId: "thread-1",
+      payload: {
+        threadId: "thread-1",
+      },
+    });
+  });
+
+  it("emits thread.unarchived for archived threads", async () => {
+    const event = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: {
+          type: "thread.unarchive",
+          commandId: CommandId.makeUnsafe("cmd-unarchive"),
+          threadId: ThreadId.makeUnsafe("thread-1"),
+        },
+        readModel: {
+          ...readModel,
+          threads: readModel.threads.map((thread) =>
+            thread.id === ThreadId.makeUnsafe("thread-1")
+              ? { ...thread, archivedAt: NOW }
+              : thread,
+          ),
+        },
+      }),
+    );
+
+    expect(Array.isArray(event)).toBe(false);
+    expect(event).toMatchObject({
+      type: "thread.unarchived",
+      aggregateKind: "thread",
+      aggregateId: "thread-1",
+      payload: {
+        threadId: "thread-1",
+      },
+    });
+  });
+
+  it("rejects archiving an already archived thread", async () => {
+    await expect(
+      Effect.runPromise(
+        decideOrchestrationCommand({
+          command: {
+            type: "thread.archive",
+            commandId: CommandId.makeUnsafe("cmd-archive-again"),
+            threadId: ThreadId.makeUnsafe("thread-1"),
+          },
+          readModel: {
+            ...readModel,
+            threads: readModel.threads.map((thread) =>
+              thread.id === ThreadId.makeUnsafe("thread-1")
+                ? { ...thread, archivedAt: NOW }
+                : thread,
+            ),
+          },
+        }),
+      ),
+    ).rejects.toThrow("already archived");
+  });
+
+  it("rejects unarchiving a thread that is not archived", async () => {
+    await expect(
+      Effect.runPromise(
+        decideOrchestrationCommand({
+          command: {
+            type: "thread.unarchive",
+            commandId: CommandId.makeUnsafe("cmd-unarchive-missing"),
+            threadId: ThreadId.makeUnsafe("thread-1"),
+          },
+          readModel,
+        }),
+      ),
+    ).rejects.toThrow("is not archived");
+  });
+
   it("emits thread.context-window-set for internal context updates", async () => {
     const event = await Effect.runPromise(
       decideOrchestrationCommand({

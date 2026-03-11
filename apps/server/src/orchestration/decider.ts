@@ -47,6 +47,15 @@ function withEventBase(
   };
 }
 
+function invariantFailure(command: Pick<OrchestrationCommand, "type">, detail: string) {
+  return Effect.fail(
+    new OrchestrationCommandInvariantError({
+      commandType: command.type,
+      detail,
+    }),
+  );
+}
+
 export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand")(function* ({
   command,
   readModel,
@@ -168,11 +177,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.delete": {
-      yield* requireThread({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
+      if (thread.deletedAt !== null) {
+        return yield* invariantFailure(command, `Thread '${command.threadId}' is already deleted.`);
+      }
       const occurredAt = nowIso();
       return {
         ...withEventBase({
@@ -185,6 +197,74 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           deletedAt: occurredAt,
+        },
+      };
+    }
+
+    case "thread.archive": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (thread.deletedAt !== null) {
+        return yield* invariantFailure(
+          command,
+          `Thread '${command.threadId}' is deleted and cannot be archived.`,
+        );
+      }
+      if (thread.archivedAt !== null) {
+        return yield* invariantFailure(
+          command,
+          `Thread '${command.threadId}' is already archived.`,
+        );
+      }
+      const occurredAt = nowIso();
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.archived",
+        payload: {
+          threadId: command.threadId,
+          archivedAt: occurredAt,
+        },
+      };
+    }
+
+    case "thread.unarchive": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (thread.deletedAt !== null) {
+        return yield* invariantFailure(
+          command,
+          `Thread '${command.threadId}' is deleted and cannot be unarchived.`,
+        );
+      }
+      if (thread.archivedAt === null) {
+        return yield* invariantFailure(
+          command,
+          `Thread '${command.threadId}' is not archived.`,
+        );
+      }
+      const occurredAt = nowIso();
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.unarchived",
+        payload: {
+          threadId: command.threadId,
+          unarchivedAt: occurredAt,
         },
       };
     }

@@ -91,6 +91,7 @@ import {
   type PendingUserInputDraftAnswer,
 } from "../pendingUserInput";
 import { useStore } from "../store";
+import { selectThreadPlanModePanelState, usePlanModePanelStore } from "../planModePanelStore";
 import {
   buildPlanImplementationThreadTitle,
   buildPlanImplementationPrompt,
@@ -127,7 +128,7 @@ import {
 } from "../keybindings";
 import ChatMarkdown from "./ChatMarkdown";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
-import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert";
 import {
   BotIcon,
   ChevronDownIcon,
@@ -799,6 +800,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const activeLatestTurn = activeThread?.latestTurn ?? null;
   const latestTurnSettled = isLatestTurnSettled(activeLatestTurn, activeThread?.session ?? null);
   const activeProject = projects.find((p) => p.id === activeThread?.projectId);
+  const [isArchiveStateTransitionPending, setIsArchiveStateTransitionPending] = useState(false);
   const latestStartedThreadSelection = useMemo(
     () => getLatestStartedThreadSelection(threads),
     [threads],
@@ -963,6 +965,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
         : null,
     [activePendingDraftAnswers, activePendingUserInput],
   );
+  const activePendingComposerPreviewValue =
+    activePendingProgress &&
+    !activePendingProgress.usingCustomAnswer &&
+    activePendingProgress.selectedOptionDescription
+      ? activePendingProgress.selectedOptionDescription
+      : null;
   const activePendingIsResponding = activePendingUserInput
     ? respondingUserInputRequestIds.includes(activePendingUserInput.requestId)
     : false;
@@ -1013,6 +1021,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     isComposerApprovalState ||
     isSendBusy ||
     isRevertingCheckpoint;
+  const composerReadOnlyPreview = activePendingComposerPreviewValue !== null;
   const hasComposerHeader =
     isComposerApprovalState ||
     pendingUserInputs.length > 0 ||
@@ -2606,6 +2615,32 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [activeThread, isConnecting, isRevertingCheckpoint, isSendBusy, phase, setThreadError],
   );
 
+  const unarchiveActiveThread = useCallback(async () => {
+    const api = readNativeApi();
+    if (!api || !serverThread || serverThread.archivedAt === null) {
+      return true;
+    }
+
+    setIsArchiveStateTransitionPending(true);
+    setThreadError(serverThread.id, null);
+    try {
+      await api.orchestration.dispatchCommand({
+        type: "thread.unarchive",
+        commandId: newCommandId(),
+        threadId: serverThread.id,
+      });
+      return true;
+    } catch (err) {
+      setThreadError(
+        serverThread.id,
+        err instanceof Error ? err.message : "Failed to restore archived thread.",
+      );
+      return false;
+    } finally {
+      setIsArchiveStateTransitionPending(false);
+    }
+  }, [serverThread, setThreadError]);
+
   const onSend = async (e?: { preventDefault: () => void }) => {
     e?.preventDefault();
     const api = readNativeApi();
@@ -2616,6 +2651,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       isPendingThreadRun ||
       isSendBusy ||
       isConnecting ||
+      isArchiveStateTransitionPending ||
       sendInFlightRef.current
     ) {
       return;
@@ -2654,6 +2690,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
     if (!trimmed && composerImages.length === 0) return;
     if (!activeProject) return;
+    if (isServerThread && activeThread.archivedAt !== null) {
+      const restored = await unarchiveActiveThread();
+      if (!restored) {
+        return;
+      }
+    }
     const threadIdForSend = activeThread.id;
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
     const baseBranchForWorktree =
@@ -3642,7 +3684,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
   }
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
+    <div
+      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background"
+      data-thread-selection-root="true"
+    >
       {/* Top bar */}
       <header
         className={cn(
@@ -3681,6 +3726,29 @@ export default function ChatView({ threadId }: ChatViewProps) {
       {/* Error banner */}
       <ProviderHealthBanner status={activeProviderStatus} />
       <ThreadErrorBanner error={activeThread.error} />
+      {isServerThread && activeThread.archivedAt !== null ? (
+        <div className="px-3 pt-3 sm:px-5 sm:pt-4">
+          <Alert variant="info">
+            <AlertTitle>Archived</AlertTitle>
+            <AlertDescription>
+              <span>This thread is hidden from the active list until it is restored.</span>
+            </AlertDescription>
+            <AlertAction>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={isArchiveStateTransitionPending}
+                onClick={() => {
+                  void unarchiveActiveThread();
+                }}
+              >
+                {isArchiveStateTransitionPending ? "Restoring..." : "Unarchive"}
+              </Button>
+            </AlertAction>
+          </Alert>
+        </div>
+      ) : null}
       <div className="relative min-h-0 flex-1">
         {hasFloatingThreadCards ? (
           <div
@@ -3696,7 +3764,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                 onContextModeChange={handleThreadContextModeChange}
                 onJumpToMessage={onJumpToThreadContext}
               />
-              <PlanModePanel activePlan={activePlan} />
+              <PlanModePanel activePlan={activePlan} threadId={threadId} />
             </div>
           </div>
         ) : null}
@@ -3759,6 +3827,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         <form
           ref={composerFormRef}
           onSubmit={onSend}
+          autoComplete="off"
           className="mx-auto w-full min-w-0 max-w-3xl"
           data-chat-composer-form="true"
         >
@@ -3889,7 +3958,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                   isComposerApprovalState
                     ? ""
                     : activePendingProgress
-                      ? activePendingProgress.customAnswer
+                      ? (activePendingComposerPreviewValue ?? activePendingProgress.customAnswer)
                       : prompt
                 }
                 cursor={composerCursor}
@@ -3900,14 +3969,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
                   isComposerApprovalState
                     ? (activePendingApproval?.detail ?? "Resolve this approval request to continue")
                     : activePendingProgress
-                    ? "Type your own answer, or leave this blank to use the selected option"
+                    ? composerReadOnlyPreview
+                      ? "Selected option details"
+                      : "Type your own answer, or leave this blank to use the selected option"
                     : showPlanFollowUpPrompt && activeProposedPlan
                       ? "Add feedback to refine the plan, or leave this blank to implement it"
                       : phase === "disconnected"
                         ? "Ask for follow-up changes or attach images"
                         : "Ask anything, @tag files/folders, or use /model"
                 }
-                disabled={composerLocked}
+                disabled={composerLocked || composerReadOnlyPreview}
               />
             </div>
 
@@ -4795,6 +4866,7 @@ const ComposerPendingApprovalActions = memo(function ComposerPendingApprovalActi
 
 interface PlanModePanelProps {
   activePlan: ReturnType<typeof deriveActivePlanState>;
+  threadId: ThreadId;
 }
 
 function summarizeActivePlanSteps(
@@ -4876,34 +4948,47 @@ const ThreadContextPanel = memo(function ThreadContextPanel(props: ThreadContext
             </Toggle>
           </Group>
         </div>
-        <button
-          type="button"
-          data-thread-context-jump="true"
-          data-thread-context-message-id={contextMessage.id}
-          className="group mt-2 flex w-full items-start justify-between gap-3 rounded-lg px-1 py-1 text-left transition-colors duration-150 hover:text-foreground"
-          onClick={onJumpToMessage}
-        >
-          <p className="min-w-0 flex-1 line-clamp-2 text-sm leading-6 text-foreground/90">
+        <div className="mt-2 flex items-start justify-between gap-3">
+          <p
+            className="min-w-0 flex-1 line-clamp-2 text-sm leading-6 text-foreground/90"
+            data-thread-copyable="true"
+          >
             {describeThreadContextMessage(contextMessage)}
           </p>
-          <span className="shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted-foreground/70 transition-colors duration-150 group-hover:text-foreground/80">
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost"
+            data-thread-context-jump="true"
+            data-thread-context-message-id={contextMessage.id}
+            className="shrink-0"
+            onClick={onJumpToMessage}
+          >
             Jump
-          </span>
-        </button>
+          </Button>
+        </div>
       </div>
     </div>
   );
 });
 
-const PlanModePanel = memo(function PlanModePanel({ activePlan }: PlanModePanelProps) {
-  const [isMinimized, setIsMinimized] = useState(false);
+const PlanModePanel = memo(function PlanModePanel({ activePlan, threadId }: PlanModePanelProps) {
   const activePlanTurnId = activePlan?.turnId ?? null;
+  const storedPanelState = usePlanModePanelStore(
+    (store) => selectThreadPlanModePanelState(store.panelStateByThreadId, threadId),
+  );
+  const setPlanPanelMinimized = usePlanModePanelStore((store) => store.setPlanPanelMinimized);
+  const syncActivePlanTurn = usePlanModePanelStore((store) => store.syncActivePlanTurn);
+  const isMinimized =
+    activePlanTurnId !== null && storedPanelState.activeTurnId !== activePlanTurnId
+      ? false
+      : storedPanelState.isMinimized;
 
   useEffect(() => {
     if (activePlanTurnId) {
-      setIsMinimized(false);
+      syncActivePlanTurn(threadId, activePlanTurnId);
     }
-  }, [activePlanTurnId]);
+  }, [activePlanTurnId, syncActivePlanTurn, threadId]);
 
   if (!activePlan) return null;
 
@@ -4924,7 +5009,9 @@ const PlanModePanel = memo(function PlanModePanel({ activePlan }: PlanModePanelP
               </span>
             </div>
             {isMinimized ? (
-              <p className="mt-2 text-sm text-muted-foreground">{planSummary}</p>
+              <p className="mt-2 text-sm text-muted-foreground" data-thread-copyable="true">
+                {planSummary}
+              </p>
             ) : null}
           </div>
           <Button
@@ -4936,7 +5023,7 @@ const PlanModePanel = memo(function PlanModePanel({ activePlan }: PlanModePanelP
             aria-label={isMinimized ? "Expand plan card" : "Minimize plan card"}
             className="shrink-0"
             onClick={() => {
-              setIsMinimized((current) => !current);
+              setPlanPanelMinimized(threadId, !isMinimized);
             }}
           >
             <ChevronDownIcon
@@ -4948,7 +5035,9 @@ const PlanModePanel = memo(function PlanModePanel({ activePlan }: PlanModePanelP
         {!isMinimized ? (
           <div data-plan-mode-panel-body="true">
             {activePlan.explanation ? (
-              <p className="mt-2 text-sm text-muted-foreground">{activePlan.explanation}</p>
+              <p className="mt-2 text-sm text-muted-foreground" data-thread-copyable="true">
+                {activePlan.explanation}
+              </p>
             ) : null}
             <div className="mt-3 space-y-2">
               {activePlan.steps.map((step) => (
@@ -4971,7 +5060,9 @@ const PlanModePanel = memo(function PlanModePanel({ activePlan }: PlanModePanelP
                         ? "Done"
                         : "Pending"}
                   </Badge>
-                  <div className="min-w-0 flex-1 text-sm">{step.step}</div>
+                  <div className="min-w-0 flex-1 text-sm" data-thread-copyable="true">
+                    {step.step}
+                  </div>
                 </div>
               ))}
             </div>
@@ -5260,7 +5351,7 @@ const ProposedPlanCard = memo(function ProposedPlanCard({
       </div>
       <div className="mt-4">
         <div className={cn("relative", canCollapse && !expanded && "max-h-104 overflow-hidden")}>
-          <ChatMarkdown text={planMarkdown} cwd={cwd} isStreaming={false} />
+          <ChatMarkdown text={planMarkdown} cwd={cwd} isStreaming={false} copyable />
           {canCollapse && !expanded ? (
             <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-linear-to-t from-card/95 via-card/80 to-transparent" />
           ) : null}
@@ -6262,7 +6353,7 @@ const MessagesTimeline = memo(function MessagesTimeline({
           const canRevertAgentWork = revertTurnCountByUserMessageId.has(row.message.id);
           return (
             <div className="flex justify-end">
-              <div className="group relative max-w-[80%] rounded-2xl rounded-br-sm border border-border bg-secondary px-4 py-3">
+              <div className="group relative max-w-[80%] rounded-2xl rounded-br-sm border border-primary/15 bg-primary/[0.06] px-4 py-3">
                 {userImages.length > 0 && (
                   <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
                     {userImages.map(
@@ -6301,7 +6392,10 @@ const MessagesTimeline = memo(function MessagesTimeline({
                   </div>
                 )}
                 {row.message.text && (
-                  <pre className="whitespace-pre-wrap wrap-break-word font-mono text-sm leading-relaxed text-foreground">
+                  <pre
+                    className="whitespace-pre-wrap wrap-break-word font-mono text-sm leading-relaxed text-foreground"
+                    data-thread-copyable="true"
+                  >
                     {row.message.text}
                   </pre>
                 )}
@@ -6398,16 +6492,18 @@ const MessagesTimeline = memo(function MessagesTimeline({
                     ))}
                   </div>
                 )}
-                <AnimatedAssistantMessage
-                  message={{ ...row.message, text: messageText }}
-                  cwd={markdownCwd}
-                  animate={
-                    !row.message.streaming &&
-                    animatedAssistantMessageId === row.message.id &&
-                    messageText.length > 0
-                  }
-                  onComplete={onAnimatedAssistantMessageComplete}
-                />
+                <div data-thread-copyable="true">
+                  <AnimatedAssistantMessage
+                    message={{ ...row.message, text: messageText }}
+                    cwd={markdownCwd}
+                    animate={
+                      !row.message.streaming &&
+                      animatedAssistantMessageId === row.message.id &&
+                      messageText.length > 0
+                    }
+                    onComplete={onAnimatedAssistantMessageComplete}
+                  />
+                </div>
                 {row.changedFilesSummary && row.changedFilesSummary.files.length > 0 ? (
                   <CompactChangedFilesSummary
                     turnSummary={row.changedFilesSummary}

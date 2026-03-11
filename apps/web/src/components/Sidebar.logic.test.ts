@@ -34,6 +34,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     proposedPlans: [],
     error: null,
     createdAt: "2026-03-07T10:00:00.000Z",
+    archivedAt: null,
     latestTurn: null,
     lastVisitedAt: undefined,
     branch: null,

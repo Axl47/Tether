@@ -681,7 +681,10 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       }
 
       const existingThread = snapshot.threads.find(
-        (thread) => thread.projectId === bootstrapProjectId && thread.deletedAt === null,
+        (thread) =>
+          thread.projectId === bootstrapProjectId &&
+          thread.deletedAt === null &&
+          thread.archivedAt === null,
       );
       if (!existingThread) {
         const createdAt = new Date().toISOString();
