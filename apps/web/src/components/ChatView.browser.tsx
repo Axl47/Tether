@@ -1310,7 +1310,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
         {
           id: "run-android",
           name: "Run Android",
-          command: "npm run android",
+          command: "rtk proxy npm run android",
           icon: "build",
           runOnWorktreeCreate: false,
         },
@@ -1347,9 +1347,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
           );
           expect(terminalWrites).toEqual(
             expect.arrayContaining([
-              expect.objectContaining({ data: "react-native start\r" }),
+              expect.objectContaining({ data: "rtk proxy npm run start\r" }),
               expect.objectContaining({
-                data: "react-native run-android --no-packager\r",
+                data: "rtk proxy npm run android -- --no-packager\r",
               }),
             ]),
           );

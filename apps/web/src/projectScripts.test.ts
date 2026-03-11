@@ -131,12 +131,12 @@ describe("projectScripts helpers", () => {
     });
   });
 
-  it("builds a two-terminal launch plan for an Obscura-style npm run android script", async () => {
+  it("builds a two-terminal launch plan for an Obscura-style wrapped npm run android script", async () => {
     const plan = await buildProjectScriptLaunchPlan({
       script: {
         id: "run-android",
         name: "Run Android",
-        command: "npm run android",
+        command: "rtk proxy npm run android",
         icon: "build",
         runOnWorktreeCreate: false,
       },
@@ -164,15 +164,101 @@ describe("projectScripts helpers", () => {
       expandedFromCompatibility: true,
       steps: [
         {
-          step: { id: "metro", command: "react-native start" },
+          step: { id: "metro", command: "rtk proxy npm run start" },
           terminalId: "default",
           createNewTerminal: false,
         },
         {
           step: {
             id: "android",
-            command: "react-native run-android --no-packager",
+            command: "rtk proxy npm run android -- --no-packager",
           },
+          terminalId: "terminal-1",
+          createNewTerminal: true,
+        },
+      ],
+    });
+  });
+
+  it("preserves android arguments while forcing --no-packager for wrapped npm scripts", async () => {
+    const plan = await buildProjectScriptLaunchPlan({
+      script: {
+        id: "run-android",
+        name: "Run Android",
+        command: "rtk proxy npm run android -- --active-arch-only",
+        icon: "build",
+        runOnWorktreeCreate: false,
+      },
+      cwd: "/repo",
+      terminalState: {
+        terminalIds: ["default"],
+        activeTerminalId: "default",
+        runningTerminalIds: [],
+      },
+      readProjectFile: async () =>
+        JSON.stringify({
+          scripts: {
+            start: "react-native start",
+            android: "react-native run-android",
+          },
+        }),
+      createTerminalId: () => "terminal-1",
+    });
+
+    expect(plan).toEqual({
+      ok: true,
+      expandedFromCompatibility: true,
+      steps: [
+        {
+          step: { id: "metro", command: "rtk proxy npm run start" },
+          terminalId: "default",
+          createNewTerminal: false,
+        },
+        {
+          step: {
+            id: "android",
+            command:
+              "rtk proxy npm run android -- --active-arch-only --no-packager",
+          },
+          terminalId: "terminal-1",
+          createNewTerminal: true,
+        },
+      ],
+    });
+  });
+
+  it("still expands a recognized android launcher when package validation cannot be read", async () => {
+    const plan = await buildProjectScriptLaunchPlan({
+      script: {
+        id: "run-android",
+        name: "Run Android",
+        command: "npm run android",
+        icon: "build",
+        runOnWorktreeCreate: false,
+      },
+      cwd: "/repo",
+      terminalState: {
+        terminalIds: ["default"],
+        activeTerminalId: "default",
+        runningTerminalIds: [],
+      },
+      readProjectFile: async () => {
+        throw new Error("Unknown method: projects.readFile");
+      },
+      createTerminalId: () => "terminal-1",
+    });
+
+    expect(plan).toEqual({
+      ok: true,
+      expandedFromCompatibility: true,
+      steps: [
+        {
+          step: { id: "metro", command: "npm run start" },
+          terminalId: "default",
+          createNewTerminal: false,
+        },
+        {
+          step: { id: "android", command: "npm run android -- --no-packager" },
           terminalId: "terminal-1",
           createNewTerminal: true,
         },

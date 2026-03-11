@@ -7,18 +7,24 @@ import type {
 import { DEFAULT_THREAD_TERMINAL_ID, MAX_THREAD_TERMINAL_COUNT } from "../types";
 
 const SYNTHETIC_PRIMARY_STEP_ID = "step-1";
-const LEGACY_REACT_NATIVE_ANDROID_COMMANDS = new Set([
-  "npm run android",
-  "yarn android",
-  "pnpm android",
-  "bun run android",
-  "react-native run-android",
-  "npx react-native run-android",
-]);
 const LEGACY_REACT_NATIVE_START_COMMANDS = new Set([
   "react-native start",
   "npx react-native start",
 ]);
+
+type ReactNativeAndroidLauncherKind =
+  | "npm"
+  | "yarn"
+  | "pnpm"
+  | "bun"
+  | "react-native"
+  | "npx-react-native";
+
+interface ReactNativeAndroidLauncher {
+  kind: ReactNativeAndroidLauncherKind;
+  prefix: string;
+  androidArgsSuffix: string;
+}
 
 export interface ProjectScriptDraftInput {
   id: string;
@@ -111,6 +117,119 @@ function isLegacySingleCommandScript(script: ProjectScript): boolean {
   return !script.steps || script.steps.length === 0;
 }
 
+function parseReactNativeAndroidLauncher(
+  command: string,
+): ReactNativeAndroidLauncher | null {
+  const trimmed = command.trim();
+  const rtkPrefixMatch = /^(rtk(?:\s+proxy)?)\s+/.exec(trimmed);
+  const prefix = rtkPrefixMatch ? `${rtkPrefixMatch[1]} ` : "";
+  const candidate = rtkPrefixMatch
+    ? trimmed.slice(rtkPrefixMatch[0].length).trim()
+    : trimmed;
+
+  const patterns: Array<{
+    kind: ReactNativeAndroidLauncherKind;
+    pattern: RegExp;
+  }> = [
+    { kind: "npm", pattern: /^npm run android(?<suffix>\s+.*)?$/ },
+    { kind: "yarn", pattern: /^yarn android(?<suffix>\s+.*)?$/ },
+    { kind: "pnpm", pattern: /^pnpm android(?<suffix>\s+.*)?$/ },
+    { kind: "bun", pattern: /^bun run android(?<suffix>\s+.*)?$/ },
+    {
+      kind: "react-native",
+      pattern: /^react-native run-android(?<suffix>\s+.*)?$/,
+    },
+    {
+      kind: "npx-react-native",
+      pattern: /^npx react-native run-android(?<suffix>\s+.*)?$/,
+    },
+  ];
+
+  for (const { kind, pattern } of patterns) {
+    const match = pattern.exec(candidate);
+    if (!match) {
+      continue;
+    }
+    return {
+      kind,
+      prefix,
+      androidArgsSuffix: match.groups?.suffix?.trim() ? match[0].slice(
+        match[0].indexOf(match.groups.suffix),
+      ) : "",
+    };
+  }
+
+  return null;
+}
+
+function appendReactNativeFlag(
+  baseCommand: string,
+  launcher: ReactNativeAndroidLauncher,
+): string {
+  const suffix = launcher.androidArgsSuffix;
+  if (suffix.length === 0) {
+    switch (launcher.kind) {
+      case "npm":
+      case "pnpm":
+      case "bun":
+        return `${baseCommand} -- --no-packager`;
+      default:
+        return `${baseCommand} --no-packager`;
+    }
+  }
+
+  return `${baseCommand}${suffix} --no-packager`;
+}
+
+function buildCompatCommands(
+  launcher: ReactNativeAndroidLauncher,
+): { start: string; android: string } {
+  switch (launcher.kind) {
+    case "npm":
+      return {
+        start: `${launcher.prefix}npm run start`,
+        android: appendReactNativeFlag(
+          `${launcher.prefix}npm run android`,
+          launcher,
+        ),
+      };
+    case "yarn":
+      return {
+        start: `${launcher.prefix}yarn start`,
+        android: appendReactNativeFlag(`${launcher.prefix}yarn android`, launcher),
+      };
+    case "pnpm":
+      return {
+        start: `${launcher.prefix}pnpm start`,
+        android: appendReactNativeFlag(`${launcher.prefix}pnpm android`, launcher),
+      };
+    case "bun":
+      return {
+        start: `${launcher.prefix}bun run start`,
+        android: appendReactNativeFlag(
+          `${launcher.prefix}bun run android`,
+          launcher,
+        ),
+      };
+    case "react-native":
+      return {
+        start: `${launcher.prefix}react-native start`,
+        android: appendReactNativeFlag(
+          `${launcher.prefix}react-native run-android`,
+          launcher,
+        ),
+      };
+    case "npx-react-native":
+      return {
+        start: `${launcher.prefix}npx react-native start`,
+        android: appendReactNativeFlag(
+          `${launcher.prefix}npx react-native run-android`,
+          launcher,
+        ),
+      };
+  }
+}
+
 async function expandLegacyReactNativeAndroidScript(input: {
   script: ProjectScript;
   cwd: string;
@@ -130,14 +249,26 @@ async function expandLegacyReactNativeAndroidScript(input: {
   }
 
   const command = input.script.command.trim();
+  const launcher = parseReactNativeAndroidLauncher(command);
   if (
-    !LEGACY_REACT_NATIVE_ANDROID_COMMANDS.has(command) ||
-    command.includes("--no-packager") ||
-    !input.readProjectFile
+    !launcher ||
+    launcher.androidArgsSuffix.includes("--no-packager")
   ) {
     return {
       expandedFromCompatibility: false,
       steps: projectScriptSteps(input.script),
+    };
+  }
+
+  const compatSteps = [
+    { id: "metro", command: buildCompatCommands(launcher).start },
+    { id: "android", command: buildCompatCommands(launcher).android },
+  ] satisfies ProjectScriptStep[];
+
+  if (!input.readProjectFile) {
+    return {
+      expandedFromCompatibility: true,
+      steps: compatSteps,
     };
   }
 
@@ -172,15 +303,12 @@ async function expandLegacyReactNativeAndroidScript(input: {
     }
     return {
       expandedFromCompatibility: true,
-      steps: [
-        { id: "metro", command: startCommand },
-        { id: "android", command: `${androidCommand} --no-packager` },
-      ],
+      steps: compatSteps,
     };
   } catch {
     return {
-      expandedFromCompatibility: false,
-      steps: projectScriptSteps(input.script),
+      expandedFromCompatibility: true,
+      steps: compatSteps,
     };
   }
 }
