@@ -217,6 +217,10 @@ import {
   projectScriptIdFromCommand,
   setupProjectScript,
 } from "~/projectScripts";
+import {
+  buildProjectScriptLaunchPlan,
+  serializeProjectScript,
+} from "~/lib/projectScriptExecution";
 import { Toggle } from "./ui/toggle";
 import { SidebarTrigger } from "./ui/sidebar";
 import { newCommandId, newMessageId, newThreadId } from "~/lib/utils";
@@ -1728,29 +1732,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
         });
       }
       const targetCwd = options?.cwd ?? gitCwd ?? activeProject.cwd;
-      const baseTerminalId =
-        terminalState.activeTerminalId ||
-        terminalState.terminalIds[0] ||
-        DEFAULT_THREAD_TERMINAL_ID;
-      const isBaseTerminalBusy =
-        terminalState.runningTerminalIds.includes(baseTerminalId);
-      const wantsNewTerminal =
-        Boolean(options?.preferNewTerminal) || isBaseTerminalBusy;
-      const shouldCreateNewTerminal =
-        wantsNewTerminal &&
-        terminalState.terminalIds.length < MAX_THREAD_TERMINAL_COUNT;
-      const targetTerminalId = shouldCreateNewTerminal
-        ? `terminal-${crypto.randomUUID()}`
-        : baseTerminalId;
-
-      setTerminalOpen(true);
-      if (shouldCreateNewTerminal) {
-        storeNewTerminal(activeThreadId, targetTerminalId);
-      } else {
-        storeSetActiveTerminal(activeThreadId, targetTerminalId);
-      }
-      setTerminalFocusRequestId((value) => value + 1);
-
       const runtimeEnv = projectScriptRuntimeEnv({
         project: {
           cwd: activeProject.cwd,
@@ -1759,30 +1740,65 @@ export default function ChatView({ threadId }: ChatViewProps) {
           options?.worktreePath ?? activeThread.worktreePath ?? null,
         ...(options?.env ? { extraEnv: options.env } : {}),
       });
-      const openTerminalInput: Parameters<typeof api.terminal.open>[0] =
-        shouldCreateNewTerminal
-          ? {
-              threadId: activeThreadId,
-              terminalId: targetTerminalId,
-              cwd: targetCwd,
-              env: runtimeEnv,
-              cols: SCRIPT_TERMINAL_COLS,
-              rows: SCRIPT_TERMINAL_ROWS,
-            }
-          : {
-              threadId: activeThreadId,
-              terminalId: targetTerminalId,
-              cwd: targetCwd,
-              env: runtimeEnv,
-            };
 
       try {
-        await api.terminal.open(openTerminalInput);
-        await api.terminal.write({
-          threadId: activeThreadId,
-          terminalId: targetTerminalId,
-          data: `${script.command}\r`,
+        const launchPlan = await buildProjectScriptLaunchPlan({
+          script,
+          cwd: targetCwd,
+          terminalState: {
+            terminalIds: terminalState.terminalIds,
+            activeTerminalId:
+              terminalState.activeTerminalId || DEFAULT_THREAD_TERMINAL_ID,
+            runningTerminalIds: terminalState.runningTerminalIds,
+          },
+          maxTerminalCount: MAX_THREAD_TERMINAL_COUNT,
+          readProjectFile: async (input) => {
+            const result = await api.projects.readFile(input);
+            return result.contents;
+          },
+          ...(options?.preferNewTerminal !== undefined
+            ? { preferNewTerminal: options.preferNewTerminal }
+            : {}),
         });
+        if (!launchPlan.ok) {
+          setThreadError(activeThreadId, launchPlan.message);
+          return;
+        }
+
+        setTerminalOpen(true);
+        for (const launchStep of launchPlan.steps) {
+          if (launchStep.createNewTerminal) {
+            storeNewTerminal(activeThreadId, launchStep.terminalId);
+          } else {
+            storeSetActiveTerminal(activeThreadId, launchStep.terminalId);
+          }
+        }
+        setTerminalFocusRequestId((value) => value + 1);
+
+        for (const launchStep of launchPlan.steps) {
+          const openTerminalInput: Parameters<typeof api.terminal.open>[0] =
+            launchStep.createNewTerminal
+              ? {
+                  threadId: activeThreadId,
+                  terminalId: launchStep.terminalId,
+                  cwd: targetCwd,
+                  env: runtimeEnv,
+                  cols: SCRIPT_TERMINAL_COLS,
+                  rows: SCRIPT_TERMINAL_ROWS,
+                }
+              : {
+                  threadId: activeThreadId,
+                  terminalId: launchStep.terminalId,
+                  cwd: targetCwd,
+                  env: runtimeEnv,
+                };
+          await api.terminal.open(openTerminalInput);
+          await api.terminal.write({
+            threadId: activeThreadId,
+            terminalId: launchStep.terminalId,
+            data: `${launchStep.step.command}\r`,
+          });
+        }
       } catch (error) {
         setThreadError(
           activeThreadId,
@@ -1845,13 +1861,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
         input.name,
         activeProject.scripts.map((script) => script.id),
       );
-      const nextScript: ProjectScript = {
+      const nextScript = serializeProjectScript({
         id: nextId,
         name: input.name,
-        command: input.command,
         icon: input.icon,
         runOnWorktreeCreate: input.runOnWorktreeCreate,
-      };
+        steps: input.steps,
+      });
       const nextScripts = input.runOnWorktreeCreate
         ? [
             ...activeProject.scripts.map((script) =>
@@ -1884,13 +1900,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
         throw new Error("Script not found.");
       }
 
-      const updatedScript: ProjectScript = {
-        ...existingScript,
+      const updatedScript = serializeProjectScript({
+        id: existingScript.id,
         name: input.name,
-        command: input.command,
         icon: input.icon,
         runOnWorktreeCreate: input.runOnWorktreeCreate,
-      };
+        steps: input.steps,
+      });
       const nextScripts = activeProject.scripts.map((script) =>
         script.id === scriptId
           ? updatedScript

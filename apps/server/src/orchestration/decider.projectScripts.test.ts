@@ -74,6 +74,16 @@ describe("decider project scripts", () => {
         command: "bun run lint",
         icon: "lint",
         runOnWorktreeCreate: false,
+        steps: [
+          {
+            id: "lint",
+            command: "bun run lint",
+          },
+          {
+            id: "typecheck",
+            command: "bun run typecheck",
+          },
+        ],
       },
     ] as const;
 

@@ -349,6 +349,25 @@ describe("wsNativeApi", () => {
     });
   });
 
+  it("forwards workspace file reads to the websocket project method", async () => {
+    requestMock.mockResolvedValue({
+      relativePath: "package.json",
+      contents: '{"name":"demo"}\n',
+    });
+    const { createWsNativeApi } = await import("./wsNativeApi");
+
+    const api = createWsNativeApi();
+    await api.projects.readFile({
+      cwd: "/tmp/project",
+      relativePath: "package.json",
+    });
+
+    expect(requestMock).toHaveBeenCalledWith(WS_METHODS.projectsReadFile, {
+      cwd: "/tmp/project",
+      relativePath: "package.json",
+    });
+  });
+
   it("forwards full-thread diff requests to the orchestration websocket method", async () => {
     requestMock.mockResolvedValue({ diff: "patch" });
     const { createWsNativeApi } = await import("./wsNativeApi");

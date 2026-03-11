@@ -1727,6 +1727,34 @@ describe("WebSocket Server", () => {
     ).toBe("# Plan\n\n- step 1\n");
   });
 
+  it("supports projects.readFile within the workspace root", async () => {
+    const workspace = makeTempDir("tether-ws-read-file-");
+    fs.writeFileSync(
+      path.join(workspace, "package.json"),
+      '{"name":"demo"}\n',
+      "utf8",
+    );
+
+    server = await createTestServer({ cwd: "/test" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const ws = await connectWs(port);
+    connections.push(ws);
+    await waitForMessage(ws);
+
+    const response = await sendRequest(ws, WS_METHODS.projectsReadFile, {
+      cwd: workspace,
+      relativePath: "package.json",
+    });
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toEqual({
+      relativePath: "package.json",
+      contents: '{"name":"demo"}\n',
+    });
+  });
+
   it("rejects projects.writeFile paths outside the workspace root", async () => {
     const workspace = makeTempDir("tether-ws-write-file-reject-");
 
@@ -1749,6 +1777,53 @@ describe("WebSocket Server", () => {
       "Workspace file path must stay within the project root.",
     );
     expect(fs.existsSync(path.join(workspace, "..", "escape.md"))).toBe(false);
+  });
+
+  it("rejects projects.readFile paths outside the workspace root", async () => {
+    const workspace = makeTempDir("tether-ws-read-file-reject-");
+
+    server = await createTestServer({ cwd: "/test" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const ws = await connectWs(port);
+    connections.push(ws);
+    await waitForMessage(ws);
+
+    const response = await sendRequest(ws, WS_METHODS.projectsReadFile, {
+      cwd: workspace,
+      relativePath: "../escape.json",
+    });
+
+    expect(response.result).toBeUndefined();
+    expect(response.error?.message).toContain(
+      "Workspace file path must stay within the project root.",
+    );
+  });
+
+  it("rejects oversized projects.readFile payloads", async () => {
+    const workspace = makeTempDir("tether-ws-read-file-size-");
+    fs.writeFileSync(
+      path.join(workspace, "large.txt"),
+      "a".repeat(262_145),
+      "utf8",
+    );
+
+    server = await createTestServer({ cwd: "/test" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const ws = await connectWs(port);
+    connections.push(ws);
+    await waitForMessage(ws);
+
+    const response = await sendRequest(ws, WS_METHODS.projectsReadFile, {
+      cwd: workspace,
+      relativePath: "large.txt",
+    });
+
+    expect(response.result).toBeUndefined();
+    expect(response.error?.message).toContain("Workspace file exceeds 262144 bytes.");
   });
 
   it("routes git core methods over websocket", async () => {

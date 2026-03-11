@@ -120,12 +120,23 @@ export const ProjectScriptIcon = Schema.Literals([
 ]);
 export type ProjectScriptIcon = typeof ProjectScriptIcon.Type;
 
+export const ProjectScriptStep = Schema.Struct({
+  id: TrimmedNonEmptyString.check(Schema.isMaxLength(64)),
+  command: TrimmedNonEmptyString,
+});
+export type ProjectScriptStep = typeof ProjectScriptStep.Type;
+
 export const ProjectScript = Schema.Struct({
   id: TrimmedNonEmptyString,
   name: TrimmedNonEmptyString,
   command: TrimmedNonEmptyString,
   icon: ProjectScriptIcon,
   runOnWorktreeCreate: Schema.Boolean,
+  steps: Schema.optional(
+    Schema.Array(ProjectScriptStep)
+      .check(Schema.isMinLength(2))
+      .check(Schema.isMaxLength(4)),
+  ),
 });
 export type ProjectScript = typeof ProjectScript.Type;
 

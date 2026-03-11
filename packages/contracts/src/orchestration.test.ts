@@ -7,6 +7,7 @@ import {
   DEFAULT_RUNTIME_MODE,
   OrchestrationGetTurnDiffInput,
   OrchestrationSession,
+  ProjectScript,
   ProjectCreateCommand,
   ThreadTurnStartCommand,
   ThreadCreatedPayload,
@@ -17,6 +18,7 @@ import {
 const decodeTurnDiffInput = Schema.decodeUnknownEffect(OrchestrationGetTurnDiffInput);
 const decodeThreadTurnDiff = Schema.decodeUnknownEffect(ThreadTurnDiff);
 const decodeProjectCreateCommand = Schema.decodeUnknownEffect(ProjectCreateCommand);
+const decodeProjectScript = Schema.decodeUnknownEffect(ProjectScript);
 const decodeThreadTurnStartCommand = Schema.decodeUnknownEffect(ThreadTurnStartCommand);
 const decodeThreadTurnStartRequestedPayload = Schema.decodeUnknownEffect(
   ThreadTurnStartRequestedPayload,
@@ -214,5 +216,41 @@ it.effect("decodes orchestration session runtime mode defaults", () =>
       updatedAt: "2026-01-01T00:00:00.000Z",
     });
     assert.strictEqual(parsed.runtimeMode, DEFAULT_RUNTIME_MODE);
+  }),
+);
+
+it.effect("accepts project scripts with optional multi-step commands", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeProjectScript({
+      id: "run-android",
+      name: "Run Android",
+      command: "react-native start",
+      icon: "build",
+      runOnWorktreeCreate: false,
+      steps: [
+        { id: "metro", command: "react-native start" },
+        { id: "android", command: "react-native run-android --no-packager" },
+      ],
+    });
+
+    assert.strictEqual(parsed.steps?.length, 2);
+    assert.strictEqual(parsed.steps?.[1]?.id, "android");
+  }),
+);
+
+it.effect("rejects project scripts with fewer than two explicit steps", () =>
+  Effect.gen(function* () {
+    const result = yield* Effect.exit(
+      decodeProjectScript({
+        id: "build",
+        name: "Build",
+        command: "bun run build",
+        icon: "build",
+        runOnWorktreeCreate: false,
+        steps: [{ id: "only", command: "bun run build" }],
+      }),
+    );
+
+    assert.strictEqual(result._tag, "Failure");
   }),
 );

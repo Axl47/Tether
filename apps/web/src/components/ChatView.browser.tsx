@@ -6,6 +6,7 @@ import {
   type MessageId,
   type OrchestrationReadModel,
   type ProjectId,
+  type ProjectScript,
   type ServerConfig,
   type ThreadId,
   type WsWelcomePayload,
@@ -31,6 +32,7 @@ import { render } from "vitest-browser-react";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { getRouter } from "../router";
 import { useStore } from "../store";
+import { useTerminalStateStore } from "../terminalStateStore";
 import { estimateTimelineMessageHeight } from "./timelineHeight";
 
 const THREAD_ID = "thread-browser-test" as ThreadId;
@@ -52,6 +54,7 @@ interface TestFixture {
   snapshot: OrchestrationReadModel;
   serverConfig: ServerConfig;
   welcome: WsWelcomePayload;
+  projectFiles?: Record<string, string>;
 }
 
 let fixture: TestFixture;
@@ -333,6 +336,30 @@ function createRunningSnapshot(): OrchestrationReadModel {
   };
 }
 
+function createSnapshotWithProjectScripts(
+  scripts: ProjectScript[],
+): OrchestrationReadModel {
+  const snapshot = createSnapshotForTargetUser({
+    targetMessageId: "msg-user-project-script-target" as MessageId,
+    targetText: "project script target",
+  });
+  const projects = snapshot.projects.slice();
+  const projectIndex = projects.findIndex((project) => project.id === PROJECT_ID);
+  if (projectIndex >= 0) {
+    const project = projects[projectIndex];
+    if (project) {
+      projects[projectIndex] = {
+        ...project,
+        scripts,
+      };
+    }
+  }
+  return {
+    ...snapshot,
+    projects,
+  };
+}
+
 function setThreadState(
   updater: (thread: OrchestrationReadModel["threads"][number]) => OrchestrationReadModel["threads"][number],
 ): void {
@@ -495,7 +522,8 @@ async function dragQueuedMessageToTarget(
   await waitForLayout();
 }
 
-function resolveWsRpc(tag: string): unknown {
+function resolveWsRpc(request: WsRequestEnvelope["body"]): unknown {
+  const tag = request._tag;
   if (tag === ORCHESTRATION_WS_METHODS.getSnapshot) {
     return fixture.snapshot;
   }
@@ -536,6 +564,29 @@ function resolveWsRpc(tag: string): unknown {
       truncated: false,
     };
   }
+  if (tag === WS_METHODS.projectsReadFile) {
+    const relativePath =
+      typeof request.relativePath === "string" ? request.relativePath : "";
+    return {
+      relativePath,
+      contents: fixture.projectFiles?.[relativePath] ?? "",
+    };
+  }
+  if (tag === WS_METHODS.terminalOpen || tag === WS_METHODS.terminalRestart) {
+    return {
+      threadId:
+        typeof request.threadId === "string" ? request.threadId : THREAD_ID,
+      terminalId:
+        typeof request.terminalId === "string" ? request.terminalId : "default",
+      cwd: typeof request.cwd === "string" ? request.cwd : "/repo/project",
+      status: "running",
+      pid: null,
+      history: "",
+      exitCode: null,
+      exitSignal: null,
+      updatedAt: NOW_ISO,
+    };
+  }
   return {};
 }
 
@@ -563,7 +614,7 @@ const worker = setupWorker(
       client.send(
         JSON.stringify({
           id: request.id,
-          result: resolveWsRpc(method),
+          result: resolveWsRpc(request.body),
         }),
       );
     });
@@ -862,6 +913,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       threads: [],
       threadsHydrated: false,
     });
+    useTerminalStateStore.setState({ terminalStateByThreadId: {} });
   });
 
   afterEach(() => {
@@ -1100,6 +1152,207 @@ describe("ChatView timeline estimator parity (full app)", () => {
             cwd: "/repo/project",
             editor: "vscode",
           });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("runs explicit multi-step project actions in separate integrated terminals", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotWithProjectScripts([
+        {
+          id: "run-android",
+          name: "Run Android",
+          command: "react-native start",
+          icon: "build",
+          runOnWorktreeCreate: false,
+          steps: [
+            { id: "metro", command: "react-native start" },
+            {
+              id: "android",
+              command: "react-native run-android --no-packager",
+            },
+          ],
+        },
+      ]),
+    });
+
+    try {
+      wsRequests.length = 0;
+      const runButton = await waitForElement(
+        () => findButtonsByText("Run Android")[0] ?? null,
+        "Unable to find Run Android button.",
+      );
+      runButton.click();
+
+      await vi.waitFor(
+        () => {
+          const terminalWrites = wsRequests.filter(
+            (request) => request._tag === WS_METHODS.terminalWrite,
+          );
+          expect(terminalWrites).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({ data: "react-native start\r" }),
+              expect.objectContaining({
+                data: "react-native run-android --no-packager\r",
+              }),
+            ]),
+          );
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps single-step project actions as a single integrated terminal command", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotWithProjectScripts([
+        {
+          id: "lint",
+          name: "Lint",
+          command: "bun run lint",
+          icon: "lint",
+          runOnWorktreeCreate: false,
+        },
+      ]),
+    });
+
+    try {
+      wsRequests.length = 0;
+      const runButton = await waitForElement(
+        () => findButtonsByText("Lint")[0] ?? null,
+        "Unable to find Lint button.",
+      );
+      runButton.click();
+
+      await vi.waitFor(
+        () => {
+          const terminalWrites = wsRequests.filter(
+            (request) => request._tag === WS_METHODS.terminalWrite,
+          );
+          expect(terminalWrites).toHaveLength(1);
+          expect(terminalWrites[0]).toMatchObject({ data: "bun run lint\r" });
+          expect(
+            wsRequests.some(
+              (request) => request._tag === WS_METHODS.projectsReadFile,
+            ),
+          ).toBe(false);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("does not partially launch a multi-step project action when the terminal cap is exhausted", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotWithProjectScripts([
+        {
+          id: "dev",
+          name: "Dev",
+          command: "bun run web",
+          icon: "play",
+          runOnWorktreeCreate: false,
+          steps: [
+            { id: "web", command: "bun run web" },
+            { id: "api", command: "bun run api" },
+          ],
+        },
+      ]),
+    });
+
+    try {
+      const terminalStore = useTerminalStateStore.getState();
+      terminalStore.newTerminal(THREAD_ID, "terminal-2");
+      terminalStore.newTerminal(THREAD_ID, "terminal-3");
+      terminalStore.newTerminal(THREAD_ID, "terminal-4");
+      wsRequests.length = 0;
+
+      const runButton = await waitForElement(
+        () => findButtonsByText("Dev")[0] ?? null,
+        "Unable to find Dev button.",
+      );
+      runButton.click();
+
+      await vi.waitFor(
+        () => {
+          expect(
+            wsRequests.some(
+              (request) =>
+                request._tag === WS_METHODS.terminalOpen ||
+                request._tag === WS_METHODS.terminalWrite,
+            ),
+          ).toBe(false);
+          expect(document.body.textContent).toContain(
+            "This action needs 2 terminal tabs, but the thread is limited to 4. Close another terminal and try again.",
+          );
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("expands legacy npm run android actions into Metro plus Android integrated terminals", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotWithProjectScripts([
+        {
+          id: "run-android",
+          name: "Run Android",
+          command: "npm run android",
+          icon: "build",
+          runOnWorktreeCreate: false,
+        },
+      ]),
+      configureFixture: (nextFixture) => {
+        nextFixture.projectFiles = {
+          "package.json": JSON.stringify({
+            scripts: {
+              start: "react-native start",
+              android: "react-native run-android",
+            },
+          }),
+        };
+      },
+    });
+
+    try {
+      wsRequests.length = 0;
+      const runButton = await waitForElement(
+        () => findButtonsByText("Run Android")[0] ?? null,
+        "Unable to find Run Android button.",
+      );
+      runButton.click();
+
+      await vi.waitFor(
+        () => {
+          expect(
+            wsRequests.some(
+              (request) => request._tag === WS_METHODS.projectsReadFile,
+            ),
+          ).toBe(true);
+          const terminalWrites = wsRequests.filter(
+            (request) => request._tag === WS_METHODS.terminalWrite,
+          );
+          expect(terminalWrites).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({ data: "react-native start\r" }),
+              expect.objectContaining({
+                data: "react-native run-android --no-packager\r",
+              }),
+            ]),
+          );
         },
         { timeout: 8_000, interval: 16 },
       );

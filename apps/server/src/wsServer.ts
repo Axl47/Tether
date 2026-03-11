@@ -153,6 +153,9 @@ function toPosixRelativePath(input: string): string {
   return input.replaceAll("\\", "/");
 }
 
+const PROJECT_READ_FILE_MAX_BYTES = 262_144;
+const utf8TextDecoder = new TextDecoder("utf-8", { fatal: true });
+
 function resolveWorkspaceWritePath(params: {
   workspaceRoot: string;
   relativePath: string;
@@ -188,6 +191,22 @@ function resolveWorkspaceWritePath(params: {
   return Effect.succeed({
     absolutePath,
     relativePath: relativeToRoot,
+  });
+}
+
+function decodeWorkspaceTextFile(contents: Uint8Array): Effect.Effect<string, RouteRequestError> {
+  return Effect.try({
+    try: () => {
+      const decoded = utf8TextDecoder.decode(contents);
+      if (decoded.includes("\u0000")) {
+        throw new Error("Workspace file must be plain UTF-8 text.");
+      }
+      return decoded;
+    },
+    catch: () =>
+      new RouteRequestError({
+        message: "Workspace file must be plain UTF-8 text.",
+      }),
   });
 }
 
@@ -768,6 +787,50 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
               message: `Failed to search workspace entries: ${String(cause)}`,
             }),
         });
+      }
+
+      case WS_METHODS.projectsReadFile: {
+        const body = stripRequestTag(request.body);
+        const target = yield* resolveWorkspaceWritePath({
+          workspaceRoot: body.cwd,
+          relativePath: body.relativePath,
+          path,
+        });
+        const stat = yield* fileSystem.stat(target.absolutePath).pipe(
+          Effect.mapError(
+            (cause) =>
+              new RouteRequestError({
+                message: `Failed to inspect workspace file: ${String(cause)}`,
+              }),
+          ),
+        );
+        if (stat.type !== "File") {
+          return yield* new RouteRequestError({
+            message: "Workspace file path must point to a file.",
+          });
+        }
+        if (typeof stat.size === "number" && stat.size > PROJECT_READ_FILE_MAX_BYTES) {
+          return yield* new RouteRequestError({
+            message: `Workspace file exceeds ${PROJECT_READ_FILE_MAX_BYTES} bytes.`,
+          });
+        }
+        const contents = yield* fileSystem.readFile(target.absolutePath).pipe(
+          Effect.mapError(
+            (cause) =>
+              new RouteRequestError({
+                message: `Failed to read workspace file: ${String(cause)}`,
+              }),
+          ),
+        );
+        if (contents.length > PROJECT_READ_FILE_MAX_BYTES) {
+          return yield* new RouteRequestError({
+            message: `Workspace file exceeds ${PROJECT_READ_FILE_MAX_BYTES} bytes.`,
+          });
+        }
+        return {
+          relativePath: target.relativePath,
+          contents: yield* decodeWorkspaceTextFile(contents),
+        };
       }
 
       case WS_METHODS.projectsWriteFile: {
