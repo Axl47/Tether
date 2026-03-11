@@ -1139,6 +1139,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
     interactionMode === "plan" &&
     latestTurnSettled &&
     activeProposedPlan !== null;
+  const showPlanSidebarToggle =
+    activePlan !== null || activeProposedPlan !== null || planSidebarOpen;
   const activePendingApproval = pendingApprovals[0] ?? null;
   const isComposerApprovalState = activePendingApproval !== null;
   const hasComposerHeader =
@@ -1585,6 +1587,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
       },
     });
   }, [diffOpen, navigate, threadId]);
+  const onTogglePlanSidebar = useCallback(
+    (open: boolean) => {
+      if (open) {
+        planSidebarDismissedForTurnRef.current = null;
+      } else {
+        const turnKey = activePlan?.turnId ?? activeProposedPlan?.turnId ?? null;
+        if (turnKey) {
+          planSidebarDismissedForTurnRef.current = turnKey;
+        }
+      }
+      setPlanSidebarOpen(open);
+    },
+    [activePlan?.turnId, activeProposedPlan?.turnId],
+  );
 
   const envLocked = Boolean(
     activeThread &&
@@ -4163,6 +4179,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
           diffToggleShortcutLabel={diffPanelShortcutLabel}
           gitCwd={gitCwd}
           diffOpen={diffOpen}
+          showPlanSidebarToggle={showPlanSidebarToggle}
+          planSidebarOpen={planSidebarOpen}
           onRunProjectScript={(script) => {
             void runProjectScript(script);
           }}
@@ -4170,6 +4188,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           onUpdateProjectScript={updateProjectScript}
           onDeleteProjectScript={deleteProjectScript}
           onToggleDiff={onToggleDiff}
+          onTogglePlanSidebar={onTogglePlanSidebar}
         />
       </header>
 
@@ -4672,42 +4691,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
                     </span>
                   </Button>
 
-                  {/* Plan sidebar toggle */}
-                  {(activePlan || activeProposedPlan || planSidebarOpen) ? (
-                    <>
-                      <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
-                      <Button
-                        variant="ghost"
-                        className={cn(
-                          "shrink-0 whitespace-nowrap px-2 sm:px-3",
-                          planSidebarOpen
-                            ? "text-blue-400 hover:text-blue-300"
-                            : "text-muted-foreground/70 hover:text-foreground/80",
-                        )}
-                        size="sm"
-                        type="button"
-                        onClick={() => {
-                          setPlanSidebarOpen((open) => {
-                            if (open) {
-                              // Closing: track dismissal for current turn
-                              const turnKey = activePlan?.turnId ?? activeProposedPlan?.turnId ?? null;
-                              if (turnKey) {
-                                planSidebarDismissedForTurnRef.current = turnKey;
-                              }
-                            } else {
-                              // Re-opening: clear dismissal tracking
-                              planSidebarDismissedForTurnRef.current = null;
-                            }
-                            return !open;
-                          });
-                        }}
-                        title={planSidebarOpen ? "Hide plan sidebar" : "Show plan sidebar"}
-                      >
-                        <ListTodoIcon />
-                        <span className="sr-only sm:not-sr-only">Plan</span>
-                      </Button>
-                    </>
-                  ) : null}
                 </div>
 
                 {/* Right side: send / stop button */}
@@ -4897,14 +4880,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             activeProposedPlan={activeProposedPlan}
             markdownCwd={gitCwd ?? undefined}
             workspaceRoot={activeProject?.cwd ?? undefined}
-            onClose={() => {
-              setPlanSidebarOpen(false);
-              // Track that the user explicitly dismissed for this turn so auto-open won't fight them.
-              const turnKey = activePlan?.turnId ?? activeProposedPlan?.turnId ?? null;
-              if (turnKey) {
-                planSidebarDismissedForTurnRef.current = turnKey;
-              }
-            }}
+            onClose={() => onTogglePlanSidebar(false)}
           />
         ) : null}
       </div>{/* end horizontal flex container */}
@@ -5030,11 +5006,14 @@ interface ChatHeaderProps {
   diffToggleShortcutLabel: string | null;
   gitCwd: string | null;
   diffOpen: boolean;
+  showPlanSidebarToggle: boolean;
+  planSidebarOpen: boolean;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<void>;
   onUpdateProjectScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void>;
   onDeleteProjectScript: (scriptId: string) => Promise<void>;
   onToggleDiff: () => void;
+  onTogglePlanSidebar: (open: boolean) => void;
 }
 
 const ChatHeader = memo(function ChatHeader({
@@ -5050,11 +5029,14 @@ const ChatHeader = memo(function ChatHeader({
   diffToggleShortcutLabel,
   gitCwd,
   diffOpen,
+  showPlanSidebarToggle,
+  planSidebarOpen,
   onRunProjectScript,
   onAddProjectScript,
   onUpdateProjectScript,
   onDeleteProjectScript,
   onToggleDiff,
+  onTogglePlanSidebar,
 }: ChatHeaderProps) {
   return (
     <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -5130,6 +5112,27 @@ const ChatHeader = memo(function ChatHeader({
                 : "Toggle diff panel"}
           </TooltipPopup>
         </Tooltip>
+        {showPlanSidebarToggle ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Toggle
+                  className="shrink-0"
+                  pressed={planSidebarOpen}
+                  onPressedChange={onTogglePlanSidebar}
+                  aria-label="Toggle plan sidebar"
+                  variant="outline"
+                  size="xs"
+                >
+                  <ListTodoIcon className="size-3" />
+                </Toggle>
+              }
+            />
+            <TooltipPopup side="bottom">
+              {planSidebarOpen ? "Hide plan sidebar" : "Show plan sidebar"}
+            </TooltipPopup>
+          </Tooltip>
+        ) : null}
       </div>
     </div>
   );
