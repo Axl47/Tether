@@ -17,13 +17,14 @@ describe("normalizeModelSlug", () => {
     expect(normalizeModelSlug("gpt-5.3")).toBe("gpt-5.3-codex");
   });
 
-  it("maps Nano Banana Gemini aliases to canonical slugs", () => {
-    expect(normalizeModelSlug("nano banana", "gemini")).toBe("gemini-2.5-flash-image");
-    expect(normalizeModelSlug("Nano Banana 2", "gemini")).toBe("gemini-3-pro-preview");
+  it("maps supported Gemini aliases to canonical slugs", () => {
+    expect(normalizeModelSlug("pro", "gemini")).toBe("gemini-2.5-pro");
+    expect(normalizeModelSlug("flash", "gemini")).toBe("gemini-2.5-flash");
     expect(normalizeModelSlug("nano banana 2", "gemini")).toBe("gemini-3-pro-preview");
     expect(normalizeModelSlug("gemini-3-pro-image-preview", "gemini")).toBe(
       "gemini-3-pro-preview",
     );
+    expect(normalizeModelSlug("3-flash", "gemini")).toBe("gemini-3-flash-preview");
   });
 
   it("returns null for empty or missing values", () => {

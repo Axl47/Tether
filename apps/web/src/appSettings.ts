@@ -7,6 +7,14 @@ import { DEFAULT_SIDEBAR_THREAD_SORT, SidebarThreadSortSchema } from "./sidebarT
 const APP_SETTINGS_STORAGE_KEY = "t3code:app-settings:v1";
 const MAX_CUSTOM_MODEL_COUNT = 32;
 export const MAX_CUSTOM_MODEL_LENGTH = 256;
+const REMOVED_BUILT_IN_MODEL_SLUGS_BY_PROVIDER: Record<ProviderKind, ReadonlySet<string>> = {
+  codex: new Set(),
+  claudeCode: new Set(),
+  gemini: new Set([
+    "gemini-2.5-flash-image",
+    "gemini-3.1-pro-preview",
+  ]),
+};
 const BUILT_IN_MODEL_SLUGS_BY_PROVIDER: Record<ProviderKind, ReadonlySet<string>> = {
   codex: new Set(getModelOptions("codex").map((option) => option.slug)),
   claudeCode: new Set(getModelOptions("claudeCode").map((option) => option.slug)),
@@ -57,12 +65,14 @@ export function normalizeCustomModelSlugs(
   const normalizedModels: string[] = [];
   const seen = new Set<string>();
   const builtInModelSlugs = BUILT_IN_MODEL_SLUGS_BY_PROVIDER[provider];
+  const removedBuiltInModelSlugs = REMOVED_BUILT_IN_MODEL_SLUGS_BY_PROVIDER[provider];
 
   for (const candidate of models) {
     const normalized = normalizeModelSlug(candidate, provider);
     if (
       !normalized ||
       normalized.length > MAX_CUSTOM_MODEL_LENGTH ||
+      removedBuiltInModelSlugs.has(normalized) ||
       builtInModelSlugs.has(normalized) ||
       seen.has(normalized)
     ) {
@@ -143,7 +153,11 @@ export function getAppModelOptions(
   }
 
   const normalizedSelectedModel = normalizeModelSlug(selectedModel, provider);
-  if (normalizedSelectedModel && !seen.has(normalizedSelectedModel)) {
+  if (
+    normalizedSelectedModel &&
+    !REMOVED_BUILT_IN_MODEL_SLUGS_BY_PROVIDER[provider].has(normalizedSelectedModel) &&
+    !seen.has(normalizedSelectedModel)
+  ) {
     options.push({
       slug: normalizedSelectedModel,
       name: normalizedSelectedModel,

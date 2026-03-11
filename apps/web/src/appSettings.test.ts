@@ -64,12 +64,16 @@ describe("getAppModelOptions", () => {
     expect(options.map((option) => option.slug)).toContain("claude-sonnet-5-0");
   });
 
-  it("includes built-in Gemini image models in the picker catalog", () => {
+  it("only includes Gemini models that remain supported in the picker catalog", () => {
     const options = getAppModelOptions("gemini", []);
 
-    expect(options.map((option) => option.slug)).toContain("gemini-2.5-flash-image");
-    expect(options.map((option) => option.slug)).toContain("gemini-3-pro-preview");
-    expect(options.map((option) => option.slug)).not.toContain("gemini-3-pro-image-preview");
+    expect(options.map((option) => option.slug)).toEqual([
+      "gemini-2.5-pro",
+      "gemini-2.5-flash",
+      "gemini-2.5-flash-lite",
+      "gemini-3-pro-preview",
+      "gemini-3-flash-preview",
+    ]);
   });
 });
 
