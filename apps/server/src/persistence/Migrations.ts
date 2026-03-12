@@ -27,6 +27,7 @@ import Migration0012 from "./Migrations/012_ProjectionThreadsInteractionMode.ts"
 import Migration0013 from "./Migrations/013_ProjectionThreadProposedPlans.ts";
 import Migration0014 from "./Migrations/014_ProjectionThreadContextWindow.ts";
 import Migration0015 from "./Migrations/015_ProjectionThreadsAutorenameCache.ts";
+import Migration0016 from "./Migrations/016_ClearLegacyCodexContextWindow.ts";
 import { Effect } from "effect";
 
 /**
@@ -55,6 +56,7 @@ const loader = Migrator.fromRecord({
   "13_ProjectionThreadProposedPlans": Migration0013,
   "14_ProjectionThreadContextWindow": Migration0014,
   "15_ProjectionThreadsAutorenameCache": Migration0015,
+  "16_ClearLegacyCodexContextWindow": Migration0016,
 });
 
 /**

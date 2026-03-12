@@ -4,6 +4,7 @@ import {
   type ChatAttachment,
   CommandId,
   MessageId,
+  type OrchestrationContextWindow,
   type OrchestrationEvent,
   CheckpointRef,
   ThreadId,
@@ -99,6 +100,75 @@ function proposedPlanIdFromEvent(event: ProviderRuntimeEvent, threadId: ThreadId
     return `plan:${threadId}:item:${event.itemId}`;
   }
   return `plan:${threadId}:event:${event.eventId}`;
+}
+
+function isCodexContextWindowV2(
+  contextWindow: OrchestrationContextWindow | null | undefined,
+): contextWindow is OrchestrationContextWindow & {
+  estimationVersion: 2;
+  estimationMode: "direct" | "anchored";
+  effectiveTokens: number;
+} {
+  return (
+    contextWindow?.provider === "codex" &&
+    contextWindow.estimationVersion === 2 &&
+    (contextWindow.estimationMode === "direct" || contextWindow.estimationMode === "anchored") &&
+    contextWindow.effectiveTokens !== undefined
+  );
+}
+
+function logCodexContextTransition(input: {
+  threadId: ThreadId;
+  previousContextWindow: OrchestrationContextWindow | null | undefined;
+  nextContextWindow: OrchestrationContextWindow | null | undefined;
+  reason: "token-usage" | "explicit-compaction";
+}) {
+  const previousContextWindow = isCodexContextWindowV2(input.previousContextWindow)
+    ? input.previousContextWindow
+    : null;
+  const nextContextWindow = isCodexContextWindowV2(input.nextContextWindow)
+    ? input.nextContextWindow
+    : null;
+
+  if (!nextContextWindow) {
+    return Effect.void;
+  }
+
+  const details = {
+    threadId: input.threadId,
+    effectiveTokens: nextContextWindow.effectiveTokens,
+    usedTokens: nextContextWindow.usedTokens,
+    maxTokens: nextContextWindow.maxTokens,
+    anchorEffectiveTokens: nextContextWindow.anchorEffectiveTokens,
+    anchorEstimatedTokens: nextContextWindow.anchorEstimatedTokens,
+    anchorSource: nextContextWindow.anchorSource,
+  };
+
+  if (input.reason === "explicit-compaction") {
+    return Effect.logDebug("codex context estimation anchored from explicit compaction", details);
+  }
+
+  if (
+    nextContextWindow.estimationMode === "anchored" &&
+    (!previousContextWindow || previousContextWindow.estimationMode !== "anchored")
+  ) {
+    return Effect.logDebug("codex context estimation entered anchored mode", {
+      ...details,
+      previousMode: previousContextWindow?.estimationMode ?? "none",
+    });
+  }
+
+  if (
+    previousContextWindow?.estimationMode === "anchored" &&
+    nextContextWindow.estimationMode === "direct"
+  ) {
+    return Effect.logDebug("codex context estimation returned to direct mode", {
+      ...details,
+      previousMode: previousContextWindow.estimationMode,
+    });
+  }
+
+  return Effect.void;
 }
 
 function asString(value: unknown): string | undefined {
@@ -1225,6 +1295,12 @@ const make = Effect.gen(function* () {
             contextWindow,
             createdAt: now,
           });
+          yield* logCodexContextTransition({
+            threadId: thread.id,
+            previousContextWindow: thread.contextWindow,
+            nextContextWindow: contextWindow,
+            reason: "token-usage",
+          });
         }
       }
 
@@ -1237,6 +1313,12 @@ const make = Effect.gen(function* () {
             threadId: thread.id,
             contextWindow: compactedContextWindow,
             createdAt: now,
+          });
+          yield* logCodexContextTransition({
+            threadId: thread.id,
+            previousContextWindow: thread.contextWindow,
+            nextContextWindow: compactedContextWindow,
+            reason: "explicit-compaction",
           });
         } else {
           yield* orchestrationEngine.dispatch({

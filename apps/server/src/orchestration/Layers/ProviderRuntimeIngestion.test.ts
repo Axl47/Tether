@@ -887,17 +887,103 @@ describe("ProviderRuntimeIngestion", () => {
       harness.engine,
       (entry) =>
         entry.contextWindow?.usedTokens === 38_700 &&
-        entry.contextWindow.compactionAnchorNonCachedTokens === 100_000,
+        entry.contextWindow?.anchorEffectiveTokens === 100_000,
     );
     expect(thread.contextWindow).toMatchObject({
       provider: "codex",
+      estimationVersion: 2,
+      estimationMode: "anchored",
       usedTokens: 38_700,
+      effectiveTokens: 100_000,
       reportedTotalTokens: 120_000,
-      compactionAnchorNonCachedTokens: 100_000,
-      compactionAnchorUsedTokens: 38_700,
+      anchorEffectiveTokens: 100_000,
+      anchorEstimatedTokens: 38_700,
+      anchorSource: "explicit-compaction",
       maxTokens: 258_000,
       remainingTokens: 219_300,
       usedPercent: 15,
+    });
+  });
+
+  it("keeps growing Codex usage from the explicit compaction anchor on later updates", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "thread.token-usage.updated",
+      eventId: asEventId("evt-context-window-before-compaction-growth"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      payload: {
+        usage: {
+          tokenUsage: {
+            total: {
+              totalTokens: 120_000,
+              inputTokens: 110_000,
+              outputTokens: 10_000,
+            },
+            modelContextWindow: 258_000,
+          },
+        },
+      },
+    });
+
+    await waitForThread(harness.engine, (entry) => entry.contextWindow?.usedTokens === 100_000);
+
+    harness.emit({
+      type: "thread.state.changed",
+      eventId: asEventId("evt-thread-compacted-growth"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      payload: {
+        state: "compacted",
+      },
+    });
+
+    await waitForThread(harness.engine, (entry) => entry.contextWindow?.usedTokens === 38_700);
+
+    harness.emit({
+      type: "thread.token-usage.updated",
+      eventId: asEventId("evt-context-window-after-compaction-growth"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      payload: {
+        usage: {
+          tokenUsage: {
+            total: {
+              totalTokens: 310_000,
+              inputTokens: 300_000,
+              outputTokens: 20_000,
+            },
+            modelContextWindow: 258_000,
+          },
+        },
+      },
+    });
+
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) =>
+        entry.contextWindow?.usedTokens === 218_700 &&
+        entry.contextWindow?.anchorSource === "explicit-compaction",
+    );
+
+    expect(thread.contextWindow).toMatchObject({
+      provider: "codex",
+      estimationVersion: 2,
+      estimationMode: "anchored",
+      usedTokens: 218_700,
+      effectiveTokens: 280_000,
+      reportedTotalTokens: 310_000,
+      anchorEffectiveTokens: 100_000,
+      anchorEstimatedTokens: 38_700,
+      anchorSource: "explicit-compaction",
+      maxTokens: 258_000,
+      remainingTokens: 39_300,
+      usedPercent: 85,
     });
   });
 

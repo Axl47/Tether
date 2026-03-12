@@ -3,7 +3,8 @@ import type { OrchestrationContextWindow } from "@t3tools/contracts";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import {
   formatCompactTokenCount,
-  isCodexCompactionEstimate,
+  isCodexContextWindowV2,
+  resolveCodexContextExplanation,
   resolveContextTokensUsed,
   resolveContextWindowSeverity,
 } from "./ContextWindowIndicator.logic";
@@ -28,60 +29,16 @@ function tokenBreakdown(contextWindow: OrchestrationContextWindow): string | nul
   return parts.length > 0 ? parts.join(", ") : null;
 }
 
-function deriveCodexPromptFootprint(contextWindow: OrchestrationContextWindow): number {
-  const promptSourceTokens =
-    contextWindow.inputTokens ?? contextWindow.reportedTotalTokens ?? contextWindow.usedTokens;
-  return Math.max(
-    0,
-    promptSourceTokens -
-      (contextWindow.cachedInputTokens ?? 0) -
-      (contextWindow.outputTokens ?? 0) -
-      (contextWindow.reasoningOutputTokens ?? 0),
-  );
-}
-
 export default function ContextWindowIndicator(props: {
   contextWindow: OrchestrationContextWindow;
 }) {
   const { contextWindow } = props;
-  const isCodexEstimate = contextWindow.provider === "codex";
-  const isCompactionEstimate = isCodexCompactionEstimate(contextWindow);
-  const derivedCodexPromptFootprint = isCodexEstimate
-    ? deriveCodexPromptFootprint(contextWindow)
-    : contextWindow.usedTokens;
-  const hasLegacyRawCodexSnapshot =
-    isCodexEstimate &&
-    !isCompactionEstimate &&
-    derivedCodexPromptFootprint < contextWindow.usedTokens;
-  const hasLegacyCodexFallback =
-    isCodexEstimate &&
-    !isCompactionEstimate &&
-    contextWindow.usedTokens >= contextWindow.maxTokens &&
-    (contextWindow.reportedLastEffectiveTokens ?? contextWindow.reportedLastTokens) !== undefined;
-  const hasCodexOverflowBaselineFallback =
-    isCodexEstimate &&
-    !isCompactionEstimate &&
-    !hasLegacyCodexFallback &&
-    contextWindow.usedTokens >= contextWindow.maxTokens;
-  const displayedCodexUsedTokens = hasLegacyCodexFallback
-    ? Math.max(
-        0,
-        Math.round(contextWindow.maxTokens * 0.15) +
-          (contextWindow.reportedLastEffectiveTokens ?? contextWindow.reportedLastTokens ?? 0),
-      )
-    : hasCodexOverflowBaselineFallback
-      ? Math.round(contextWindow.maxTokens * 0.15)
-      : hasLegacyRawCodexSnapshot
-        ? derivedCodexPromptFootprint
-        : contextWindow.usedTokens;
-  const displayedUsedPercent = isCodexEstimate
-    ? Math.max(0, Math.round((displayedCodexUsedTokens / contextWindow.maxTokens) * 100))
-    : contextWindow.usedPercent;
-  const remainingPercent = Math.max(0, 100 - displayedUsedPercent);
+  const isCodexEstimate = isCodexContextWindowV2(contextWindow);
+  const remainingPercent = Math.max(0, 100 - contextWindow.usedPercent);
   const contextTokensUsed = isCodexEstimate
-    ? displayedCodexUsedTokens
+    ? contextWindow.usedTokens
     : resolveContextTokensUsed(contextWindow);
-  const severity = resolveContextWindowSeverity(displayedUsedPercent);
+  const severity = resolveContextWindowSeverity(contextWindow.usedPercent);
   const badgeClassName =
     severity === "danger"
       ? "border-destructive/28 bg-destructive/8 text-destructive-foreground hover:bg-destructive/12"
@@ -102,7 +59,7 @@ export default function ContextWindowIndicator(props: {
               badgeClassName,
             )}
           >
-            {isCodexEstimate ? `${displayedUsedPercent}%` : `${contextWindow.usedPercent}%`}
+            {contextWindow.usedPercent}%
           </button>
         }
       />
@@ -114,22 +71,14 @@ export default function ContextWindowIndicator(props: {
           {isCodexEstimate ? (
             <>
               <p>
-                {displayedUsedPercent}% used ({remainingPercent}% left)
+                {contextWindow.usedPercent}% used ({remainingPercent}% left)
               </p>
               <p>
-                Estimated usage: {formatCompactTokenCount(displayedCodexUsedTokens)} /{" "}
+                Estimated usage: {formatCompactTokenCount(contextWindow.usedTokens)} /{" "}
                 {formatCompactTokenCount(contextWindow.maxTokens)} tokens
               </p>
               <p className="text-muted-foreground">
-                {hasLegacyCodexFallback
-                  ? "Approximated from the latest reported turn while waiting for a refreshed compaction anchor."
-                  : hasCodexOverflowBaselineFallback
-                    ? "Using the post-compaction baseline while waiting for a refreshed last-turn delta from Codex."
-                    : hasLegacyRawCodexSnapshot
-                      ? "Derived from the current Codex totals with cached, output, and reasoning tokens removed."
-                      : isCompactionEstimate
-                        ? "Estimated from a 15% post-compaction reset plus new non-cached token growth."
-                        : "Estimated from Codex reported totals with cached, output, and reasoning tokens excluded."}
+                {resolveCodexContextExplanation(contextWindow)}
               </p>
               {contextWindow.reportedTotalTokens !== undefined ? (
                 <p>
@@ -143,10 +92,10 @@ export default function ContextWindowIndicator(props: {
                   tokens
                 </p>
               ) : null}
-              {contextWindow.reportedLastEffectiveTokens !== undefined ? (
+              {contextWindow.lastEffectiveTokens !== undefined ? (
                 <p>
                   Estimated last-turn footprint:{" "}
-                  {formatCompactTokenCount(contextWindow.reportedLastEffectiveTokens)} tokens
+                  {formatCompactTokenCount(contextWindow.lastEffectiveTokens)} tokens
                 </p>
               ) : null}
               <p>Model context window: {formatCompactTokenCount(contextWindow.maxTokens)} tokens</p>

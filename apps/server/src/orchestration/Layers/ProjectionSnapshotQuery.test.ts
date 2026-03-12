@@ -73,7 +73,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           'gpt-5-codex',
           NULL,
           NULL,
-          '{"provider":"codex","usedTokens":119000,"maxTokens":258000,"remainingTokens":139000,"usedPercent":46,"updatedAt":"2026-02-24T00:00:03.000Z"}',
+          '{"provider":"codex","estimationVersion":2,"estimationMode":"direct","usedTokens":119000,"effectiveTokens":119000,"reportedTotalTokens":119000,"maxTokens":258000,"remainingTokens":139000,"usedPercent":46,"updatedAt":"2026-02-24T00:00:03.000Z"}',
           'turn-1',
           'message-autorename-1',
           '2026-02-24T00:00:02.000Z',
@@ -261,7 +261,11 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           proposedPlans: [],
           contextWindow: {
             provider: "codex",
+            estimationVersion: 2,
+            estimationMode: "direct",
             usedTokens: 119000,
+            effectiveTokens: 119000,
+            reportedTotalTokens: 119000,
             maxTokens: 258000,
             remainingTokens: 139000,
             usedPercent: 46,
@@ -300,6 +304,92 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           },
         },
       ]);
+    }),
+  );
+
+  it.effect("drops legacy Codex context snapshots that are missing estimationVersion 2", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_state`;
+      yield* sql`DELETE FROM projection_turns`;
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          default_model,
+          scripts_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'project-1',
+          'Project 1',
+          '/tmp/project-1',
+          'gpt-5-codex',
+          '[]',
+          '2026-02-24T00:00:00.000Z',
+          '2026-02-24T00:00:01.000Z',
+          NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id,
+          project_id,
+          title,
+          model,
+          branch,
+          worktree_path,
+          context_window_json,
+          latest_turn_id,
+          last_autorename_user_message_id,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'thread-legacy',
+          'project-1',
+          'Legacy Thread',
+          'gpt-5-codex',
+          NULL,
+          NULL,
+          '{"provider":"codex","usedTokens":119000,"maxTokens":258000,"remainingTokens":139000,"usedPercent":46,"updatedAt":"2026-02-24T00:00:03.000Z"}',
+          NULL,
+          NULL,
+          '2026-02-24T00:00:02.000Z',
+          '2026-02-24T00:00:03.000Z',
+          NULL
+        )
+      `;
+
+      let sequence = 5;
+      for (const projector of Object.values(ORCHESTRATION_PROJECTOR_NAMES)) {
+        yield* sql`
+          INSERT INTO projection_state (
+            projector,
+            last_applied_sequence,
+            updated_at
+          )
+          VALUES (
+            ${projector},
+            ${sequence},
+            '2026-02-24T00:00:09.000Z'
+          )
+        `;
+        sequence += 1;
+      }
+
+      const snapshot = yield* snapshotQuery.getSnapshot();
+      assert.equal(snapshot.threads[0]?.contextWindow, null);
     }),
   );
 });

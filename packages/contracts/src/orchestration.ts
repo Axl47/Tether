@@ -201,14 +201,29 @@ export const OrchestrationSession = Schema.Struct({
 });
 export type OrchestrationSession = typeof OrchestrationSession.Type;
 
+export const CodexContextEstimationMode = Schema.Literals(["direct", "anchored"]);
+export type CodexContextEstimationMode = typeof CodexContextEstimationMode.Type;
+
+export const CodexContextAnchorSource = Schema.Literals([
+  "explicit-compaction",
+  "overflow-previous-direct",
+  "overflow-last-delta",
+  "overflow-baseline",
+]);
+export type CodexContextAnchorSource = typeof CodexContextAnchorSource.Type;
+
 export const OrchestrationContextWindow = Schema.Struct({
   provider: ProviderKind,
+  estimationVersion: Schema.optional(Schema.Literal(2)),
+  estimationMode: Schema.optional(CodexContextEstimationMode),
   usedTokens: NonNegativeInt,
+  effectiveTokens: Schema.optional(NonNegativeInt),
   reportedTotalTokens: Schema.optional(NonNegativeInt),
   reportedLastTokens: Schema.optional(NonNegativeInt),
-  reportedLastEffectiveTokens: Schema.optional(NonNegativeInt),
-  compactionAnchorNonCachedTokens: Schema.optional(NonNegativeInt),
-  compactionAnchorUsedTokens: Schema.optional(NonNegativeInt),
+  lastEffectiveTokens: Schema.optional(NonNegativeInt),
+  anchorEffectiveTokens: Schema.optional(NonNegativeInt),
+  anchorEstimatedTokens: Schema.optional(NonNegativeInt),
+  anchorSource: Schema.optional(CodexContextAnchorSource),
   maxTokens: NonNegativeInt,
   remainingTokens: NonNegativeInt,
   usedPercent: NonNegativeInt,

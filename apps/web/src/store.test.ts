@@ -214,7 +214,11 @@ describe("store read model sync", () => {
       makeReadModelThread({
         contextWindow: {
           provider: "codex",
+          estimationVersion: 2,
+          estimationMode: "direct",
           usedTokens: 119000,
+          effectiveTokens: 119000,
+          reportedTotalTokens: 119000,
           maxTokens: 258000,
           remainingTokens: 139000,
           usedPercent: 46,

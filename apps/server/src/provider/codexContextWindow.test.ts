@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { compactCodexContextWindow, normalizeCodexContextWindow } from "./codexContextWindow.ts";
 
 describe("normalizeCodexContextWindow", () => {
-  it("parses the observed Codex token-count shape", () => {
+  it("parses the observed Codex token-count shape into a direct v2 snapshot", () => {
     expect(
       normalizeCodexContextWindow(
         {
@@ -22,7 +22,10 @@ describe("normalizeCodexContextWindow", () => {
       ),
     ).toEqual({
       provider: "codex",
+      estimationVersion: 2,
+      estimationMode: "direct",
       usedTokens: 30259,
+      effectiveTokens: 30259,
       reportedTotalTokens: 126516,
       maxTokens: 258400,
       remainingTokens: 228141,
@@ -50,7 +53,11 @@ describe("normalizeCodexContextWindow", () => {
         "2026-03-07T00:00:00.000Z",
       ),
     ).toMatchObject({
+      provider: "codex",
+      estimationVersion: 2,
+      estimationMode: "direct",
       usedTokens: 41000,
+      effectiveTokens: 41000,
       reportedTotalTokens: 119000,
       maxTokens: 258000,
       remainingTokens: 217000,
@@ -58,7 +65,7 @@ describe("normalizeCodexContextWindow", () => {
     });
   });
 
-  it("carries the last-turn token total when available", () => {
+  it("carries the last-turn token total and effective footprint when available", () => {
     expect(
       normalizeCodexContextWindow(
         {
@@ -82,9 +89,14 @@ describe("normalizeCodexContextWindow", () => {
         "2026-03-07T00:00:00.000Z",
       ),
     ).toMatchObject({
+      provider: "codex",
+      estimationVersion: 2,
+      estimationMode: "direct",
       usedTokens: 41000,
+      effectiveTokens: 41000,
       reportedTotalTokens: 119000,
       reportedLastTokens: 8500,
+      lastEffectiveTokens: 5500,
       maxTokens: 258000,
       remainingTokens: 217000,
       usedPercent: 16,
@@ -119,10 +131,13 @@ describe("normalizeCodexContextWindow", () => {
       ),
     ).toEqual({
       provider: "codex",
+      estimationVersion: 2,
+      estimationMode: "direct",
       usedTokens: 6431,
+      effectiveTokens: 6431,
       reportedTotalTokens: 11347,
       reportedLastTokens: 11347,
-      reportedLastEffectiveTokens: 6431,
+      lastEffectiveTokens: 6431,
       maxTokens: 258400,
       remainingTokens: 251969,
       usedPercent: 2,
@@ -147,7 +162,10 @@ describe("normalizeCodexContextWindow", () => {
       ),
     ).toEqual({
       provider: "codex",
+      estimationVersion: 2,
+      estimationMode: "direct",
       usedTokens: 100,
+      effectiveTokens: 100,
       reportedTotalTokens: 100,
       maxTokens: 258400,
       remainingTokens: 258300,
@@ -169,7 +187,10 @@ describe("normalizeCodexContextWindow", () => {
       ),
     ).toEqual({
       provider: "codex",
+      estimationVersion: 2,
+      estimationMode: "direct",
       usedTokens: 100,
+      effectiveTokens: 100,
       reportedTotalTokens: 100,
       maxTokens: 258400,
       remainingTokens: 258300,
@@ -195,7 +216,10 @@ describe("normalizeCodexContextWindow", () => {
       ),
     ).toEqual({
       provider: "codex",
+      estimationVersion: 2,
+      estimationMode: "direct",
       usedTokens: 40,
+      effectiveTokens: 40,
       reportedTotalTokens: 100,
       maxTokens: 258400,
       remainingTokens: 258360,
@@ -208,7 +232,60 @@ describe("normalizeCodexContextWindow", () => {
     });
   });
 
-  it("preserves oversized estimated occupancy and reported totals", () => {
+  it("keeps direct mode when raw totals overflow but the effective footprint is below the window", () => {
+    expect(
+      normalizeCodexContextWindow(
+        {
+          tokenUsage: {
+            total: {
+              totalTokens: 1_212_700,
+              inputTokens: 1_200_000,
+              cachedInputTokens: 1_100_000,
+              outputTokens: 9_500,
+              reasoningOutputTokens: 3_200,
+            },
+            modelContextWindow: 258_000,
+          },
+        },
+        "2026-03-07T03:55:00.000Z",
+        {
+          provider: "codex",
+          estimationVersion: 2,
+          estimationMode: "anchored",
+          usedTokens: 38_700,
+          effectiveTokens: 300_000,
+          reportedTotalTokens: 1_050_000,
+          anchorEffectiveTokens: 300_000,
+          anchorEstimatedTokens: 38_700,
+          anchorSource: "overflow-baseline",
+          maxTokens: 258_000,
+          remainingTokens: 219_300,
+          usedPercent: 15,
+          inputTokens: 1_040_000,
+          cachedInputTokens: 950_000,
+          outputTokens: 7_000,
+          reasoningOutputTokens: 2_000,
+          updatedAt: "2026-03-07T03:45:00.000Z",
+        },
+      ),
+    ).toMatchObject({
+      provider: "codex",
+      estimationVersion: 2,
+      estimationMode: "direct",
+      usedTokens: 87_300,
+      effectiveTokens: 87_300,
+      reportedTotalTokens: 1_212_700,
+      maxTokens: 258_000,
+      remainingTokens: 170_700,
+      usedPercent: 34,
+      inputTokens: 1_200_000,
+      cachedInputTokens: 1_100_000,
+      outputTokens: 9_500,
+      reasoningOutputTokens: 3_200,
+    });
+  });
+
+  it("keeps direct mode for oversized reported totals when the effective footprint is zero", () => {
     expect(
       normalizeCodexContextWindow(
         {
@@ -225,7 +302,11 @@ describe("normalizeCodexContextWindow", () => {
         "2026-03-07T00:00:00.000Z",
       ),
     ).toMatchObject({
+      provider: "codex",
+      estimationVersion: 2,
+      estimationMode: "direct",
       usedTokens: 0,
+      effectiveTokens: 0,
       reportedTotalTokens: 9_300_000,
       maxTokens: 258_000,
       remainingTokens: 258_000,
@@ -234,15 +315,18 @@ describe("normalizeCodexContextWindow", () => {
     });
   });
 
-  it("resets to a 15% baseline after compaction and grows from the compaction anchor", () => {
+  it("resets to a 15% baseline after explicit compaction and grows from the stored anchor", () => {
     const compacted = compactCodexContextWindow(
       {
         provider: "codex",
-        usedTokens: 245_000,
+        estimationVersion: 2,
+        estimationMode: "direct",
+        usedTokens: 145_000,
+        effectiveTokens: 145_000,
         reportedTotalTokens: 300_000,
         maxTokens: 258_000,
-        remainingTokens: 13_000,
-        usedPercent: 95,
+        remainingTokens: 113_000,
+        usedPercent: 56,
         inputTokens: 250_000,
         cachedInputTokens: 55_000,
         outputTokens: 50_000,
@@ -252,10 +336,15 @@ describe("normalizeCodexContextWindow", () => {
     );
 
     expect(compacted).toMatchObject({
+      provider: "codex",
+      estimationVersion: 2,
+      estimationMode: "anchored",
       usedTokens: 38_700,
+      effectiveTokens: 145_000,
       reportedTotalTokens: 300_000,
-      compactionAnchorNonCachedTokens: 145_000,
-      compactionAnchorUsedTokens: 38_700,
+      anchorEffectiveTokens: 145_000,
+      anchorEstimatedTokens: 38_700,
+      anchorSource: "explicit-compaction",
       remainingTokens: 219_300,
       usedPercent: 15,
       updatedAt: "2026-03-07T01:00:00.000Z",
@@ -266,10 +355,9 @@ describe("normalizeCodexContextWindow", () => {
         {
           tokenUsage: {
             total: {
-              totalTokens: 333_000,
-              inputTokens: 275_000,
-              cachedInputTokens: 58_000,
-              outputTokens: 58_000,
+              totalTokens: 330_000,
+              inputTokens: 320_000,
+              outputTokens: 20_000,
             },
             modelContextWindow: 258_000,
           },
@@ -278,33 +366,28 @@ describe("normalizeCodexContextWindow", () => {
         compacted,
       ),
     ).toMatchObject({
-      usedTokens: 52_700,
-      reportedTotalTokens: 333_000,
-      compactionAnchorNonCachedTokens: 145_000,
-      compactionAnchorUsedTokens: 38_700,
-      remainingTokens: 205_300,
-      usedPercent: 20,
+      provider: "codex",
+      estimationVersion: 2,
+      estimationMode: "anchored",
+      usedTokens: 193_700,
+      effectiveTokens: 300_000,
+      reportedTotalTokens: 330_000,
+      anchorEffectiveTokens: 145_000,
+      anchorEstimatedTokens: 38_700,
+      anchorSource: "explicit-compaction",
+      remainingTokens: 64_300,
+      usedPercent: 75,
     });
   });
 
-  it("recovers a compaction anchor from legacy overflowing snapshots using the latest turn delta", () => {
+  it("creates the first overflow anchor from the previous direct snapshot when available", () => {
     expect(
       normalizeCodexContextWindow(
         {
           tokenUsage: {
             total: {
-              totalTokens: 26_400_000,
-              inputTokens: 24_000_000,
-              cachedInputTokens: 2_000_000,
-              outputTokens: 250_000,
-              reasoningOutputTokens: 50_000,
-            },
-            last: {
-              totalTokens: 32_000,
-              inputTokens: 29_000,
-              cachedInputTokens: 2_000,
-              outputTokens: 2_000,
-              reasoningOutputTokens: 1_000,
+              totalTokens: 268_000,
+              inputTokens: 268_000,
             },
             modelContextWindow: 258_000,
           },
@@ -312,37 +395,40 @@ describe("normalizeCodexContextWindow", () => {
         "2026-03-07T03:00:00.000Z",
         {
           provider: "codex",
-          usedTokens: 258_000,
-          reportedTotalTokens: 26_000_000,
+          estimationVersion: 2,
+          estimationMode: "direct",
+          usedTokens: 240_000,
+          effectiveTokens: 240_000,
+          reportedTotalTokens: 240_000,
           maxTokens: 258_000,
-          remainingTokens: 0,
-          usedPercent: 100,
+          remainingTokens: 18_000,
+          usedPercent: 93,
           updatedAt: "2026-03-07T02:00:00.000Z",
         },
       ),
     ).toMatchObject({
-      usedTokens: 62_700,
-      reportedTotalTokens: 26_400_000,
-      reportedLastTokens: 32_000,
-      reportedLastEffectiveTokens: 24_000,
-      compactionAnchorNonCachedTokens: 21_676_000,
-      compactionAnchorUsedTokens: 38_700,
-      remainingTokens: 195_300,
-      usedPercent: 24,
+      provider: "codex",
+      estimationVersion: 2,
+      estimationMode: "anchored",
+      usedTokens: 66_700,
+      effectiveTokens: 268_000,
+      reportedTotalTokens: 268_000,
+      anchorEffectiveTokens: 240_000,
+      anchorEstimatedTokens: 38_700,
+      anchorSource: "overflow-previous-direct",
+      remainingTokens: 191_300,
+      usedPercent: 26,
     });
   });
 
-  it("recovers a compaction anchor from an overflowing update even when no prior anchor exists", () => {
+  it("creates the first overflow anchor from the latest turn delta when no prior direct snapshot exists", () => {
     expect(
       normalizeCodexContextWindow(
         {
           tokenUsage: {
             total: {
-              totalTokens: 26_400_000,
-              inputTokens: 24_000_000,
-              cachedInputTokens: 2_000_000,
-              outputTokens: 250_000,
-              reasoningOutputTokens: 50_000,
+              totalTokens: 270_000,
+              inputTokens: 270_000,
             },
             last: {
               totalTokens: 32_000,
@@ -357,47 +443,58 @@ describe("normalizeCodexContextWindow", () => {
         "2026-03-07T03:30:00.000Z",
       ),
     ).toMatchObject({
+      provider: "codex",
+      estimationVersion: 2,
+      estimationMode: "anchored",
       usedTokens: 62_700,
-      reportedTotalTokens: 26_400_000,
+      effectiveTokens: 270_000,
+      reportedTotalTokens: 270_000,
       reportedLastTokens: 32_000,
-      reportedLastEffectiveTokens: 24_000,
-      compactionAnchorNonCachedTokens: 21_676_000,
-      compactionAnchorUsedTokens: 38_700,
+      lastEffectiveTokens: 24_000,
+      anchorEffectiveTokens: 246_000,
+      anchorEstimatedTokens: 38_700,
+      anchorSource: "overflow-last-delta",
       remainingTokens: 195_300,
       usedPercent: 24,
     });
   });
 
-  it("falls back to the post-compaction baseline for overflowing updates without a usable last-turn delta", () => {
+  it("falls back to a baseline anchor when Codex overflows without prior detail", () => {
     expect(
       normalizeCodexContextWindow(
         {
           info: {
             total_token_usage: {
-              total_tokens: 400_000,
+              total_tokens: 300000,
             },
-            model_context_window: 258_000,
+            model_context_window: 258400,
           },
         },
-        "2026-03-07T03:45:00.000Z",
+        "2026-03-07T00:00:00.000Z",
       ),
     ).toMatchObject({
-      usedTokens: 38_700,
-      reportedTotalTokens: 400_000,
-      compactionAnchorNonCachedTokens: 400_000,
-      compactionAnchorUsedTokens: 38_700,
-      remainingTokens: 219_300,
+      provider: "codex",
+      estimationVersion: 2,
+      estimationMode: "anchored",
+      usedTokens: 38_760,
+      effectiveTokens: 300000,
+      reportedTotalTokens: 300000,
+      maxTokens: 258400,
+      anchorEffectiveTokens: 300000,
+      anchorEstimatedTokens: 38_760,
+      anchorSource: "overflow-baseline",
+      remainingTokens: 219640,
       usedPercent: 15,
     });
   });
 
-  it("derives overflow growth from the previous snapshot when Codex omits the last-turn delta", () => {
+  it("keeps using an existing anchored snapshot while effective usage remains over the window", () => {
     expect(
       normalizeCodexContextWindow(
         {
           info: {
             total_token_usage: {
-              total_tokens: 400_000,
+              total_tokens: 315_000,
             },
             model_context_window: 258_000,
           },
@@ -405,42 +502,46 @@ describe("normalizeCodexContextWindow", () => {
         "2026-03-07T03:50:00.000Z",
         {
           provider: "codex",
-          usedTokens: 240_000,
-          reportedTotalTokens: 240_000,
+          estimationVersion: 2,
+          estimationMode: "anchored",
+          usedTokens: 38_700,
+          effectiveTokens: 300_000,
+          reportedTotalTokens: 300_000,
+          anchorEffectiveTokens: 300_000,
+          anchorEstimatedTokens: 38_700,
+          anchorSource: "overflow-baseline",
           maxTokens: 258_000,
-          remainingTokens: 18_000,
-          usedPercent: 93,
+          remainingTokens: 219_300,
+          usedPercent: 15,
           updatedAt: "2026-03-07T03:40:00.000Z",
         },
       ),
     ).toMatchObject({
-      usedTokens: 198_700,
-      reportedTotalTokens: 400_000,
-      compactionAnchorNonCachedTokens: 240_000,
-      compactionAnchorUsedTokens: 38_700,
-      remainingTokens: 59_300,
-      usedPercent: 77,
+      provider: "codex",
+      estimationVersion: 2,
+      estimationMode: "anchored",
+      usedTokens: 53_700,
+      effectiveTokens: 315_000,
+      reportedTotalTokens: 315_000,
+      anchorEffectiveTokens: 300_000,
+      anchorEstimatedTokens: 38_700,
+      anchorSource: "overflow-baseline",
+      remainingTokens: 204_300,
+      usedPercent: 21,
     });
   });
 
-  it("recovers from legacy snapshots clamped exactly to the model limit", () => {
+  it("returns to direct mode when a later effective footprint drops back under the window", () => {
     expect(
       normalizeCodexContextWindow(
         {
           tokenUsage: {
             total: {
-              totalTokens: 258_000,
-              inputTokens: 258_000,
-              cachedInputTokens: 220_000,
-              outputTokens: 6_000,
-              reasoningOutputTokens: 2_000,
-            },
-            last: {
-              totalTokens: 18_000,
-              inputTokens: 16_000,
-              cachedInputTokens: 3_000,
-              outputTokens: 1_500,
-              reasoningOutputTokens: 500,
+              totalTokens: 1_212_700,
+              inputTokens: 1_200_000,
+              cachedInputTokens: 1_100_000,
+              outputTokens: 9_500,
+              reasoningOutputTokens: 3_200,
             },
             modelContextWindow: 258_000,
           },
@@ -448,23 +549,29 @@ describe("normalizeCodexContextWindow", () => {
         "2026-03-07T04:00:00.000Z",
         {
           provider: "codex",
-          usedTokens: 258_000,
-          reportedTotalTokens: 258_000,
+          estimationVersion: 2,
+          estimationMode: "anchored",
+          usedTokens: 53_700,
+          effectiveTokens: 315_000,
+          reportedTotalTokens: 315_000,
+          anchorEffectiveTokens: 300_000,
+          anchorEstimatedTokens: 38_700,
+          anchorSource: "overflow-baseline",
           maxTokens: 258_000,
-          remainingTokens: 0,
-          usedPercent: 100,
-          updatedAt: "2026-03-07T03:00:00.000Z",
+          remainingTokens: 204_300,
+          usedPercent: 21,
+          updatedAt: "2026-03-07T03:50:00.000Z",
         },
       ),
     ).toMatchObject({
-      usedTokens: 49_700,
-      reportedTotalTokens: 258_000,
-      reportedLastTokens: 18_000,
-      reportedLastEffectiveTokens: 11_000,
-      compactionAnchorNonCachedTokens: 19_000,
-      compactionAnchorUsedTokens: 38_700,
-      remainingTokens: 208_300,
-      usedPercent: 19,
+      provider: "codex",
+      estimationVersion: 2,
+      estimationMode: "direct",
+      usedTokens: 87_300,
+      effectiveTokens: 87_300,
+      reportedTotalTokens: 1_212_700,
+      remainingTokens: 170_700,
+      usedPercent: 34,
     });
   });
 
@@ -482,29 +589,5 @@ describe("normalizeCodexContextWindow", () => {
         "2026-03-07T00:00:00.000Z",
       ),
     ).toBeNull();
-  });
-
-  it("switches overflowing totals without a last-turn delta onto the post-compaction baseline", () => {
-    expect(
-      normalizeCodexContextWindow(
-        {
-          info: {
-            total_token_usage: {
-              total_tokens: 300000,
-            },
-            model_context_window: 258400,
-          },
-        },
-        "2026-03-07T00:00:00.000Z",
-      ),
-    ).toMatchObject({
-      usedTokens: 38_760,
-      reportedTotalTokens: 300000,
-      maxTokens: 258400,
-      compactionAnchorNonCachedTokens: 300000,
-      compactionAnchorUsedTokens: 38_760,
-      remainingTokens: 219640,
-      usedPercent: 15,
-    });
   });
 });

@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   formatCompactTokenCount,
-  isCodexCompactionEstimate,
+  isCodexContextWindowV2,
+  resolveCodexContextExplanation,
   resolveContextTokensUsed,
   resolveContextWindowSeverity,
 } from "./ContextWindowIndicator.logic";
@@ -35,14 +36,18 @@ describe("ContextWindowIndicator helpers", () => {
     ).toBe(38_700);
   });
 
-  it("flags Codex estimates that are anchored to a compaction reset", () => {
+  it("flags Codex v2 snapshots", () => {
     expect(
-      isCodexCompactionEstimate({
+      isCodexContextWindowV2({
         provider: "codex",
+        estimationVersion: 2,
+        estimationMode: "anchored",
         usedTokens: 38_700,
+        effectiveTokens: 245_000,
         reportedTotalTokens: 9_300_000,
-        compactionAnchorNonCachedTokens: 245_000,
-        compactionAnchorUsedTokens: 38_700,
+        anchorEffectiveTokens: 245_000,
+        anchorEstimatedTokens: 38_700,
+        anchorSource: "explicit-compaction",
         maxTokens: 258_000,
         remainingTokens: 219_300,
         usedPercent: 15,
@@ -51,7 +56,7 @@ describe("ContextWindowIndicator helpers", () => {
     ).toBe(true);
 
     expect(
-      isCodexCompactionEstimate({
+      isCodexContextWindowV2({
         provider: "codex",
         usedTokens: 119_000,
         reportedTotalTokens: 119_000,
@@ -61,5 +66,40 @@ describe("ContextWindowIndicator helpers", () => {
         updatedAt: "2026-03-12T00:00:00.000Z",
       }),
     ).toBe(false);
+  });
+
+  it("resolves deterministic codex tooltip explanations from the server-owned mode", () => {
+    expect(
+      resolveCodexContextExplanation({
+        provider: "codex",
+        estimationVersion: 2,
+        estimationMode: "direct",
+        usedTokens: 87_300,
+        effectiveTokens: 87_300,
+        reportedTotalTokens: 1_212_700,
+        maxTokens: 258_000,
+        remainingTokens: 170_700,
+        usedPercent: 34,
+        updatedAt: "2026-03-12T00:00:00.000Z",
+      }),
+    ).toBe("Derived from current Codex totals with cached, output, and reasoning tokens excluded.");
+
+    expect(
+      resolveCodexContextExplanation({
+        provider: "codex",
+        estimationVersion: 2,
+        estimationMode: "anchored",
+        usedTokens: 68_700,
+        effectiveTokens: 6_711_000,
+        reportedTotalTokens: 9_300_000,
+        anchorEffectiveTokens: 6_681_000,
+        anchorEstimatedTokens: 38_700,
+        anchorSource: "explicit-compaction",
+        maxTokens: 258_000,
+        remainingTokens: 189_300,
+        usedPercent: 27,
+        updatedAt: "2026-03-12T00:00:00.000Z",
+      }),
+    ).toBe("Estimated from an explicit compaction baseline plus new effective token growth.");
   });
 });

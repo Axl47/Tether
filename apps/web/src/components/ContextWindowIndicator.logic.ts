@@ -32,10 +32,28 @@ export function resolveContextTokensUsed(contextWindow: OrchestrationContextWind
   );
 }
 
-export function isCodexCompactionEstimate(contextWindow: OrchestrationContextWindow): boolean {
-  return (
-    contextWindow.provider === "codex" &&
-    contextWindow.compactionAnchorNonCachedTokens !== undefined &&
-    contextWindow.compactionAnchorUsedTokens !== undefined
-  );
+export function isCodexContextWindowV2(contextWindow: OrchestrationContextWindow): boolean {
+  return contextWindow.provider === "codex" && contextWindow.estimationVersion === 2;
+}
+
+export function resolveCodexContextExplanation(contextWindow: OrchestrationContextWindow): string {
+  if (!isCodexContextWindowV2(contextWindow)) {
+    return "Derived from current Codex totals with cached, output, and reasoning tokens excluded.";
+  }
+
+  if (contextWindow.estimationMode === "direct") {
+    return "Derived from current Codex totals with cached, output, and reasoning tokens excluded.";
+  }
+
+  switch (contextWindow.anchorSource) {
+    case "explicit-compaction":
+      return "Estimated from an explicit compaction baseline plus new effective token growth.";
+    case "overflow-previous-direct":
+      return "Estimated from the last known under-window footprint plus new effective token growth.";
+    case "overflow-last-delta":
+      return "Estimated from the latest turn delta after overflow.";
+    case "overflow-baseline":
+    default:
+      return "Estimated from a baseline because Codex overflowed without enough prior detail.";
+  }
 }

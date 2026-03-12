@@ -4,6 +4,12 @@ import { asNonNegativeInteger, asRecord } from "./contextWindowCommon.ts";
 
 type UnknownRecord = Record<string, unknown>;
 const CODEX_COMPACTION_RESET_FRACTION = 0.15;
+const CODEX_ESTIMATION_VERSION = 2 as const;
+type CodexAnchorSource =
+  | "explicit-compaction"
+  | "overflow-previous-direct"
+  | "overflow-last-delta"
+  | "overflow-baseline";
 
 function compactRecords(
   values: ReadonlyArray<UnknownRecord | null | undefined>,
@@ -85,10 +91,6 @@ function normalizeUsedTokens(usedTokens: number): number {
   return Math.max(0, usedTokens);
 }
 
-function estimateUsedTokensFromReportedTotal(effectiveReportedTotal: number): number {
-  return normalizeUsedTokens(effectiveReportedTotal);
-}
-
 function resolveCompactionResetTokens(maxTokens: number): number {
   return normalizeUsedTokens(Math.round(maxTokens * CODEX_COMPACTION_RESET_FRACTION));
 }
@@ -97,6 +99,21 @@ function previousCodexContextWindow(
   contextWindow: OrchestrationContextWindow | null | undefined,
 ): OrchestrationContextWindow | null {
   return contextWindow?.provider === "codex" ? contextWindow : null;
+}
+
+function isCodexContextWindowV2(
+  contextWindow: OrchestrationContextWindow | null | undefined,
+): contextWindow is OrchestrationContextWindow & {
+  estimationVersion: 2;
+  estimationMode: "direct" | "anchored";
+  effectiveTokens: number;
+} {
+  return (
+    contextWindow?.provider === "codex" &&
+    contextWindow.estimationVersion === CODEX_ESTIMATION_VERSION &&
+    (contextWindow.estimationMode === "direct" || contextWindow.estimationMode === "anchored") &&
+    contextWindow.effectiveTokens !== undefined
+  );
 }
 
 function resolveEffectiveReportedTotal(
@@ -116,82 +133,111 @@ function resolveEffectiveReportedTotal(
   );
 }
 
-function resolveContextWindowEffectiveReportedTotal(
-  contextWindow: OrchestrationContextWindow | null | undefined,
-): number | undefined {
-  const previousContextWindow = previousCodexContextWindow(contextWindow);
-  if (!previousContextWindow) {
-    return undefined;
-  }
+function buildCodexContextWindow(
+  input: {
+    maxTokens: number;
+    effectiveTokens: number;
+    reportedTotalTokens: number;
+    reportedLastTokens: number | undefined;
+    lastEffectiveTokens: number | undefined;
+    inputTokens: number | undefined;
+    cachedInputTokens: number | undefined;
+    outputTokens: number | undefined;
+    reasoningOutputTokens: number | undefined;
+    updatedAt: string;
+  } & (
+    | {
+        estimationMode: "direct";
+      }
+    | {
+        estimationMode: "anchored";
+        anchorEffectiveTokens: number;
+        anchorEstimatedTokens: number;
+        anchorSource: CodexAnchorSource;
+      }
+  ),
+): OrchestrationContextWindow {
+  const usedTokens =
+    input.estimationMode === "anchored"
+      ? normalizeUsedTokens(
+          input.anchorEstimatedTokens +
+            Math.max(0, input.effectiveTokens - input.anchorEffectiveTokens),
+        )
+      : normalizeUsedTokens(input.effectiveTokens);
+  const remainingTokens = Math.max(0, input.maxTokens - usedTokens);
+  const usedPercent = Math.max(0, Math.round((usedTokens / input.maxTokens) * 100));
 
-  return resolveEffectiveReportedTotal(
-    previousContextWindow.inputTokens,
-    previousContextWindow.reportedTotalTokens ?? previousContextWindow.usedTokens,
-    previousContextWindow.cachedInputTokens,
-    previousContextWindow.outputTokens,
-    previousContextWindow.reasoningOutputTokens,
-  );
+  return {
+    provider: "codex",
+    estimationVersion: CODEX_ESTIMATION_VERSION,
+    estimationMode: input.estimationMode,
+    usedTokens,
+    effectiveTokens: input.effectiveTokens,
+    reportedTotalTokens: input.reportedTotalTokens,
+    ...(input.reportedLastTokens !== undefined
+      ? { reportedLastTokens: input.reportedLastTokens }
+      : {}),
+    ...(input.lastEffectiveTokens !== undefined
+      ? { lastEffectiveTokens: input.lastEffectiveTokens }
+      : {}),
+    ...(input.estimationMode === "anchored"
+      ? {
+          anchorEffectiveTokens: input.anchorEffectiveTokens,
+          anchorEstimatedTokens: input.anchorEstimatedTokens,
+          anchorSource: input.anchorSource,
+        }
+      : {}),
+    maxTokens: input.maxTokens,
+    remainingTokens,
+    usedPercent,
+    ...(input.inputTokens !== undefined ? { inputTokens: input.inputTokens } : {}),
+    ...(input.cachedInputTokens !== undefined
+      ? { cachedInputTokens: input.cachedInputTokens }
+      : {}),
+    ...(input.outputTokens !== undefined ? { outputTokens: input.outputTokens } : {}),
+    ...(input.reasoningOutputTokens !== undefined
+      ? { reasoningOutputTokens: input.reasoningOutputTokens }
+      : {}),
+    updatedAt: input.updatedAt,
+  };
 }
 
-function resolveCompactionAnchoredEstimate(input: {
-  effectiveReportedTotal: number;
-  effectiveReportedLastTotal: number | undefined;
+function anchorFromOverflow(input: {
+  effectiveTokens: number;
+  lastEffectiveTokens: number | undefined;
   maxTokens: number;
   previousContextWindow: OrchestrationContextWindow | null;
 }): {
-  usedTokens: number;
-  compactionAnchorNonCachedTokens?: number;
-  compactionAnchorUsedTokens?: number;
+  anchorEffectiveTokens: number;
+  anchorEstimatedTokens: number;
+  anchorSource: CodexAnchorSource;
 } {
-  const { effectiveReportedTotal, effectiveReportedLastTotal, maxTokens, previousContextWindow } =
-    input;
-  const anchorNonCachedTokens = previousContextWindow?.compactionAnchorNonCachedTokens;
-  const anchorUsedTokens = previousContextWindow?.compactionAnchorUsedTokens;
+  const baseline = resolveCompactionResetTokens(input.maxTokens);
+  const previousContextWindow = previousCodexContextWindow(input.previousContextWindow);
 
   if (
-    anchorNonCachedTokens === undefined ||
-    anchorUsedTokens === undefined ||
-    effectiveReportedTotal < anchorNonCachedTokens
+    isCodexContextWindowV2(previousContextWindow) &&
+    previousContextWindow.estimationMode === "direct"
   ) {
-    const previousReportedTotalTokens =
-      previousContextWindow?.reportedTotalTokens ?? previousContextWindow?.usedTokens;
-    const previousEffectiveReportedTotal =
-      resolveContextWindowEffectiveReportedTotal(previousContextWindow);
-    const canRecoverOverflowEstimate =
-      effectiveReportedTotal >= maxTokens ||
-      (previousReportedTotalTokens !== undefined &&
-        previousContextWindow !== null &&
-        previousReportedTotalTokens >= previousContextWindow.maxTokens);
-
-    if (canRecoverOverflowEstimate) {
-      const recoveredAnchorUsedTokens = resolveCompactionResetTokens(maxTokens);
-      const recoveredGrowthTokens =
-        effectiveReportedLastTotal ??
-        Math.max(
-          0,
-          effectiveReportedTotal - (previousEffectiveReportedTotal ?? effectiveReportedTotal),
-        );
-      const recoveredAnchorNonCachedTokens = Math.max(
-        0,
-        effectiveReportedTotal - recoveredGrowthTokens,
-      );
-      return {
-        usedTokens: normalizeUsedTokens(recoveredAnchorUsedTokens + recoveredGrowthTokens),
-        compactionAnchorNonCachedTokens: recoveredAnchorNonCachedTokens,
-        compactionAnchorUsedTokens: recoveredAnchorUsedTokens,
-      };
-    }
-
     return {
-      usedTokens: estimateUsedTokensFromReportedTotal(effectiveReportedTotal),
+      anchorEffectiveTokens: previousContextWindow.effectiveTokens,
+      anchorEstimatedTokens: baseline,
+      anchorSource: "overflow-previous-direct",
     };
   }
 
-  const growthSinceCompaction = Math.max(0, effectiveReportedTotal - anchorNonCachedTokens);
+  if (input.lastEffectiveTokens !== undefined) {
+    return {
+      anchorEffectiveTokens: Math.max(0, input.effectiveTokens - input.lastEffectiveTokens),
+      anchorEstimatedTokens: baseline,
+      anchorSource: "overflow-last-delta",
+    };
+  }
+
   return {
-    usedTokens: normalizeUsedTokens(anchorUsedTokens + growthSinceCompaction),
-    compactionAnchorNonCachedTokens: anchorNonCachedTokens,
-    compactionAnchorUsedTokens: anchorUsedTokens,
+    anchorEffectiveTokens: input.effectiveTokens,
+    anchorEstimatedTokens: baseline,
+    anchorSource: "overflow-baseline",
   };
 }
 
@@ -251,39 +297,56 @@ export function normalizeCodexContextWindow(
           lastOutputTokens,
           lastReasoningOutputTokens,
         );
-  const estimatedUsage = resolveCompactionAnchoredEstimate({
-    effectiveReportedTotal,
-    effectiveReportedLastTotal,
+  const sharedFields = {
+    maxTokens,
+    effectiveTokens: effectiveReportedTotal,
+    reportedTotalTokens,
+    reportedLastTokens,
+    lastEffectiveTokens: effectiveReportedLastTotal,
+    inputTokens,
+    cachedInputTokens,
+    outputTokens,
+    reasoningOutputTokens,
+    updatedAt,
+  } as const;
+
+  if (effectiveReportedTotal <= maxTokens) {
+    return buildCodexContextWindow({
+      ...sharedFields,
+      estimationMode: "direct",
+    });
+  }
+
+  if (
+    isCodexContextWindowV2(previousCodexWindow) &&
+    previousCodexWindow.estimationMode === "anchored" &&
+    previousCodexWindow.anchorEffectiveTokens !== undefined &&
+    previousCodexWindow.anchorEstimatedTokens !== undefined &&
+    previousCodexWindow.anchorSource !== undefined
+  ) {
+    return buildCodexContextWindow({
+      ...sharedFields,
+      estimationMode: "anchored",
+      anchorEffectiveTokens: previousCodexWindow.anchorEffectiveTokens,
+      anchorEstimatedTokens: previousCodexWindow.anchorEstimatedTokens,
+      anchorSource: previousCodexWindow.anchorSource,
+    });
+  }
+
+  const anchor = anchorFromOverflow({
+    effectiveTokens: effectiveReportedTotal,
+    lastEffectiveTokens: effectiveReportedLastTotal,
     maxTokens,
     previousContextWindow: previousCodexWindow,
   });
-  const usedTokens = estimatedUsage.usedTokens;
-  const remainingTokens = Math.max(0, maxTokens - usedTokens);
-  const usedPercent = Math.max(0, Math.round((usedTokens / maxTokens) * 100));
 
-  return {
-    provider: "codex",
-    usedTokens,
-    reportedTotalTokens,
-    ...(reportedLastTokens !== undefined ? { reportedLastTokens } : {}),
-    ...(effectiveReportedLastTotal !== undefined
-      ? { reportedLastEffectiveTokens: effectiveReportedLastTotal }
-      : {}),
-    ...(estimatedUsage.compactionAnchorNonCachedTokens !== undefined
-      ? { compactionAnchorNonCachedTokens: estimatedUsage.compactionAnchorNonCachedTokens }
-      : {}),
-    ...(estimatedUsage.compactionAnchorUsedTokens !== undefined
-      ? { compactionAnchorUsedTokens: estimatedUsage.compactionAnchorUsedTokens }
-      : {}),
-    maxTokens,
-    remainingTokens,
-    usedPercent,
-    ...(inputTokens !== undefined ? { inputTokens } : {}),
-    ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),
-    ...(outputTokens !== undefined ? { outputTokens } : {}),
-    ...(reasoningOutputTokens !== undefined ? { reasoningOutputTokens } : {}),
-    updatedAt,
-  };
+  return buildCodexContextWindow({
+    ...sharedFields,
+    estimationMode: "anchored",
+    anchorEffectiveTokens: anchor.anchorEffectiveTokens,
+    anchorEstimatedTokens: anchor.anchorEstimatedTokens,
+    anchorSource: anchor.anchorSource,
+  });
 }
 
 export function compactCodexContextWindow(
@@ -291,33 +354,29 @@ export function compactCodexContextWindow(
   updatedAt: string,
 ): OrchestrationContextWindow | null {
   const previousContextWindow = previousCodexContextWindow(contextWindow);
-  if (!previousContextWindow || previousContextWindow.maxTokens <= 0) {
+  if (
+    !isCodexContextWindowV2(previousContextWindow) ||
+    previousContextWindow.maxTokens <= 0 ||
+    previousContextWindow.effectiveTokens === undefined
+  ) {
     return null;
   }
 
-  const reportedTotalTokens =
-    previousContextWindow.reportedTotalTokens ??
-    previousContextWindow.usedTokens + (previousContextWindow.cachedInputTokens ?? 0);
-  const compactionAnchorNonCachedTokens = resolveEffectiveReportedTotal(
-    previousContextWindow.inputTokens,
-    reportedTotalTokens,
-    previousContextWindow.cachedInputTokens,
-    previousContextWindow.outputTokens,
-    previousContextWindow.reasoningOutputTokens,
-  );
-  const compactionAnchorUsedTokens = resolveCompactionResetTokens(previousContextWindow.maxTokens);
-  const usedTokens = compactionAnchorUsedTokens;
-  const remainingTokens = Math.max(0, previousContextWindow.maxTokens - usedTokens);
-  const usedPercent = Math.max(0, Math.round((usedTokens / previousContextWindow.maxTokens) * 100));
-
-  return {
-    ...previousContextWindow,
-    usedTokens,
-    reportedTotalTokens,
-    compactionAnchorNonCachedTokens,
-    compactionAnchorUsedTokens,
-    remainingTokens,
-    usedPercent,
+  return buildCodexContextWindow({
+    maxTokens: previousContextWindow.maxTokens,
+    effectiveTokens: previousContextWindow.effectiveTokens,
+    reportedTotalTokens:
+      previousContextWindow.reportedTotalTokens ?? previousContextWindow.usedTokens,
+    reportedLastTokens: previousContextWindow.reportedLastTokens,
+    lastEffectiveTokens: previousContextWindow.lastEffectiveTokens,
+    inputTokens: previousContextWindow.inputTokens,
+    cachedInputTokens: previousContextWindow.cachedInputTokens,
+    outputTokens: previousContextWindow.outputTokens,
+    reasoningOutputTokens: previousContextWindow.reasoningOutputTokens,
     updatedAt,
-  };
+    estimationMode: "anchored",
+    anchorEffectiveTokens: previousContextWindow.effectiveTokens,
+    anchorEstimatedTokens: resolveCompactionResetTokens(previousContextWindow.maxTokens),
+    anchorSource: "explicit-compaction",
+  });
 }

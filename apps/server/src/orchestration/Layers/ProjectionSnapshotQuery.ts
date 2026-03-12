@@ -91,6 +91,16 @@ const REQUIRED_SNAPSHOT_PROJECTORS = [
   ORCHESTRATION_PROJECTOR_NAMES.checkpoints,
 ] as const;
 
+function sanitizeContextWindowForSnapshot(
+  contextWindow: OrchestrationThread["contextWindow"],
+): OrchestrationThread["contextWindow"] {
+  if (contextWindow?.provider !== "codex") {
+    return contextWindow;
+  }
+
+  return contextWindow.estimationVersion === 2 ? contextWindow : null;
+}
+
 function maxIso(left: string | null, right: string): string {
   if (left === null) {
     return right;
@@ -546,7 +556,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             deletedAt: row.deletedAt,
             messages: messagesByThread.get(row.threadId) ?? [],
             proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
-            contextWindow: row.contextWindow,
+            contextWindow: sanitizeContextWindowForSnapshot(row.contextWindow),
             activities: activitiesByThread.get(row.threadId) ?? [],
             checkpoints: checkpointsByThread.get(row.threadId) ?? [],
             session: sessionsByThread.get(row.threadId) ?? null,
