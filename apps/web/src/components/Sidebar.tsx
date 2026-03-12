@@ -97,6 +97,7 @@ import {
   deriveThreadStatusPill,
   filterSidebarThreads,
   getThreadLatestActivityAt,
+  sortSidebarProjects,
   sortSidebarThreads,
 } from "./Sidebar.logic";
 import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
@@ -105,6 +106,7 @@ import { MobileContextMenu, type MobileContextMenuItem } from "./MobileContextMe
 
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 const THREAD_PREVIEW_LIMIT = 6;
+const PROJECT_DRAG_CLICK_SUPPRESSION_MS = 200;
 const DRAFT_THREAD_LABEL_CLASS_NAME =
   "inline-flex items-center rounded-full border border-amber-500/20 bg-amber-500/10 px-1.5 py-0.5 font-medium text-[10px] text-amber-700 dark:text-amber-300";
 
@@ -301,7 +303,7 @@ export default function Sidebar() {
   const renamingCommittedRef = useRef(false);
   const renamingInputRef = useRef<HTMLInputElement | null>(null);
   const dragInProgressRef = useRef(false);
-  const suppressProjectClickAfterDragRef = useRef(false);
+  const lastProjectDragEndedAtRef = useRef<number>(0);
   const [desktopUpdateState, setDesktopUpdateState] = useState<DesktopUpdateState | null>(null);
   const dispatchingQueuedMessageIdByThreadId = useQueuedTurnRuntimeStore(
     (store) => store.dispatchingQueuedMessageIdByThreadId,
@@ -1197,6 +1199,7 @@ export default function Sidebar() {
   const handleProjectDragEnd = useCallback(
     (event: DragEndEvent) => {
       dragInProgressRef.current = false;
+      lastProjectDragEndedAtRef.current = Date.now();
       const { active, over } = event;
       if (!over || active.id === over.id) return;
       const activeProject = projects.find((project) => project.id === active.id);
@@ -1209,16 +1212,11 @@ export default function Sidebar() {
 
   const handleProjectDragStart = useCallback((_event: DragStartEvent) => {
     dragInProgressRef.current = true;
-    suppressProjectClickAfterDragRef.current = true;
   }, []);
 
   const handleProjectDragCancel = useCallback((_event: DragCancelEvent) => {
     dragInProgressRef.current = false;
-    suppressProjectClickAfterDragRef.current = false;
-  }, []);
-
-  const handleProjectTitlePointerDownCapture = useCallback(() => {
-    suppressProjectClickAfterDragRef.current = false;
+    lastProjectDragEndedAtRef.current = Date.now();
   }, []);
 
   const handleProjectTitleClick = useCallback(
@@ -1228,9 +1226,8 @@ export default function Sidebar() {
         event.stopPropagation();
         return;
       }
-      if (suppressProjectClickAfterDragRef.current) {
+      if (Date.now() - lastProjectDragEndedAtRef.current < PROJECT_DRAG_CLICK_SUPPRESSION_MS) {
         // Consume the synthetic click emitted after a drag release.
-        suppressProjectClickAfterDragRef.current = false;
         event.preventDefault();
         event.stopPropagation();
         return;
@@ -1353,6 +1350,15 @@ export default function Sidebar() {
   const threadSort = appSettings.sidebarThreadSort ?? DEFAULT_SIDEBAR_THREAD_SORT;
   const hasSidebarThreadSearch = threadSearchQuery.trim().length > 0;
   const hasAnyThreads = sidebarThreads.length > 0;
+  const orderedProjects = useMemo(
+    () =>
+      sortSidebarProjects(projects, sidebarThreads, {
+        sortBy: threadSort,
+        hasPendingApprovalsByThreadId: pendingApprovalByThreadId,
+        hasPendingUserInputByThreadId: pendingUserInputByThreadId,
+      }),
+    [pendingApprovalByThreadId, pendingUserInputByThreadId, projects, sidebarThreads, threadSort],
+  );
   const hasAnyMatchingThreads = useMemo(
     () => filterSidebarThreads(sidebarThreads, threadSearchQuery).length > 0,
     [sidebarThreads, threadSearchQuery],
@@ -1706,10 +1712,10 @@ export default function Sidebar() {
           >
             <SidebarMenu>
               <SortableContext
-                items={projects.map((project) => project.id)}
+                items={orderedProjects.map((project) => project.id)}
                 strategy={verticalListSortingStrategy}
               >
-                {projects.map((project) => {
+                {orderedProjects.map((project) => {
                   const allProjectThreads = sidebarThreads.filter(
                     (thread) => thread.projectId === project.id,
                   );
@@ -1742,7 +1748,6 @@ export default function Sidebar() {
                               className="gap-2 px-2 py-1.5 pr-12 text-left cursor-grab active:cursor-grabbing hover:bg-accent group-hover/project-header:bg-accent group-hover/project-header:text-sidebar-accent-foreground"
                               {...dragHandleProps.attributes}
                               {...dragHandleProps.listeners}
-                              onPointerDownCapture={handleProjectTitlePointerDownCapture}
                               onClick={(event) => handleProjectTitleClick(event, project.id)}
                               onKeyDown={(event) => handleProjectTitleKeyDown(event, project.id)}
                               onContextMenu={(event) => {

@@ -2,7 +2,7 @@ import type { SidebarThreadSort } from "../sidebarThreadSort";
 import { findLatestProposedPlan, isLatestTurnSettled } from "../session-logic";
 import type { PendingThreadRunPhase } from "../threadRunStateStore";
 import { resolveLatestThreadContextMessage, resolveThreadContextMessage } from "../threadContext";
-import type { Thread } from "../types";
+import type { Project, Thread } from "../types";
 
 export const THREAD_SELECTION_SAFE_SELECTOR = "[data-thread-item], [data-thread-selection-safe]";
 
@@ -24,6 +24,13 @@ export interface SortSidebarThreadsOptions {
   readonly sortBy: SidebarThreadSort;
   readonly hasPendingApprovalsByThreadId: ReadonlyMap<Thread["id"], boolean>;
   readonly hasPendingUserInputByThreadId: ReadonlyMap<Thread["id"], boolean>;
+}
+
+interface SortableThreadEntry {
+  readonly thread: Thread;
+  readonly createdAtMs: number;
+  readonly latestActivityAtMs: number;
+  readonly statusRank: number;
 }
 
 type ThreadStatusInput = {
@@ -284,11 +291,11 @@ export function filterSidebarThreads(threads: readonly Thread[], query: string):
   return threads.filter((thread) => matchesNormalizedSidebarSearch(thread, normalizedQuery));
 }
 
-export function sortSidebarThreads(
-  threads: readonly Thread[],
+function buildSortableThreadEntry(
+  thread: Thread,
   options: SortSidebarThreadsOptions,
-): Thread[] {
-  const entries = threads.map((thread) => ({
+): SortableThreadEntry {
+  return {
     thread,
     createdAtMs: parseIsoMs(thread.createdAt),
     latestActivityAtMs: parseIsoMs(getThreadLatestActivityAt(thread)),
@@ -297,43 +304,100 @@ export function sortSidebarThreads(
       hasPendingApprovals: options.hasPendingApprovalsByThreadId.get(thread.id) === true,
       hasPendingUserInput: options.hasPendingUserInputByThreadId.get(thread.id) === true,
     }),
-  }));
+  };
+}
 
-  entries.sort((left, right) => {
-    if (options.sortBy === "name") {
-      const byName = compareNames(left.thread, right.thread);
-      if (byName !== 0) return byName;
-      const byActivity = right.latestActivityAtMs - left.latestActivityAtMs;
-      if (byActivity !== 0) return byActivity;
-      return left.thread.id.localeCompare(right.thread.id);
-    }
-
-    if (options.sortBy === "status") {
-      const byStatus = left.statusRank - right.statusRank;
-      if (byStatus !== 0) return byStatus;
-      const byActivity = right.latestActivityAtMs - left.latestActivityAtMs;
-      if (byActivity !== 0) return byActivity;
-      const byName = compareNames(left.thread, right.thread);
-      if (byName !== 0) return byName;
-      return left.thread.id.localeCompare(right.thread.id);
-    }
-
-    if (options.sortBy === "created") {
-      const byCreatedAt = right.createdAtMs - left.createdAtMs;
-      if (byCreatedAt !== 0) return byCreatedAt;
-      const byName = compareNames(left.thread, right.thread);
-      if (byName !== 0) return byName;
-      return left.thread.id.localeCompare(right.thread.id);
-    }
-
+function compareSortableThreadEntries(
+  left: SortableThreadEntry,
+  right: SortableThreadEntry,
+  sortBy: SidebarThreadSort,
+): number {
+  if (sortBy === "name") {
+    const byName = compareNames(left.thread, right.thread);
+    if (byName !== 0) return byName;
     const byActivity = right.latestActivityAtMs - left.latestActivityAtMs;
     if (byActivity !== 0) return byActivity;
+    return left.thread.id.localeCompare(right.thread.id);
+  }
+
+  if (sortBy === "status") {
+    const byStatus = left.statusRank - right.statusRank;
+    if (byStatus !== 0) return byStatus;
+    const byActivity = right.latestActivityAtMs - left.latestActivityAtMs;
+    if (byActivity !== 0) return byActivity;
+    const byName = compareNames(left.thread, right.thread);
+    if (byName !== 0) return byName;
+    return left.thread.id.localeCompare(right.thread.id);
+  }
+
+  if (sortBy === "created") {
     const byCreatedAt = right.createdAtMs - left.createdAtMs;
     if (byCreatedAt !== 0) return byCreatedAt;
     const byName = compareNames(left.thread, right.thread);
     if (byName !== 0) return byName;
     return left.thread.id.localeCompare(right.thread.id);
-  });
+  }
+
+  const byActivity = right.latestActivityAtMs - left.latestActivityAtMs;
+  if (byActivity !== 0) return byActivity;
+  const byCreatedAt = right.createdAtMs - left.createdAtMs;
+  if (byCreatedAt !== 0) return byCreatedAt;
+  const byName = compareNames(left.thread, right.thread);
+  if (byName !== 0) return byName;
+  return left.thread.id.localeCompare(right.thread.id);
+}
+
+export function sortSidebarThreads(
+  threads: readonly Thread[],
+  options: SortSidebarThreadsOptions,
+): Thread[] {
+  const entries = threads.map((thread) => buildSortableThreadEntry(thread, options));
+
+  entries.sort((left, right) => compareSortableThreadEntries(left, right, options.sortBy));
 
   return entries.map((entry) => entry.thread);
+}
+
+export function sortSidebarProjects<P extends Pick<Project, "id">>(
+  projects: readonly P[],
+  threads: readonly Thread[],
+  options: SortSidebarThreadsOptions,
+): P[] {
+  const leadingThreadByProjectId = new Map<Project["id"], SortableThreadEntry>();
+
+  for (const thread of threads) {
+    const sortableThread = buildSortableThreadEntry(thread, options);
+    const current = leadingThreadByProjectId.get(thread.projectId);
+    if (
+      current === undefined ||
+      compareSortableThreadEntries(sortableThread, current, options.sortBy) < 0
+    ) {
+      leadingThreadByProjectId.set(thread.projectId, sortableThread);
+    }
+  }
+
+  const sortedProjects = projects.map((project, index) => ({
+    project,
+    index,
+    leadingThread: leadingThreadByProjectId.get(project.id) ?? null,
+  }));
+
+  sortedProjects.sort((left, right) => {
+    if (left.leadingThread && right.leadingThread) {
+      const byLeadingThread = compareSortableThreadEntries(
+        left.leadingThread,
+        right.leadingThread,
+        options.sortBy,
+      );
+      if (byLeadingThread !== 0) {
+        return byLeadingThread;
+      }
+    } else if (left.leadingThread || right.leadingThread) {
+      return left.leadingThread ? -1 : 1;
+    }
+
+    return left.index - right.index;
+  });
+
+  return sortedProjects.map(({ project }) => project);
 }

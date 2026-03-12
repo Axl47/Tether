@@ -8,6 +8,7 @@ import {
   hasUnseenCompletion,
   resolveThreadStatusPill,
   shouldClearThreadSelectionOnMouseDown,
+  sortSidebarProjects,
   sortSidebarThreads,
   threadMatchesSidebarSearch,
 } from "./Sidebar.logic";
@@ -374,6 +375,61 @@ describe("sortSidebarThreads", () => {
         }),
       }).map((thread) => thread.id),
     ).toEqual([pendingApproval.id, planReady.id]);
+  });
+});
+
+describe("sortSidebarProjects", () => {
+  it("orders projects by the highest-priority thread for activity sort", () => {
+    const projectOne = { id: "project-1" as Thread["projectId"] };
+    const projectTwo = { id: "project-2" as Thread["projectId"] };
+
+    const olderThread = makeThread({
+      id: "thread-older" as Thread["id"],
+      projectId: projectOne.id,
+      createdAt: "2026-03-07T09:00:00.000Z",
+    });
+    const newerActivityThread = makeThread({
+      id: "thread-newer" as Thread["id"],
+      projectId: projectTwo.id,
+      createdAt: "2026-03-07T08:00:00.000Z",
+      session: {
+        provider: "codex",
+        status: "running",
+        orchestrationStatus: "running",
+        createdAt: "2026-03-07T08:00:00.000Z",
+        updatedAt: "2026-03-07T11:00:00.000Z",
+      },
+    });
+
+    expect(
+      sortSidebarProjects([projectOne, projectTwo], [olderThread, newerActivityThread], {
+        sortBy: "activity",
+        ...threadSortMaps(),
+      }).map((project) => project.id),
+    ).toEqual([projectTwo.id, projectOne.id]);
+  });
+
+  it("preserves stored project order when the leading thread sort key ties", () => {
+    const projectOne = { id: "project-1" as Thread["projectId"] };
+    const projectTwo = { id: "project-2" as Thread["projectId"] };
+
+    const firstThread = makeThread({
+      id: "thread-1" as Thread["id"],
+      projectId: projectOne.id,
+      createdAt: "2026-03-07T09:00:00.000Z",
+    });
+    const secondThread = makeThread({
+      id: "thread-2" as Thread["id"],
+      projectId: projectTwo.id,
+      createdAt: "2026-03-07T09:00:00.000Z",
+    });
+
+    expect(
+      sortSidebarProjects([projectOne, projectTwo], [firstThread, secondThread], {
+        sortBy: "activity",
+        ...threadSortMaps(),
+      }).map((project) => project.id),
+    ).toEqual([projectOne.id, projectTwo.id]);
   });
 });
 
