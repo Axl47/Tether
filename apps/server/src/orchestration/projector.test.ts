@@ -216,7 +216,7 @@ describe("orchestration projector", () => {
     expect(thread?.session?.status).toBe("running");
   });
 
-  it("projects thread context-window updates and clears them on revert", async () => {
+  it("projects thread context-window updates and clears them on explicit invalidation and revert", async () => {
     const now = "2026-03-07T00:00:00.000Z";
     const model = createEmptyReadModel(now);
 
@@ -275,11 +275,55 @@ describe("orchestration projector", () => {
       usedPercent: 46,
     });
 
-    const afterRevert = await Effect.runPromise(
+    const afterClear = await Effect.runPromise(
       projectEvent(
         afterContextWindow,
         makeEvent({
           sequence: 3,
+          type: "thread.context-window-cleared",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: now,
+          commandId: "cmd-context-window-clear",
+          payload: {
+            threadId: "thread-1",
+          },
+        }),
+      ),
+    );
+
+    expect(afterClear.threads[0]?.contextWindow).toBeNull();
+
+    const afterRevertedContextWindow = await Effect.runPromise(
+      projectEvent(
+        afterClear,
+        makeEvent({
+          sequence: 4,
+          type: "thread.context-window-set",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: now,
+          commandId: "cmd-context-window-2",
+          payload: {
+            threadId: "thread-1",
+            contextWindow: {
+              provider: "codex",
+              usedTokens: 100000,
+              maxTokens: 258000,
+              remainingTokens: 158000,
+              usedPercent: 39,
+              updatedAt: now,
+            },
+          },
+        }),
+      ),
+    );
+
+    const afterRevert = await Effect.runPromise(
+      projectEvent(
+        afterRevertedContextWindow,
+        makeEvent({
+          sequence: 5,
           type: "thread.reverted",
           aggregateKind: "thread",
           aggregateId: "thread-1",

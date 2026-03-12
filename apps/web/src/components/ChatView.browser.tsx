@@ -2640,19 +2640,19 @@ describe("ChatView timeline estimator parity (full app)", () => {
       const badge = await waitForElement(
         () =>
           Array.from(document.querySelectorAll("button")).find(
-            (button) => button.getAttribute("aria-label") === "Context window usage",
+            (button) => button.getAttribute("aria-label") === "Reported token usage",
           ) as HTMLButtonElement | null,
         "Unable to find context-window badge.",
       );
-      expect(badge.textContent?.trim()).toBe("46%");
+      expect(badge.textContent?.trim()).toBe("119k");
 
       badge.focus();
 
       await vi.waitFor(
         () => {
-          expect(document.body.textContent).toContain("Context window");
-          expect(document.body.textContent).toContain("46% used (54% left)");
-          expect(document.body.textContent).toContain("119k / 258k tokens used");
+          expect(document.body.textContent).toContain("Reported token usage");
+          expect(document.body.textContent).toContain("119k active tokens reported");
+          expect(document.body.textContent).toContain("Model context window: 258k tokens");
           expect(document.body.textContent).toContain(
             "Input 110k, cached 65k, output 9k, reasoning 320",
           );
@@ -2703,18 +2703,19 @@ describe("ChatView timeline estimator parity (full app)", () => {
       const badge = await waitForElement(
         () =>
           Array.from(document.querySelectorAll("button")).find(
-            (button) => button.getAttribute("aria-label") === "Context window usage",
+            (button) => button.getAttribute("aria-label") === "Reported token usage",
           ) as HTMLButtonElement | null,
         "Unable to find context-window badge.",
       );
-      expect(badge.textContent?.trim()).toBe("100%");
+      expect(badge.textContent?.trim()).toBe("258k");
 
       badge.focus();
 
       await vi.waitFor(
         () => {
-          expect(document.body.textContent).toContain("100% used (0% left)");
-          expect(document.body.textContent).toContain("258k / 258k tokens used");
+          expect(document.body.textContent).toContain("Reported token usage");
+          expect(document.body.textContent).toContain("258k active tokens reported");
+          expect(document.body.textContent).toContain("Model context window: 258k tokens");
           expect(document.body.textContent).toContain("Reported session total: 9.3m tokens");
           expect(document.body.textContent).toContain(
             "Reported totals: Input 9.1m, cached 2.4m, output 180k, reasoning 9k",

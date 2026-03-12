@@ -844,6 +844,47 @@ describe("ProviderRuntimeIngestion", () => {
     });
   });
 
+  it("clears stale Codex context-window state when the thread is compacted", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "thread.token-usage.updated",
+      eventId: asEventId("evt-context-window-before-compaction"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      payload: {
+        usage: {
+          tokenUsage: {
+            total: {
+              totalTokens: 120_000,
+              inputTokens: 110_000,
+              outputTokens: 10_000,
+            },
+            modelContextWindow: 258_000,
+          },
+        },
+      },
+    });
+
+    await waitForThread(harness.engine, (entry) => entry.contextWindow?.usedTokens === 120_000);
+
+    harness.emit({
+      type: "thread.state.changed",
+      eventId: asEventId("evt-thread-compacted"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      payload: {
+        state: "compacted",
+      },
+    });
+
+    const thread = await waitForThread(harness.engine, (entry) => entry.contextWindow === null);
+    expect(thread.contextWindow).toBeNull();
+  });
+
   it("ignores malformed thread token usage payloads", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();

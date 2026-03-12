@@ -1221,6 +1221,15 @@ const make = Effect.gen(function* () {
         }
       }
 
+      if (event.type === "thread.state.changed" && event.payload.state === "compacted") {
+        yield* orchestrationEngine.dispatch({
+          type: "thread.context-window.clear",
+          commandId: providerCommandId(event, "thread-context-window-clear"),
+          threadId: thread.id,
+          createdAt: now,
+        });
+      }
+
       if (event.type === "turn.completed" && event.provider === "claudeCode") {
         const contextWindow = normalizeClaudeContextWindow(
           {
