@@ -792,14 +792,15 @@ describe("ProviderRuntimeIngestion", () => {
     const thread = await waitForThread(
       harness.engine,
       (entry) =>
-        entry.contextWindow?.usedTokens === 126516 && entry.contextWindow?.usedPercent === 49,
+        entry.contextWindow?.usedTokens === 30259 && entry.contextWindow?.usedPercent === 12,
     );
     expect(thread.contextWindow).toMatchObject({
       provider: "codex",
-      usedTokens: 126516,
+      usedTokens: 30259,
+      reportedTotalTokens: 126516,
       maxTokens: 258400,
-      remainingTokens: 131884,
-      usedPercent: 49,
+      remainingTokens: 228141,
+      usedPercent: 12,
     });
   });
 
@@ -829,13 +830,14 @@ describe("ProviderRuntimeIngestion", () => {
 
     const thread = await waitForThread(
       harness.engine,
-      (entry) => entry.contextWindow?.usedTokens === 100 && entry.contextWindow?.usedPercent === 0,
+      (entry) => entry.contextWindow?.usedTokens === 40 && entry.contextWindow?.usedPercent === 0,
     );
     expect(thread.contextWindow).toMatchObject({
       provider: "codex",
-      usedTokens: 100,
+      usedTokens: 40,
+      reportedTotalTokens: 100,
       maxTokens: 258400,
-      remainingTokens: 258300,
+      remainingTokens: 258360,
       usedPercent: 0,
       inputTokens: 80,
       cachedInputTokens: 20,
@@ -844,7 +846,7 @@ describe("ProviderRuntimeIngestion", () => {
     });
   });
 
-  it("clears stale Codex context-window state when the thread is compacted", async () => {
+  it("resets Codex context-window state to a compaction baseline when the thread is compacted", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();
 
@@ -868,7 +870,7 @@ describe("ProviderRuntimeIngestion", () => {
       },
     });
 
-    await waitForThread(harness.engine, (entry) => entry.contextWindow?.usedTokens === 120_000);
+    await waitForThread(harness.engine, (entry) => entry.contextWindow?.usedTokens === 100_000);
 
     harness.emit({
       type: "thread.state.changed",
@@ -881,8 +883,22 @@ describe("ProviderRuntimeIngestion", () => {
       },
     });
 
-    const thread = await waitForThread(harness.engine, (entry) => entry.contextWindow === null);
-    expect(thread.contextWindow).toBeNull();
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) =>
+        entry.contextWindow?.usedTokens === 38_700 &&
+        entry.contextWindow.compactionAnchorNonCachedTokens === 100_000,
+    );
+    expect(thread.contextWindow).toMatchObject({
+      provider: "codex",
+      usedTokens: 38_700,
+      reportedTotalTokens: 120_000,
+      compactionAnchorNonCachedTokens: 100_000,
+      compactionAnchorUsedTokens: 38_700,
+      maxTokens: 258_000,
+      remainingTokens: 219_300,
+      usedPercent: 15,
+    });
   });
 
   it("ignores malformed thread token usage payloads", async () => {

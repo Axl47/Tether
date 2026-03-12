@@ -2,17 +2,16 @@
 
 ## Pending
 
-- [ ] Create commit from staged merge result and publish branch if desired
+- [ ] Manual validation in the running app on an existing overflowed Codex thread
 
 ## In Progress
 
-- [~] Review final diff and prepare verification notes
+- [~] Close out with final summary and human verification notes
 
 ## Done
 
-- [x] Create merge execution artifacts (`working_list.md` and ExecPlan)
-- [x] Create integration branch and merge `refs/remotes/origin/pr-5`
-- [x] Resolve contract/server/tooling conflicts while preserving Tether additions
-- [x] Resolve web conflicts while preserving queued follow-ups, project actions, and sidebar UX
-- [x] Rebrand touched user-facing T3Code surfaces back to Tether where needed
-- [x] Run targeted tests, `bun fmt`, `bun lint`, and `bun typecheck`
+- [x] Write the execution plan and confirm the current architecture
+- [x] Implement Codex heuristic normalization and compaction anchoring
+- [x] Add legacy overflow recovery for pre-anchor Codex snapshots using the latest reported turn
+- [x] Update Codex composer indicator copy, immediate legacy fallback, and browser coverage
+- [x] Run focused tests plus repo verification (`fmt`, `lint`, `typecheck`)

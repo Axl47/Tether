@@ -16,7 +16,10 @@ import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { normalizeClaudeContextWindow } from "../../provider/claudeContextWindow.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
-import { normalizeCodexContextWindow } from "../../provider/codexContextWindow.ts";
+import {
+  compactCodexContextWindow,
+  normalizeCodexContextWindow,
+} from "../../provider/codexContextWindow.ts";
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { isGitRepository } from "../../git/isRepo.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
@@ -1209,7 +1212,11 @@ const make = Effect.gen(function* () {
       }
 
       if (event.type === "thread.token-usage.updated") {
-        const contextWindow = normalizeCodexContextWindow(event.payload.usage, now);
+        const contextWindow = normalizeCodexContextWindow(
+          event.payload.usage,
+          now,
+          thread.contextWindow,
+        );
         if (contextWindow) {
           yield* orchestrationEngine.dispatch({
             type: "thread.context-window.set",
@@ -1222,12 +1229,23 @@ const make = Effect.gen(function* () {
       }
 
       if (event.type === "thread.state.changed" && event.payload.state === "compacted") {
-        yield* orchestrationEngine.dispatch({
-          type: "thread.context-window.clear",
-          commandId: providerCommandId(event, "thread-context-window-clear"),
-          threadId: thread.id,
-          createdAt: now,
-        });
+        const compactedContextWindow = compactCodexContextWindow(thread.contextWindow, now);
+        if (compactedContextWindow) {
+          yield* orchestrationEngine.dispatch({
+            type: "thread.context-window.set",
+            commandId: providerCommandId(event, "thread-context-window-reset"),
+            threadId: thread.id,
+            contextWindow: compactedContextWindow,
+            createdAt: now,
+          });
+        } else {
+          yield* orchestrationEngine.dispatch({
+            type: "thread.context-window.clear",
+            commandId: providerCommandId(event, "thread-context-window-clear"),
+            threadId: thread.id,
+            createdAt: now,
+          });
+        }
       }
 
       if (event.type === "turn.completed" && event.provider === "claudeCode") {

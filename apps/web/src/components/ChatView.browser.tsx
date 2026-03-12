@@ -2623,11 +2623,12 @@ describe("ChatView timeline estimator parity (full app)", () => {
               ...thread,
               contextWindow: {
                 provider: "codex" as const,
-                usedTokens: 119000,
+                usedTokens: 44_680,
+                reportedTotalTokens: 119000,
                 reportedLastTokens: 8500,
                 maxTokens: 258000,
-                remainingTokens: 139000,
-                usedPercent: 46,
+                remainingTokens: 213_320,
+                usedPercent: 17,
                 inputTokens: 110000,
                 cachedInputTokens: 65000,
                 outputTokens: 9000,
@@ -2644,22 +2645,27 @@ describe("ChatView timeline estimator parity (full app)", () => {
       const badge = await waitForElement(
         () =>
           Array.from(document.querySelectorAll("button")).find(
-            (button) => button.getAttribute("aria-label") === "Reported token usage",
+            (button) => button.getAttribute("aria-label") === "Estimated context window usage",
           ) as HTMLButtonElement | null,
         "Unable to find context-window badge.",
       );
-      expect(badge.textContent?.trim()).toBe("119k");
+      expect(badge.textContent?.trim()).toBe("~17%");
 
       badge.focus();
 
       await vi.waitFor(
         () => {
-          expect(document.body.textContent).toContain("Reported token usage");
-          expect(document.body.textContent).toContain("Total reported: 119k tokens");
-          expect(document.body.textContent).toContain("Last turn: 8.5k tokens");
+          expect(document.body.textContent).toContain("Estimated context window");
+          expect(document.body.textContent).toContain("~17% used (83% left)");
+          expect(document.body.textContent).toContain("Estimated usage: 44.7k / 258k tokens");
+          expect(document.body.textContent).toContain(
+            "Estimated from Codex reported totals with cached tokens excluded.",
+          );
+          expect(document.body.textContent).toContain("Reported total: 119k tokens");
+          expect(document.body.textContent).toContain("Reported last turn: 8.5k tokens");
           expect(document.body.textContent).toContain("Model context window: 258k tokens");
           expect(document.body.textContent).toContain(
-            "Input 110k, cached 65k, output 9k, reasoning 320",
+            "Reported totals: Input 110k, cached 65k, output 9k, reasoning 320",
           );
         },
         { timeout: 8_000, interval: 16 },
@@ -2669,7 +2675,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("separates reported session totals from the context footprint when totals exceed the window", async () => {
+  it("estimates codex context usage from a compaction baseline", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
       snapshot: (() => {
@@ -2688,11 +2694,14 @@ describe("ChatView timeline estimator parity (full app)", () => {
               ...thread,
               contextWindow: {
                 provider: "codex" as const,
-                usedTokens: 9_300_000,
+                usedTokens: 68_700,
+                reportedTotalTokens: 9_300_000,
                 reportedLastTokens: 12_800,
+                compactionAnchorNonCachedTokens: 6_681_000,
+                compactionAnchorUsedTokens: 38_700,
                 maxTokens: 258_000,
-                remainingTokens: 0,
-                usedPercent: 100,
+                remainingTokens: 189_300,
+                usedPercent: 27,
                 inputTokens: 9_120_000,
                 cachedInputTokens: 2_400_000,
                 outputTokens: 180_000,
@@ -2709,22 +2718,27 @@ describe("ChatView timeline estimator parity (full app)", () => {
       const badge = await waitForElement(
         () =>
           Array.from(document.querySelectorAll("button")).find(
-            (button) => button.getAttribute("aria-label") === "Reported token usage",
+            (button) => button.getAttribute("aria-label") === "Estimated context window usage",
           ) as HTMLButtonElement | null,
         "Unable to find context-window badge.",
       );
-      expect(badge.textContent?.trim()).toBe("9.3m");
+      expect(badge.textContent?.trim()).toBe("~27%");
 
       badge.focus();
 
       await vi.waitFor(
         () => {
-          expect(document.body.textContent).toContain("Reported token usage");
-          expect(document.body.textContent).toContain("Total reported: 9.3m tokens");
-          expect(document.body.textContent).toContain("Last turn: 12.8k tokens");
+          expect(document.body.textContent).toContain("Estimated context window");
+          expect(document.body.textContent).toContain("~27% used (73% left)");
+          expect(document.body.textContent).toContain("Estimated usage: 68.7k / 258k tokens");
+          expect(document.body.textContent).toContain(
+            "Estimated from a 15% post-compaction reset plus new non-cached token growth.",
+          );
+          expect(document.body.textContent).toContain("Reported total: 9.3m tokens");
+          expect(document.body.textContent).toContain("Reported last turn: 12.8k tokens");
           expect(document.body.textContent).toContain("Model context window: 258k tokens");
           expect(document.body.textContent).toContain(
-            "Input 9.1m, cached 2.4m, output 180k, reasoning 9k",
+            "Reported totals: Input 9.1m, cached 2.4m, output 180k, reasoning 9k",
           );
         },
         { timeout: 8_000, interval: 16 },

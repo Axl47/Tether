@@ -1658,7 +1658,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
     ) => {
       const api = readNativeApi();
       if (!api || !activeThreadId || !activeProject || !activeThread) return;
-      if (!isServerThread && !options?.allowLocalDraftThread) return;
       if (options?.rememberAsLastInvoked !== false) {
         setLastInvokedScriptByProjectId((current) => {
           if (current[activeProject.id] === script.id) return current;
@@ -1743,7 +1742,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
       activeThread,
       activeThreadId,
       gitCwd,
-      isServerThread,
       setTerminalOpen,
       setThreadError,
       storeNewTerminal,
@@ -4858,32 +4856,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
 interface ChatHeaderDropdownProps {
   activeProjectName: string | undefined;
   openInCwd: string | null;
-  activeProjectScripts: ProjectScript[] | undefined;
-  preferredScriptId: string | null;
   keybindings: ResolvedKeybindingsConfig;
   availableEditors: ReadonlyArray<EditorId>;
   terminalOpen: boolean;
   terminalToggleShortcutLabel: string | null;
-  onRunProjectScript: (script: ProjectScript) => void;
-  onAddProjectScript: (input: NewProjectScriptInput) => Promise<void>;
-  onUpdateProjectScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void>;
-  onDeleteProjectScript: (scriptId: string) => Promise<void>;
   onToggleTerminal: () => void;
 }
 
 const ChatHeaderDropdown = memo(function ChatHeaderDropdown({
   activeProjectName,
   openInCwd,
-  activeProjectScripts,
-  preferredScriptId,
   keybindings,
   availableEditors,
   terminalOpen,
   terminalToggleShortcutLabel,
-  onRunProjectScript,
-  onAddProjectScript,
-  onUpdateProjectScript,
-  onDeleteProjectScript,
   onToggleTerminal,
 }: ChatHeaderDropdownProps) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -4928,65 +4914,8 @@ const ChatHeaderDropdown = memo(function ChatHeaderDropdown({
               </MenuSubPopup>
             </MenuSub>
           )}
-
-          {/* Actions / Scripts */}
-          {activeProjectScripts && activeProjectScripts.length > 0 && (
-            <>
-              <MenuDivider />
-              <ActionsDropdownContent
-                scripts={activeProjectScripts}
-                keybindings={keybindings}
-                onRunScript={(script) => {
-                  onRunProjectScript(script);
-                  setDropdownOpen(false);
-                }}
-              />
-            </>
-          )}
         </MenuPopup>
       </Menu>
-      {/* Keep controls mounted (hidden) for their dialogs */}
-      <div className="sr-only">
-        {activeProjectScripts && (
-          <ProjectScriptsControl
-            scripts={activeProjectScripts}
-            keybindings={keybindings}
-            preferredScriptId={preferredScriptId}
-            onRunScript={onRunProjectScript}
-            onAddScript={onAddProjectScript}
-            onUpdateScript={onUpdateProjectScript}
-            onDeleteScript={onDeleteProjectScript}
-          />
-        )}
-      </div>
-    </>
-  );
-});
-
-const ActionsDropdownContent = memo(function ActionsDropdownContent({
-  scripts,
-  keybindings,
-  onRunScript,
-}: {
-  scripts: ProjectScript[];
-  keybindings: ResolvedKeybindingsConfig;
-  onRunScript: (script: ProjectScript) => void;
-}) {
-  return (
-    <>
-      {scripts.map((script) => {
-        const shortcutLabel = shortcutLabelForCommand(
-          keybindings,
-          commandForProjectScript(script.id),
-        );
-        return (
-          <MenuItem key={script.id} onClick={() => onRunScript(script)}>
-            <ZapIcon className="size-4" />
-            {script.runOnWorktreeCreate ? `${script.name} (setup)` : script.name}
-            {shortcutLabel && <MenuShortcut>{shortcutLabel}</MenuShortcut>}
-          </MenuItem>
-        );
-      })}
     </>
   );
 });
@@ -5144,16 +5073,10 @@ const ChatHeader = memo(function ChatHeader({
           <ChatHeaderDropdown
             activeProjectName={activeProjectName}
             openInCwd={openInCwd}
-            activeProjectScripts={activeProjectScripts}
-            preferredScriptId={preferredScriptId}
             keybindings={keybindings}
             availableEditors={availableEditors}
             terminalOpen={terminalOpen}
             terminalToggleShortcutLabel={terminalToggleShortcutLabel}
-            onRunProjectScript={onRunProjectScript}
-            onAddProjectScript={onAddProjectScript}
-            onUpdateProjectScript={onUpdateProjectScript}
-            onDeleteProjectScript={onDeleteProjectScript}
             onToggleTerminal={onToggleTerminal}
           />
         )}
@@ -5162,6 +5085,18 @@ const ChatHeader = memo(function ChatHeader({
             activeThreadId={activeThreadId}
             gitCwd={gitCwd}
             availableEditors={availableEditors}
+            mode="menu-button"
+          />
+        ) : null}
+        {activeProjectName ? (
+          <ProjectScriptsControl
+            scripts={activeProjectScripts ?? []}
+            keybindings={keybindings}
+            preferredScriptId={preferredScriptId}
+            onRunScript={onRunProjectScript}
+            onAddScript={onAddProjectScript}
+            onUpdateScript={onUpdateProjectScript}
+            onDeleteScript={onDeleteProjectScript}
             mode="menu-button"
           />
         ) : null}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { normalizeCodexContextWindow } from "./codexContextWindow.ts";
+import { compactCodexContextWindow, normalizeCodexContextWindow } from "./codexContextWindow.ts";
 
 describe("normalizeCodexContextWindow", () => {
   it("parses the observed Codex token-count shape", () => {
@@ -22,10 +22,11 @@ describe("normalizeCodexContextWindow", () => {
       ),
     ).toEqual({
       provider: "codex",
-      usedTokens: 126516,
+      usedTokens: 30259,
+      reportedTotalTokens: 126516,
       maxTokens: 258400,
-      remainingTokens: 131884,
-      usedPercent: 49,
+      remainingTokens: 228141,
+      usedPercent: 12,
       inputTokens: 124862,
       cachedInputTokens: 92672,
       outputTokens: 1654,
@@ -49,10 +50,11 @@ describe("normalizeCodexContextWindow", () => {
         "2026-03-07T00:00:00.000Z",
       ),
     ).toMatchObject({
-      usedTokens: 119000,
+      usedTokens: 41000,
+      reportedTotalTokens: 119000,
       maxTokens: 258000,
-      remainingTokens: 139000,
-      usedPercent: 46,
+      remainingTokens: 217000,
+      usedPercent: 16,
     });
   });
 
@@ -80,11 +82,12 @@ describe("normalizeCodexContextWindow", () => {
         "2026-03-07T00:00:00.000Z",
       ),
     ).toMatchObject({
-      usedTokens: 119000,
+      usedTokens: 41000,
+      reportedTotalTokens: 119000,
       reportedLastTokens: 8500,
       maxTokens: 258000,
-      remainingTokens: 139000,
-      usedPercent: 46,
+      remainingTokens: 217000,
+      usedPercent: 16,
     });
   });
 
@@ -116,11 +119,12 @@ describe("normalizeCodexContextWindow", () => {
       ),
     ).toEqual({
       provider: "codex",
-      usedTokens: 11347,
+      usedTokens: 6431,
+      reportedTotalTokens: 11347,
       reportedLastTokens: 11347,
       maxTokens: 258400,
-      remainingTokens: 247053,
-      usedPercent: 4,
+      remainingTokens: 251969,
+      usedPercent: 2,
       inputTokens: 11321,
       cachedInputTokens: 4864,
       outputTokens: 26,
@@ -143,6 +147,7 @@ describe("normalizeCodexContextWindow", () => {
     ).toEqual({
       provider: "codex",
       usedTokens: 100,
+      reportedTotalTokens: 100,
       maxTokens: 258400,
       remainingTokens: 258300,
       usedPercent: 0,
@@ -164,6 +169,7 @@ describe("normalizeCodexContextWindow", () => {
     ).toEqual({
       provider: "codex",
       usedTokens: 100,
+      reportedTotalTokens: 100,
       maxTokens: 258400,
       remainingTokens: 258300,
       usedPercent: 0,
@@ -188,9 +194,10 @@ describe("normalizeCodexContextWindow", () => {
       ),
     ).toEqual({
       provider: "codex",
-      usedTokens: 100,
+      usedTokens: 40,
+      reportedTotalTokens: 100,
       maxTokens: 258400,
-      remainingTokens: 258300,
+      remainingTokens: 258360,
       usedPercent: 0,
       inputTokens: 80,
       cachedInputTokens: 20,
@@ -200,7 +207,7 @@ describe("normalizeCodexContextWindow", () => {
     });
   });
 
-  it("keeps oversized reported totals instead of capping them to the model window", () => {
+  it("preserves oversized estimated occupancy and reported totals", () => {
     expect(
       normalizeCodexContextWindow(
         {
@@ -217,11 +224,144 @@ describe("normalizeCodexContextWindow", () => {
         "2026-03-07T00:00:00.000Z",
       ),
     ).toMatchObject({
-      usedTokens: 9_300_000,
+      usedTokens: 0,
+      reportedTotalTokens: 9_300_000,
       maxTokens: 258_000,
-      remainingTokens: 0,
-      usedPercent: 100,
+      remainingTokens: 258_000,
+      usedPercent: 0,
       cachedInputTokens: 2_400_000,
+    });
+  });
+
+  it("resets to a 15% baseline after compaction and grows from the compaction anchor", () => {
+    const compacted = compactCodexContextWindow(
+      {
+        provider: "codex",
+        usedTokens: 245_000,
+        reportedTotalTokens: 300_000,
+        maxTokens: 258_000,
+        remainingTokens: 13_000,
+        usedPercent: 95,
+        inputTokens: 250_000,
+        cachedInputTokens: 55_000,
+        outputTokens: 50_000,
+        updatedAt: "2026-03-07T00:00:00.000Z",
+      },
+      "2026-03-07T01:00:00.000Z",
+    );
+
+    expect(compacted).toMatchObject({
+      usedTokens: 38_700,
+      reportedTotalTokens: 300_000,
+      compactionAnchorNonCachedTokens: 145_000,
+      compactionAnchorUsedTokens: 38_700,
+      remainingTokens: 219_300,
+      usedPercent: 15,
+      updatedAt: "2026-03-07T01:00:00.000Z",
+    });
+
+    expect(
+      normalizeCodexContextWindow(
+        {
+          tokenUsage: {
+            total: {
+              totalTokens: 333_000,
+              inputTokens: 275_000,
+              cachedInputTokens: 58_000,
+              outputTokens: 58_000,
+            },
+            modelContextWindow: 258_000,
+          },
+        },
+        "2026-03-07T02:00:00.000Z",
+        compacted,
+      ),
+    ).toMatchObject({
+      usedTokens: 52_700,
+      reportedTotalTokens: 333_000,
+      compactionAnchorNonCachedTokens: 145_000,
+      compactionAnchorUsedTokens: 38_700,
+      remainingTokens: 205_300,
+      usedPercent: 20,
+    });
+  });
+
+  it("recovers a compaction anchor from legacy overflowing snapshots using the latest turn delta", () => {
+    expect(
+      normalizeCodexContextWindow(
+        {
+          tokenUsage: {
+            total: {
+              totalTokens: 26_400_000,
+              inputTokens: 24_000_000,
+              cachedInputTokens: 2_000_000,
+              outputTokens: 250_000,
+              reasoningOutputTokens: 50_000,
+            },
+            last: {
+              totalTokens: 32_000,
+              inputTokens: 29_000,
+              cachedInputTokens: 2_000,
+              outputTokens: 2_000,
+              reasoningOutputTokens: 1_000,
+            },
+            modelContextWindow: 258_000,
+          },
+        },
+        "2026-03-07T03:00:00.000Z",
+        {
+          provider: "codex",
+          usedTokens: 258_000,
+          reportedTotalTokens: 26_000_000,
+          maxTokens: 258_000,
+          remainingTokens: 0,
+          usedPercent: 100,
+          updatedAt: "2026-03-07T02:00:00.000Z",
+        },
+      ),
+    ).toMatchObject({
+      usedTokens: 62_700,
+      reportedTotalTokens: 26_400_000,
+      reportedLastTokens: 32_000,
+      compactionAnchorNonCachedTokens: 21_676_000,
+      compactionAnchorUsedTokens: 38_700,
+      remainingTokens: 195_300,
+      usedPercent: 24,
+    });
+  });
+
+  it("recovers a compaction anchor from an overflowing update even when no prior anchor exists", () => {
+    expect(
+      normalizeCodexContextWindow(
+        {
+          tokenUsage: {
+            total: {
+              totalTokens: 26_400_000,
+              inputTokens: 24_000_000,
+              cachedInputTokens: 2_000_000,
+              outputTokens: 250_000,
+              reasoningOutputTokens: 50_000,
+            },
+            last: {
+              totalTokens: 32_000,
+              inputTokens: 29_000,
+              cachedInputTokens: 2_000,
+              outputTokens: 2_000,
+              reasoningOutputTokens: 1_000,
+            },
+            modelContextWindow: 258_000,
+          },
+        },
+        "2026-03-07T03:30:00.000Z",
+      ),
+    ).toMatchObject({
+      usedTokens: 62_700,
+      reportedTotalTokens: 26_400_000,
+      reportedLastTokens: 32_000,
+      compactionAnchorNonCachedTokens: 21_676_000,
+      compactionAnchorUsedTokens: 38_700,
+      remainingTokens: 195_300,
+      usedPercent: 24,
     });
   });
 
@@ -241,7 +381,7 @@ describe("normalizeCodexContextWindow", () => {
     ).toBeNull();
   });
 
-  it("clamps derived values when usage exceeds the model limit", () => {
+  it("preserves derived values when usage exceeds the model limit", () => {
     expect(
       normalizeCodexContextWindow(
         {
@@ -256,9 +396,10 @@ describe("normalizeCodexContextWindow", () => {
       ),
     ).toMatchObject({
       usedTokens: 300000,
+      reportedTotalTokens: 300000,
       maxTokens: 258400,
       remainingTokens: 0,
-      usedPercent: 100,
+      usedPercent: 116,
     });
   });
 });

@@ -15,6 +15,7 @@ import {
   PlayIcon,
   PlusIcon,
   SettingsIcon,
+  ZapIcon,
   WrenchIcon,
   XIcon,
 } from "lucide-react";
@@ -95,6 +96,7 @@ interface ProjectScriptsControlProps {
   scripts: ProjectScript[];
   keybindings: ResolvedKeybindingsConfig;
   preferredScriptId?: string | null;
+  mode?: "toolbar" | "menu-button";
   onRunScript: (script: ProjectScript) => void;
   onAddScript: (input: NewProjectScriptInput) => Promise<void> | void;
   onUpdateScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void> | void;
@@ -156,6 +158,7 @@ export default function ProjectScriptsControl({
   scripts,
   keybindings,
   preferredScriptId = null,
+  mode = "toolbar",
   onRunScript,
   onAddScript,
   onUpdateScript,
@@ -172,6 +175,7 @@ export default function ProjectScriptsControl({
   const [keybinding, setKeybinding] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const primaryScript = useMemo(() => {
     if (preferredScriptId) {
@@ -256,7 +260,7 @@ export default function ProjectScriptsControl({
     }
   };
 
-  const openAddDialog = () => {
+  const openAddDialog = useCallback(() => {
     setEditingScriptId(null);
     setName("");
     setSteps([{ id: "step-1", command: "" }]);
@@ -266,19 +270,24 @@ export default function ProjectScriptsControl({
     setKeybinding("");
     setValidationError(null);
     setDialogOpen(true);
-  };
+  }, []);
 
-  const openEditDialog = (script: ProjectScript) => {
-    setEditingScriptId(script.id);
-    setName(script.name);
-    setSteps(projectScriptSteps(script));
-    setIcon(script.icon);
-    setIconPickerOpen(false);
-    setRunOnWorktreeCreate(script.runOnWorktreeCreate);
-    setKeybinding(keybindingValueForCommand(keybindings, commandForProjectScript(script.id)) ?? "");
-    setValidationError(null);
-    setDialogOpen(true);
-  };
+  const openEditDialog = useCallback(
+    (script: ProjectScript) => {
+      setEditingScriptId(script.id);
+      setName(script.name);
+      setSteps(projectScriptSteps(script));
+      setIcon(script.icon);
+      setIconPickerOpen(false);
+      setRunOnWorktreeCreate(script.runOnWorktreeCreate);
+      setKeybinding(
+        keybindingValueForCommand(keybindings, commandForProjectScript(script.id)) ?? "",
+      );
+      setValidationError(null);
+      setDialogOpen(true);
+    },
+    [keybindings],
+  );
 
   const confirmDeleteScript = useCallback(() => {
     if (!editingScriptId) return;
@@ -321,9 +330,108 @@ export default function ProjectScriptsControl({
     });
   }, []);
 
+  const runScriptFromMenu = useCallback(
+    (script: ProjectScript) => {
+      onRunScript(script);
+      queueMicrotask(() => setMenuOpen(false));
+    },
+    [onRunScript],
+  );
+
+  const openAddDialogFromMenu = useCallback(() => {
+    openAddDialog();
+    queueMicrotask(() => setMenuOpen(false));
+  }, [openAddDialog]);
+
+  const openEditDialogFromMenu = useCallback(
+    (script: ProjectScript) => {
+      openEditDialog(script);
+      queueMicrotask(() => setMenuOpen(false));
+    },
+    [openEditDialog],
+  );
+
+  const scriptsMenuContent = (
+    <>
+      {scripts.map((script) => {
+        const shortcutLabel = shortcutLabelForCommand(
+          keybindings,
+          commandForProjectScript(script.id),
+        );
+        return (
+          <MenuItem
+            key={script.id}
+            className={`group ${dropdownItemClassName}`}
+            closeOnClick={mode !== "menu-button"}
+            onClick={() => runScriptFromMenu(script)}
+          >
+            <ScriptIcon icon={script.icon} className="size-4" />
+            <span className="truncate">
+              {script.runOnWorktreeCreate ? `${script.name} (setup)` : script.name}
+            </span>
+            <span className="relative ms-auto flex h-6 min-w-6 items-center justify-end">
+              {shortcutLabel && (
+                <MenuShortcut className="ms-0 transition-opacity group-hover:opacity-0 group-focus-visible:opacity-0">
+                  {shortcutLabel}
+                </MenuShortcut>
+              )}
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                className="absolute right-0 top-1/2 size-6 -translate-y-1/2 opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto group-focus-visible:opacity-100 group-focus-visible:pointer-events-auto"
+                aria-label={`Edit ${script.name}`}
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  openEditDialogFromMenu(script);
+                }}
+              >
+                <SettingsIcon className="size-3.5" />
+              </Button>
+            </span>
+          </MenuItem>
+        );
+      })}
+      <MenuItem
+        className={dropdownItemClassName}
+        closeOnClick={mode !== "menu-button"}
+        onClick={openAddDialogFromMenu}
+      >
+        <PlusIcon className="size-4" />
+        Add action
+      </MenuItem>
+    </>
+  );
+
   return (
     <>
-      {primaryScript ? (
+      {mode === "menu-button" ? (
+        primaryScript ? (
+          <Menu highlightItemOnHover={false} open={menuOpen} onOpenChange={setMenuOpen}>
+            <MenuTrigger
+              render={<Button size="icon-xs" variant="outline" aria-label="Run actions" />}
+            >
+              <ZapIcon className="size-3.5" />
+            </MenuTrigger>
+            <MenuPopup align="end">{scriptsMenuContent}</MenuPopup>
+          </Menu>
+        ) : (
+          <Button
+            size="icon-xs"
+            variant="outline"
+            onClick={openAddDialog}
+            title="Add action"
+            aria-label="Add action"
+          >
+            <PlusIcon className="size-3.5" />
+          </Button>
+        )
+      ) : primaryScript ? (
         <Group aria-label="Project scripts">
           <Button
             size="xs"
@@ -343,55 +451,7 @@ export default function ProjectScriptsControl({
             >
               <ChevronDownIcon className="size-4" />
             </MenuTrigger>
-            <MenuPopup align="end">
-              {scripts.map((script) => {
-                const shortcutLabel = shortcutLabelForCommand(
-                  keybindings,
-                  commandForProjectScript(script.id),
-                );
-                return (
-                  <MenuItem
-                    key={script.id}
-                    className={`group ${dropdownItemClassName}`}
-                    onClick={() => onRunScript(script)}
-                  >
-                    <ScriptIcon icon={script.icon} className="size-4" />
-                    <span className="truncate">
-                      {script.runOnWorktreeCreate ? `${script.name} (setup)` : script.name}
-                    </span>
-                    <span className="relative ms-auto flex h-6 min-w-6 items-center justify-end">
-                      {shortcutLabel && (
-                        <MenuShortcut className="ms-0 transition-opacity group-hover:opacity-0 group-focus-visible:opacity-0">
-                          {shortcutLabel}
-                        </MenuShortcut>
-                      )}
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-xs"
-                        className="absolute right-0 top-1/2 size-6 -translate-y-1/2 opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto group-focus-visible:opacity-100 group-focus-visible:pointer-events-auto"
-                        aria-label={`Edit ${script.name}`}
-                        onPointerDown={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                        }}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          openEditDialog(script);
-                        }}
-                      >
-                        <SettingsIcon className="size-3.5" />
-                      </Button>
-                    </span>
-                  </MenuItem>
-                );
-              })}
-              <MenuItem className={dropdownItemClassName} onClick={openAddDialog}>
-                <PlusIcon className="size-4" />
-                Add action
-              </MenuItem>
-            </MenuPopup>
+            <MenuPopup align="end">{scriptsMenuContent}</MenuPopup>
           </Menu>
         </Group>
       ) : (

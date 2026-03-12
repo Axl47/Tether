@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   formatCompactTokenCount,
-  hasReportedSessionTokenTotal,
+  isCodexCompactionEstimate,
   resolveContextTokensUsed,
   resolveContextWindowSeverity,
 } from "./ContextWindowIndicator.logic";
@@ -25,31 +25,36 @@ describe("ContextWindowIndicator helpers", () => {
     expect(
       resolveContextTokensUsed({
         provider: "codex",
-        usedTokens: 9_300_000,
+        usedTokens: 38_700,
+        reportedTotalTokens: 9_300_000,
         maxTokens: 258_000,
-        remainingTokens: 0,
-        usedPercent: 100,
+        remainingTokens: 219_300,
+        usedPercent: 15,
         updatedAt: "2026-03-12T00:00:00.000Z",
       }),
-    ).toBe(258_000);
+    ).toBe(38_700);
   });
 
-  it("flags when the reported total differs from the context footprint", () => {
+  it("flags Codex estimates that are anchored to a compaction reset", () => {
     expect(
-      hasReportedSessionTokenTotal({
+      isCodexCompactionEstimate({
         provider: "codex",
-        usedTokens: 9_300_000,
+        usedTokens: 38_700,
+        reportedTotalTokens: 9_300_000,
+        compactionAnchorNonCachedTokens: 245_000,
+        compactionAnchorUsedTokens: 38_700,
         maxTokens: 258_000,
-        remainingTokens: 0,
-        usedPercent: 100,
+        remainingTokens: 219_300,
+        usedPercent: 15,
         updatedAt: "2026-03-12T00:00:00.000Z",
       }),
     ).toBe(true);
 
     expect(
-      hasReportedSessionTokenTotal({
+      isCodexCompactionEstimate({
         provider: "codex",
         usedTokens: 119_000,
+        reportedTotalTokens: 119_000,
         maxTokens: 258_000,
         remainingTokens: 139_000,
         usedPercent: 46,

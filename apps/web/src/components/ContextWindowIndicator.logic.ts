@@ -32,6 +32,10 @@ export function resolveContextTokensUsed(contextWindow: OrchestrationContextWind
   );
 }
 
-export function hasReportedSessionTokenTotal(contextWindow: OrchestrationContextWindow): boolean {
-  return contextWindow.usedTokens !== resolveContextTokensUsed(contextWindow);
+export function isCodexCompactionEstimate(contextWindow: OrchestrationContextWindow): boolean {
+  return (
+    contextWindow.provider === "codex" &&
+    contextWindow.compactionAnchorNonCachedTokens !== undefined &&
+    contextWindow.compactionAnchorUsedTokens !== undefined
+  );
 }

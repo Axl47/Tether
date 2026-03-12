@@ -308,15 +308,19 @@ it.effect("accepts orchestration threads with null or populated context windows"
       ...baseThread,
       contextWindow: {
         provider: "codex",
-        usedTokens: 119000,
+        usedTokens: 59000,
+        reportedTotalTokens: 119000,
+        reportedLastTokens: 8500,
         maxTokens: 258000,
-        remainingTokens: 139000,
-        usedPercent: 46,
+        compactionAnchorNonCachedTokens: 45000,
+        compactionAnchorUsedTokens: 38700,
+        remainingTokens: 199000,
+        usedPercent: 23,
         updatedAt: "2026-03-07T00:00:00.000Z",
       },
     });
 
     assert.strictEqual(withoutContextWindow.contextWindow, null);
-    assert.strictEqual(withContextWindow.contextWindow?.usedPercent, 46);
+    assert.strictEqual(withContextWindow.contextWindow?.usedPercent, 23);
   }),
 );
