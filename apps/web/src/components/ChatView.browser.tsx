@@ -2150,6 +2150,33 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("keeps the message scroller above the composer footer", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createRunningSnapshot(),
+    });
+
+    try {
+      const scrollContainer = await waitForMessageScrollContainer();
+      const composerForm = await waitForElement(
+        () => document.querySelector<HTMLFormElement>("[data-chat-composer-form='true']"),
+        "Unable to find composer form.",
+      );
+
+      await vi.waitFor(
+        () => {
+          const scrollRect = scrollContainer.getBoundingClientRect();
+          const composerRect = composerForm.getBoundingClientRect();
+          expect(scrollRect.height).toBeGreaterThan(0);
+          expect(scrollRect.bottom).toBeLessThanOrEqual(composerRect.top + 2);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("queues a follow-up while the thread is running and auto-dispatches it after the thread becomes idle", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,

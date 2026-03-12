@@ -2090,23 +2090,43 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
     lastKnownScrollTopRef.current = currentScrollTop;
   }, [noteManualScrollInteraction]);
-  const onMessagesWheel = useCallback(
-    (event: React.WheelEvent<HTMLDivElement>) => {
+  const noteThreadWheelIntent = useCallback(
+    (deltaY: number) => {
       const scrollContainer = messagesScrollRef.current;
       if (!scrollContainer) {
-        return;
+        return null;
       }
       noteManualScrollInteraction();
-      if (event.deltaY < 0) {
+      if (deltaY < 0) {
         pendingUserScrollUpIntentRef.current = true;
         shouldAutoScrollRef.current = false;
-        return;
-      }
-      if (event.deltaY > 0 && !isScrollContainerNearBottom(scrollContainer)) {
+      } else if (deltaY > 0 && !isScrollContainerNearBottom(scrollContainer)) {
         shouldAutoScrollRef.current = false;
       }
+      return scrollContainer;
     },
     [noteManualScrollInteraction],
+  );
+  const onMessagesWheel = useCallback(
+    (event: React.WheelEvent<HTMLDivElement>) => {
+      noteThreadWheelIntent(event.deltaY);
+    },
+    [noteThreadWheelIntent],
+  );
+  const onComposerWheel = useCallback(
+    (event: React.WheelEvent<HTMLDivElement>) => {
+      if (event.ctrlKey) {
+        return;
+      }
+      const scrollContainer = noteThreadWheelIntent(event.deltaY);
+      if (!scrollContainer || Math.abs(event.deltaY) < 0.5) {
+        return;
+      }
+      scrollContainer.scrollTop += event.deltaY;
+      lastKnownScrollTopRef.current = scrollContainer.scrollTop;
+      event.preventDefault();
+    },
+    [noteThreadWheelIntent],
   );
   const onMessagesPointerDown = useCallback((_event: React.PointerEvent<HTMLDivElement>) => {
     isPointerScrollActiveRef.current = true;
@@ -4007,7 +4027,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       <ThreadErrorBanner error={activeThread.error} />
       <div className="flex min-h-0 flex-1">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="relative min-h-0 flex-1">
+          <div className="relative flex min-h-0 flex-1 flex-col">
             {hasFloatingThreadCards ? (
               <div
                 ref={floatingThreadCardsRef}
@@ -4082,7 +4102,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
           </div>
 
           {/* Input bar */}
-          <div className={cn("px-3 pt-1.5 sm:px-5 sm:pt-2", isGitRepo ? "pb-1" : "pb-3 sm:pb-4")}>
+          <div
+            className={cn("px-3 pt-1.5 sm:px-5 sm:pt-2", isGitRepo ? "pb-1" : "pb-3 sm:pb-4")}
+            onWheel={onComposerWheel}
+          >
             <form
               ref={composerFormRef}
               onSubmit={onSend}
@@ -4090,7 +4113,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
               data-chat-composer-form="true"
             >
               <div
-                className={`group rounded-[20px] border bg-card transition-colors duration-200 focus-within:border-ring/45 ${
+                className={`group relative rounded-[20px] border bg-card/95 transition-colors duration-200 supports-[backdrop-filter]:bg-card/80 supports-[backdrop-filter]:backdrop-blur-md focus-within:border-ring/45 ${
                   isDragOverComposer ? "border-primary/70 bg-accent/30" : "border-border"
                 }`}
                 onDragEnter={onComposerDragEnter}
@@ -4405,7 +4428,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
                 {/* Bottom toolbar */}
                 {activePendingApproval ? (
-                  <div className="flex items-center justify-end gap-2 px-2.5 pb-2 sm:px-3 sm:pb-2.5">
+                  <div
+                    className="flex items-center justify-end gap-2 px-2.5 pb-2 sm:px-3 sm:pb-2.5"
+                    data-chat-composer-footer="true"
+                  >
                     <ComposerPendingApprovalActions
                       requestId={activePendingApproval.requestId}
                       isResponding={respondingRequestIds.includes(activePendingApproval.requestId)}
@@ -4413,7 +4439,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
                     />
                   </div>
                 ) : (
-                  <div className="flex flex-wrap items-center justify-between gap-2 px-2.5 pb-2 sm:flex-nowrap sm:gap-0 sm:px-3 sm:pb-2.5">
+                  <div
+                    className="flex flex-wrap items-center justify-between gap-2 px-2.5 pb-2 sm:flex-nowrap sm:gap-0 sm:px-3 sm:pb-2.5"
+                    data-chat-composer-footer="true"
+                  >
                     <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:min-w-max sm:overflow-visible">
                       {/* Provider/model picker */}
                       <ProviderModelPicker
@@ -4520,7 +4549,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
                     </div>
 
                     {/* Right side: send / stop button */}
-                    <div className="flex shrink-0 items-center gap-2">
+                    <div
+                      className="flex shrink-0 items-center gap-2"
+                      data-chat-composer-actions="right"
+                    >
                       {activeContextWindow ? (
                         <ContextWindowIndicator contextWindow={activeContextWindow} />
                       ) : null}

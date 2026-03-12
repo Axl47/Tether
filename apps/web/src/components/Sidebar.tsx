@@ -297,9 +297,7 @@ export default function Sidebar() {
   const [expandedThreadListsByProject, setExpandedThreadListsByProject] = useState<
     ReadonlySet<ProjectId>
   >(() => new Set());
-  const [threadSearchByProject, setThreadSearchByProject] = useState<
-    ReadonlyMap<ProjectId, string>
-  >(() => new Map());
+  const [threadSearchQuery, setThreadSearchQuery] = useState("");
   const renamingCommittedRef = useRef(false);
   const renamingInputRef = useRef<HTMLInputElement | null>(null);
   const dragInProgressRef = useRef(false);
@@ -1353,6 +1351,12 @@ export default function Sidebar() {
     [keybindings],
   );
   const threadSort = appSettings.sidebarThreadSort ?? DEFAULT_SIDEBAR_THREAD_SORT;
+  const hasSidebarThreadSearch = threadSearchQuery.trim().length > 0;
+  const hasAnyThreads = sidebarThreads.length > 0;
+  const hasAnyMatchingThreads = useMemo(
+    () => filterSidebarThreads(sidebarThreads, threadSearchQuery).length > 0,
+    [sidebarThreads, threadSearchQuery],
+  );
 
   const handleDesktopUpdateButtonClick = useCallback(() => {
     const bridge = window.desktopBridge;
@@ -1429,34 +1433,6 @@ export default function Sidebar() {
       return next;
     });
   }, []);
-
-  const setProjectThreadSearch = useCallback((projectId: ProjectId, value: string) => {
-    setThreadSearchByProject((current) => {
-      const next = new Map(current);
-      if (value.length === 0) {
-        next.delete(projectId);
-      } else {
-        next.set(projectId, value);
-      }
-      return next;
-    });
-  }, []);
-
-  useEffect(() => {
-    const activeProjectIds = new Set(projects.map((project) => project.id));
-    setThreadSearchByProject((current) => {
-      let changed = false;
-      const next = new Map<ProjectId, string>();
-      for (const [projectId, search] of current) {
-        if (!activeProjectIds.has(projectId)) {
-          changed = true;
-          continue;
-        }
-        next.set(projectId, search);
-      }
-      return changed ? next : current;
-    });
-  }, [projects]);
 
   const wordmark = (
     <div className="flex items-center gap-2">
@@ -1631,42 +1607,93 @@ export default function Sidebar() {
           )}
           {projects.length > 0 && (
             <div className="px-1 pb-2">
-              <label className="block space-y-1">
-                <span className="px-1 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60">
-                  Thread sort
-                </span>
-                <Select
-                  items={SIDEBAR_THREAD_SORT_OPTIONS.map((option) => ({
-                    label: option.label,
-                    value: option.value,
-                  }))}
-                  value={threadSort}
-                  onValueChange={(value) => {
-                    if (!value) return;
-                    updateSettings({ sidebarThreadSort: value });
-                  }}
-                >
-                  <SelectTrigger
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 w-full rounded-md px-2 text-xs text-muted-foreground/80 hover:text-foreground"
+              <div className="space-y-2">
+                <label className="block space-y-1">
+                  <span className="px-1 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60">
+                    Thread sort
+                  </span>
+                  <Select
+                    items={SIDEBAR_THREAD_SORT_OPTIONS.map((option) => ({
+                      label: option.label,
+                      value: option.value,
+                    }))}
+                    value={threadSort}
+                    onValueChange={(value) => {
+                      if (!value) return;
+                      updateSettings({ sidebarThreadSort: value });
+                    }}
                   >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectPopup alignItemWithTrigger={false}>
-                    {SIDEBAR_THREAD_SORT_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        <div className="flex min-w-0 flex-col">
-                          <span className="truncate">{option.label}</span>
-                          <span className="truncate text-[10px] text-muted-foreground/70">
-                            {option.description}
-                          </span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectPopup>
-                </Select>
-              </label>
+                    <SelectTrigger
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 w-full rounded-md px-2 text-xs text-muted-foreground/80 hover:text-foreground"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectPopup alignItemWithTrigger={false}>
+                      {SIDEBAR_THREAD_SORT_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          <div className="flex min-w-0 flex-col">
+                            <span className="truncate">{option.label}</span>
+                            <span className="truncate text-[10px] text-muted-foreground/70">
+                              {option.description}
+                            </span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectPopup>
+                  </Select>
+                </label>
+                {hasAnyThreads ? (
+                  <label className="block space-y-1">
+                    <span className="px-1 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60">
+                      Thread search
+                    </span>
+                    <InputGroup className="overflow-visible rounded-md border-border bg-background/70 shadow-none dark:bg-background/20">
+                      <InputGroupInput
+                        type="search"
+                        size="sm"
+                        value={threadSearchQuery}
+                        placeholder="Search all threads"
+                        aria-label="Search all threads"
+                        className="text-xs placeholder:text-muted-foreground/55"
+                        onChange={(event) => {
+                          setThreadSearchQuery(event.target.value);
+                        }}
+                        onKeyDown={(event) => {
+                          event.stopPropagation();
+                          if (event.key === "Escape" && threadSearchQuery.length > 0) {
+                            event.preventDefault();
+                            setThreadSearchQuery("");
+                          }
+                        }}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                        }}
+                      />
+                      {hasSidebarThreadSearch ? (
+                        <InputGroupAddon align="inline-end" className="pe-2.5 [&>button]:me-0">
+                          <button
+                            type="button"
+                            aria-label="Clear thread search"
+                            className="inline-flex size-4 shrink-0 items-center justify-center text-muted-foreground/50 transition-colors hover:text-foreground"
+                            onMouseDown={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                            }}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setThreadSearchQuery("");
+                            }}
+                          >
+                            <XIcon className="size-3.5" />
+                          </button>
+                        </InputGroupAddon>
+                      ) : null}
+                    </InputGroup>
+                  </label>
+                ) : null}
+              </div>
             </div>
           )}
           <DndContext
@@ -1683,24 +1710,22 @@ export default function Sidebar() {
                 strategy={verticalListSortingStrategy}
               >
                 {projects.map((project) => {
-                  const projectThreadSearch = threadSearchByProject.get(project.id) ?? "";
-                  const hasActiveThreadSearch = projectThreadSearch.trim().length > 0;
                   const allProjectThreads = sidebarThreads.filter(
                     (thread) => thread.projectId === project.id,
                   );
-                  const showThreadSearch = allProjectThreads.length >= THREAD_PREVIEW_LIMIT;
                   const filteredProjectThreads = filterSidebarThreads(
                     allProjectThreads,
-                    projectThreadSearch,
+                    threadSearchQuery,
                   );
                   const projectThreads = sortSidebarThreads(filteredProjectThreads, {
                     sortBy: threadSort,
                     hasPendingApprovalsByThreadId: pendingApprovalByThreadId,
                     hasPendingUserInputByThreadId: pendingUserInputByThreadId,
                   });
+                  const isProjectOpen = project.expanded || hasSidebarThreadSearch;
                   const isThreadListExpanded = expandedThreadListsByProject.has(project.id);
                   const hasHiddenThreads =
-                    !hasActiveThreadSearch && projectThreads.length > THREAD_PREVIEW_LIMIT;
+                    !hasSidebarThreadSearch && projectThreads.length > THREAD_PREVIEW_LIMIT;
                   const isAutoRenamingProject = autoRenamingProjectId === project.id;
                   const visibleThreads =
                     hasHiddenThreads && !isThreadListExpanded
@@ -1710,7 +1735,7 @@ export default function Sidebar() {
                   return (
                     <SortableProjectItem key={project.id} projectId={project.id}>
                       {(dragHandleProps) => (
-                        <Collapsible className="group/collapsible" open={project.expanded}>
+                        <Collapsible className="group/collapsible" open={isProjectOpen}>
                           <div className="group/project-header relative">
                             <SidebarMenuButton
                               size="sm"
@@ -1731,7 +1756,7 @@ export default function Sidebar() {
                             >
                               <ChevronRightIcon
                                 className={`-ml-0.5 size-3.5 shrink-0 text-muted-foreground/70 transition-transform duration-150 ${
-                                  project.expanded ? "rotate-90" : ""
+                                  isProjectOpen ? "rotate-90" : ""
                                 }`}
                               />
                               <ProjectFavicon cwd={project.cwd} />
@@ -1799,60 +1824,6 @@ export default function Sidebar() {
 
                           <CollapsibleContent>
                             <SidebarMenuSub className="mx-1 my-0 translate-x-0 gap-0 px-1.5 py-0">
-                              {showThreadSearch && (
-                                <SidebarMenuSubItem className="w-full">
-                                  <div className="px-2 py-1.5">
-                                    <InputGroup className="overflow-visible rounded-md border-border bg-background/70 shadow-none dark:bg-background/20">
-                                      <InputGroupInput
-                                        type="search"
-                                        size="sm"
-                                        value={projectThreadSearch}
-                                        placeholder="Search threads"
-                                        aria-label={`Search threads in ${project.name}`}
-                                        className="text-xs placeholder:text-muted-foreground/55"
-                                        onChange={(event) => {
-                                          setProjectThreadSearch(project.id, event.target.value);
-                                        }}
-                                        onKeyDown={(event) => {
-                                          event.stopPropagation();
-                                          if (
-                                            event.key === "Escape" &&
-                                            projectThreadSearch.length > 0
-                                          ) {
-                                            event.preventDefault();
-                                            setProjectThreadSearch(project.id, "");
-                                          }
-                                        }}
-                                        onClick={(event) => {
-                                          event.stopPropagation();
-                                        }}
-                                      />
-                                      {hasActiveThreadSearch ? (
-                                        <InputGroupAddon
-                                          align="inline-end"
-                                          className="pe-2.5 [&>button]:me-0"
-                                        >
-                                          <button
-                                            type="button"
-                                            aria-label={`Clear thread search in ${project.name}`}
-                                            className="inline-flex size-4 shrink-0 items-center justify-center text-muted-foreground/50 transition-colors hover:text-foreground"
-                                            onMouseDown={(event) => {
-                                              event.preventDefault();
-                                              event.stopPropagation();
-                                            }}
-                                            onClick={(event) => {
-                                              event.stopPropagation();
-                                              setProjectThreadSearch(project.id, "");
-                                            }}
-                                          >
-                                            <XIcon className="size-3.5" />
-                                          </button>
-                                        </InputGroupAddon>
-                                      ) : null}
-                                    </InputGroup>
-                                  </div>
-                                </SidebarMenuSubItem>
-                              )}
                               {visibleThreads.map((thread) => {
                                 const isActive = routeThreadId === thread.id;
                                 const pendingRun = pendingRunByThreadId[thread.id] ?? null;
@@ -1936,15 +1907,14 @@ export default function Sidebar() {
                                         {threadStatus && (
                                           <span
                                             className={`inline-flex items-center gap-1 text-[10px] ${threadStatus.colorClass}`}
+                                            aria-label={threadStatus.label}
+                                            title={threadStatus.label}
                                           >
                                             <span
                                               className={`h-1.5 w-1.5 rounded-full ${threadStatus.dotClass} ${
                                                 threadStatus.pulse ? "animate-pulse" : ""
                                               }`}
                                             />
-                                            <span className="hidden md:inline">
-                                              {threadStatus.label}
-                                            </span>
                                           </span>
                                         )}
                                         {isDraftThread && (
@@ -2026,13 +1996,15 @@ export default function Sidebar() {
                                 );
                               })}
 
-                              {hasActiveThreadSearch && projectThreads.length === 0 && (
-                                <SidebarMenuSubItem className="w-full">
-                                  <div className="px-2 py-1.5 text-[10px] text-muted-foreground/60">
-                                    No matching threads
-                                  </div>
-                                </SidebarMenuSubItem>
-                              )}
+                              {hasSidebarThreadSearch &&
+                                hasAnyMatchingThreads &&
+                                projectThreads.length === 0 && (
+                                  <SidebarMenuSubItem className="w-full">
+                                    <div className="px-2 py-1.5 text-[10px] text-muted-foreground/60">
+                                      No matching threads
+                                    </div>
+                                  </SidebarMenuSubItem>
+                                )}
 
                               {hasHiddenThreads && !isThreadListExpanded && (
                                 <SidebarMenuSubItem className="w-full">
@@ -2076,6 +2048,11 @@ export default function Sidebar() {
           {projects.length === 0 && !shouldShowProjectPathEntry && (
             <div className="px-2 pt-4 text-center text-xs text-muted-foreground/60">
               No projects yet
+            </div>
+          )}
+          {projects.length > 0 && hasSidebarThreadSearch && !hasAnyMatchingThreads && (
+            <div className="px-2 pt-3 text-center text-xs text-muted-foreground/60">
+              No matching threads
             </div>
           )}
         </SidebarGroup>
