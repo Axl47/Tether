@@ -55,8 +55,8 @@ export function hasUnseenCompletion(thread: ThreadStatusInput): boolean {
 function buildPlanReadyPill(): ThreadStatusPill {
   return {
     label: "Plan Ready",
-    colorClass: "text-violet-600 dark:text-violet-300/90",
-    dotClass: "bg-violet-500 dark:bg-violet-300/90",
+    colorClass: "text-orange-600 dark:text-orange-300/90",
+    dotClass: "bg-orange-500 dark:bg-orange-300/90",
     pulse: false,
   };
 }
