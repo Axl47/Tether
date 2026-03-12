@@ -4855,9 +4855,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
 }
 
 interface ChatHeaderDropdownProps {
-  activeThreadId: ThreadId;
   activeProjectName: string | undefined;
-  isGitRepo: boolean;
   openInCwd: string | null;
   activeProjectScripts: ProjectScript[] | undefined;
   preferredScriptId: string | null;
@@ -4865,7 +4863,6 @@ interface ChatHeaderDropdownProps {
   availableEditors: ReadonlyArray<EditorId>;
   terminalOpen: boolean;
   terminalToggleShortcutLabel: string | null;
-  gitCwd: string | null;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<void>;
   onUpdateProjectScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void>;
@@ -4874,9 +4871,7 @@ interface ChatHeaderDropdownProps {
 }
 
 const ChatHeaderDropdown = memo(function ChatHeaderDropdown({
-  activeThreadId,
   activeProjectName,
-  isGitRepo,
   openInCwd,
   activeProjectScripts,
   preferredScriptId,
@@ -4884,7 +4879,6 @@ const ChatHeaderDropdown = memo(function ChatHeaderDropdown({
   availableEditors,
   terminalOpen,
   terminalToggleShortcutLabel,
-  gitCwd,
   onRunProjectScript,
   onAddProjectScript,
   onUpdateProjectScript,
@@ -4915,24 +4909,6 @@ const ChatHeaderDropdown = memo(function ChatHeaderDropdown({
           </MenuItem>
 
           <MenuDivider />
-
-          {/* Git */}
-          {activeProjectName && isGitRepo && (
-            <MenuSub>
-              <MenuSubTrigger>
-                <GitCommitIcon className="size-4" />
-                Git
-              </MenuSubTrigger>
-              <MenuSubPopup side="inline-start" keepMounted>
-                <GitActionsControl
-                  gitCwd={gitCwd}
-                  activeThreadId={activeThreadId}
-                  availableEditors={availableEditors}
-                  mode="menu-items"
-                />
-              </MenuSubPopup>
-            </MenuSub>
-          )}
 
           {/* Folder / Open in editor */}
           {activeProjectName && (
@@ -4983,6 +4959,35 @@ const ChatHeaderDropdown = memo(function ChatHeaderDropdown({
         )}
       </div>
     </>
+  );
+});
+
+const ChatHeaderGitButton = memo(function ChatHeaderGitButton({
+  activeThreadId,
+  gitCwd,
+  availableEditors,
+}: {
+  activeThreadId: ThreadId;
+  gitCwd: string | null;
+  availableEditors: ReadonlyArray<EditorId>;
+}) {
+  return (
+    <Menu>
+      <MenuTrigger render={<Button aria-label="Git" size="xs" variant="outline" />}>
+        <GitCommitIcon className="size-3.5" />
+        <span className="sr-only @sm/header-actions:not-sr-only @sm/header-actions:ml-0.5">
+          Git
+        </span>
+      </MenuTrigger>
+      <MenuPopup align="end" className="min-w-48" keepMounted>
+        <GitActionsControl
+          gitCwd={gitCwd}
+          activeThreadId={activeThreadId}
+          availableEditors={availableEditors}
+          mode="menu-items"
+        />
+      </MenuPopup>
+    </Menu>
   );
 });
 
@@ -5165,9 +5170,7 @@ const ChatHeader = memo(function ChatHeader({
       <div className="@container/header-actions flex min-w-0 flex-1 items-center justify-end gap-2 @sm/header-actions:gap-3">
         {activeProjectName && (
           <ChatHeaderDropdown
-            activeThreadId={activeThreadId}
             activeProjectName={activeProjectName}
-            isGitRepo={isGitRepo}
             openInCwd={openInCwd}
             activeProjectScripts={activeProjectScripts}
             preferredScriptId={preferredScriptId}
@@ -5175,7 +5178,6 @@ const ChatHeader = memo(function ChatHeader({
             availableEditors={availableEditors}
             terminalOpen={terminalOpen}
             terminalToggleShortcutLabel={terminalToggleShortcutLabel}
-            gitCwd={gitCwd}
             onRunProjectScript={onRunProjectScript}
             onAddProjectScript={onAddProjectScript}
             onUpdateProjectScript={onUpdateProjectScript}
@@ -5183,6 +5185,13 @@ const ChatHeader = memo(function ChatHeader({
             onToggleTerminal={onToggleTerminal}
           />
         )}
+        {activeProjectName && isGitRepo ? (
+          <ChatHeaderGitButton
+            activeThreadId={activeThreadId}
+            gitCwd={gitCwd}
+            availableEditors={availableEditors}
+          />
+        ) : null}
         <Tooltip>
           <TooltipTrigger
             render={
