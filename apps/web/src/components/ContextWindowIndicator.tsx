@@ -56,17 +56,20 @@ export default function ContextWindowIndicator(props: {
   const hasLegacyCodexFallback =
     isCodexEstimate &&
     !isCompactionEstimate &&
-    contextWindow.usedTokens > contextWindow.maxTokens &&
-    contextWindow.reportedLastTokens !== undefined;
+    contextWindow.usedTokens >= contextWindow.maxTokens &&
+    (contextWindow.reportedLastEffectiveTokens ?? contextWindow.reportedLastTokens) !== undefined;
   const displayedCodexUsedTokens = hasLegacyCodexFallback
-    ? Math.max(0, Math.round(contextWindow.maxTokens * 0.15) + contextWindow.reportedLastTokens)
+    ? Math.max(
+        0,
+        Math.round(contextWindow.maxTokens * 0.15) +
+          (contextWindow.reportedLastEffectiveTokens ?? contextWindow.reportedLastTokens ?? 0),
+      )
     : hasLegacyRawCodexSnapshot
       ? derivedCodexPromptFootprint
       : contextWindow.usedTokens;
-  const displayedUsedPercent =
-    isCodexEstimate && hasLegacyCodexFallback
-      ? Math.max(0, Math.round((displayedCodexUsedTokens / contextWindow.maxTokens) * 100))
-      : contextWindow.usedPercent;
+  const displayedUsedPercent = isCodexEstimate
+    ? Math.max(0, Math.round((displayedCodexUsedTokens / contextWindow.maxTokens) * 100))
+    : contextWindow.usedPercent;
   const remainingPercent = Math.max(0, 100 - displayedUsedPercent);
   const contextTokensUsed = isCodexEstimate
     ? displayedCodexUsedTokens
@@ -92,7 +95,7 @@ export default function ContextWindowIndicator(props: {
               badgeClassName,
             )}
           >
-            {isCodexEstimate ? `~${displayedUsedPercent}%` : `${contextWindow.usedPercent}%`}
+            {isCodexEstimate ? `${displayedUsedPercent}%` : `${contextWindow.usedPercent}%`}
           </button>
         }
       />
@@ -104,7 +107,7 @@ export default function ContextWindowIndicator(props: {
           {isCodexEstimate ? (
             <>
               <p>
-                ~{displayedUsedPercent}% used ({remainingPercent}% left)
+                {displayedUsedPercent}% used ({remainingPercent}% left)
               </p>
               <p>
                 Estimated usage: {formatCompactTokenCount(displayedCodexUsedTokens)} /{" "}
@@ -129,6 +132,12 @@ export default function ContextWindowIndicator(props: {
                 <p>
                   Reported last turn: {formatCompactTokenCount(contextWindow.reportedLastTokens)}{" "}
                   tokens
+                </p>
+              ) : null}
+              {contextWindow.reportedLastEffectiveTokens !== undefined ? (
+                <p>
+                  Estimated last-turn footprint:{" "}
+                  {formatCompactTokenCount(contextWindow.reportedLastEffectiveTokens)} tokens
                 </p>
               ) : null}
               <p>Model context window: {formatCompactTokenCount(contextWindow.maxTokens)} tokens</p>

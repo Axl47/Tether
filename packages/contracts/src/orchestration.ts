@@ -206,6 +206,7 @@ export const OrchestrationContextWindow = Schema.Struct({
   usedTokens: NonNegativeInt,
   reportedTotalTokens: Schema.optional(NonNegativeInt),
   reportedLastTokens: Schema.optional(NonNegativeInt),
+  reportedLastEffectiveTokens: Schema.optional(NonNegativeInt),
   compactionAnchorNonCachedTokens: Schema.optional(NonNegativeInt),
   compactionAnchorUsedTokens: Schema.optional(NonNegativeInt),
   maxTokens: NonNegativeInt,

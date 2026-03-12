@@ -311,6 +311,7 @@ it.effect("accepts orchestration threads with null or populated context windows"
         usedTokens: 59000,
         reportedTotalTokens: 119000,
         reportedLastTokens: 8500,
+        reportedLastEffectiveTokens: 6000,
         maxTokens: 258000,
         compactionAnchorNonCachedTokens: 45000,
         compactionAnchorUsedTokens: 38700,

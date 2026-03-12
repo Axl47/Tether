@@ -897,10 +897,18 @@ function findDispatchedCommand(type: string): WsRequestEnvelope["body"] | undefi
 }
 
 function elementOwnsCenterPoint(element: HTMLElement): boolean {
+  return elementOwnsInteriorPoint(element, 0.5, 0.5);
+}
+
+function elementOwnsInteriorPoint(
+  element: HTMLElement,
+  horizontalRatio: number,
+  verticalRatio: number,
+): boolean {
   const rect = element.getBoundingClientRect();
-  const centerX = rect.left + rect.width / 2;
-  const centerY = rect.top + rect.height / 2;
-  const hit = document.elementFromPoint(centerX, centerY);
+  const pointX = rect.left + rect.width * horizontalRatio;
+  const pointY = rect.top + rect.height * verticalRatio;
+  const hit = document.elementFromPoint(pointX, pointY);
   return hit === element || (hit instanceof Node && element.contains(hit));
 }
 
@@ -1973,6 +1981,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
       expect(recommendedOption.dataset.slot).toBe("button");
       expect(elementOwnsCenterPoint(recommendedOption)).toBe(true);
       expect(elementOwnsCenterPoint(explicitConfigOption)).toBe(true);
+      expect(elementOwnsInteriorPoint(recommendedOption, 0.5, 0.85)).toBe(true);
+      expect(elementOwnsInteriorPoint(explicitConfigOption, 0.5, 0.85)).toBe(true);
 
       recommendedOption.click();
 
@@ -1992,6 +2002,30 @@ describe("ChatView timeline estimator parity (full app)", () => {
           expect(explicitConfigOption.className).toContain("bg-primary");
           expect(recommendedOption.className).not.toContain("bg-primary");
           expect(document.activeElement).toBe(explicitConfigOption);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("shows the pending user input description tooltip for the full option chip", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotWithPendingUserInput(),
+    });
+
+    try {
+      const recommendedOption = await waitForPendingUserInputOption("Pure static (Recommended)");
+
+      expect(elementOwnsInteriorPoint(recommendedOption, 0.5, 0.85)).toBe(true);
+
+      recommendedOption.focus();
+
+      await vi.waitFor(
+        () => {
+          expect(document.body.textContent).toContain("Export a static site with no Node runtime.");
         },
         { timeout: 8_000, interval: 16 },
       );
@@ -2627,8 +2661,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
                 reportedTotalTokens: 119000,
                 reportedLastTokens: 8500,
                 maxTokens: 258000,
-                remainingTokens: 213_320,
-                usedPercent: 17,
+                remainingTokens: 0,
+                usedPercent: 100,
                 inputTokens: 110000,
                 cachedInputTokens: 65000,
                 outputTokens: 9000,
@@ -2649,17 +2683,17 @@ describe("ChatView timeline estimator parity (full app)", () => {
           ) as HTMLButtonElement | null,
         "Unable to find context-window badge.",
       );
-      expect(badge.textContent?.trim()).toBe("~17%");
+      expect(badge.textContent?.trim()).toBe("14%");
 
       badge.focus();
 
       await vi.waitFor(
         () => {
           expect(document.body.textContent).toContain("Estimated context window");
-          expect(document.body.textContent).toContain("~17% used (83% left)");
-          expect(document.body.textContent).toContain("Estimated usage: 44.7k / 258k tokens");
+          expect(document.body.textContent).toContain("14% used (86% left)");
+          expect(document.body.textContent).toContain("Estimated usage: 35.7k / 258k tokens");
           expect(document.body.textContent).toContain(
-            "Estimated from Codex reported totals with cached tokens excluded.",
+            "Derived from the current Codex totals with cached, output, and reasoning tokens removed.",
           );
           expect(document.body.textContent).toContain("Reported total: 119k tokens");
           expect(document.body.textContent).toContain("Reported last turn: 8.5k tokens");
@@ -2722,14 +2756,14 @@ describe("ChatView timeline estimator parity (full app)", () => {
           ) as HTMLButtonElement | null,
         "Unable to find context-window badge.",
       );
-      expect(badge.textContent?.trim()).toBe("~27%");
+      expect(badge.textContent?.trim()).toBe("27%");
 
       badge.focus();
 
       await vi.waitFor(
         () => {
           expect(document.body.textContent).toContain("Estimated context window");
-          expect(document.body.textContent).toContain("~27% used (73% left)");
+          expect(document.body.textContent).toContain("27% used (73% left)");
           expect(document.body.textContent).toContain("Estimated usage: 68.7k / 258k tokens");
           expect(document.body.textContent).toContain(
             "Estimated from a 15% post-compaction reset plus new non-cached token growth.",
@@ -2740,6 +2774,71 @@ describe("ChatView timeline estimator parity (full app)", () => {
           expect(document.body.textContent).toContain(
             "Reported totals: Input 9.1m, cached 2.4m, output 180k, reasoning 9k",
           );
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("recovers codex display from a legacy snapshot clamped at 100%", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: (() => {
+        const snapshot = createSnapshotForTargetUser({
+          targetMessageId: "msg-user-context-window-clamped" as MessageId,
+          targetText: "context clamped target",
+        });
+        const [thread] = snapshot.threads;
+        if (!thread) {
+          return snapshot;
+        }
+        return {
+          ...snapshot,
+          threads: [
+            {
+              ...thread,
+              contextWindow: {
+                provider: "codex" as const,
+                usedTokens: 258_000,
+                reportedTotalTokens: 258_000,
+                reportedLastTokens: 18_000,
+                reportedLastEffectiveTokens: 11_000,
+                maxTokens: 258_000,
+                remainingTokens: 0,
+                usedPercent: 100,
+                updatedAt: NOW_ISO,
+              },
+            },
+          ],
+        };
+      })(),
+    });
+
+    try {
+      const badge = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll("button")).find(
+            (button) => button.getAttribute("aria-label") === "Estimated context window usage",
+          ) as HTMLButtonElement | null,
+        "Unable to find context-window badge.",
+      );
+      expect(badge.textContent?.trim()).toBe("19%");
+
+      badge.focus();
+
+      await vi.waitFor(
+        () => {
+          expect(document.body.textContent).toContain("Estimated context window");
+          expect(document.body.textContent).toContain("19% used (81% left)");
+          expect(document.body.textContent).toContain("Estimated usage: 49.7k / 258k tokens");
+          expect(document.body.textContent).toContain(
+            "Approximated from the latest reported turn while waiting for a refreshed compaction anchor.",
+          );
+          expect(document.body.textContent).toContain("Reported total: 258k tokens");
+          expect(document.body.textContent).toContain("Reported last turn: 18k tokens");
+          expect(document.body.textContent).toContain("Estimated last-turn footprint: 11k tokens");
         },
         { timeout: 8_000, interval: 16 },
       );

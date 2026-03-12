@@ -122,6 +122,7 @@ describe("normalizeCodexContextWindow", () => {
       usedTokens: 6431,
       reportedTotalTokens: 11347,
       reportedLastTokens: 11347,
+      reportedLastEffectiveTokens: 6431,
       maxTokens: 258400,
       remainingTokens: 251969,
       usedPercent: 2,
@@ -323,6 +324,7 @@ describe("normalizeCodexContextWindow", () => {
       usedTokens: 62_700,
       reportedTotalTokens: 26_400_000,
       reportedLastTokens: 32_000,
+      reportedLastEffectiveTokens: 24_000,
       compactionAnchorNonCachedTokens: 21_676_000,
       compactionAnchorUsedTokens: 38_700,
       remainingTokens: 195_300,
@@ -358,10 +360,56 @@ describe("normalizeCodexContextWindow", () => {
       usedTokens: 62_700,
       reportedTotalTokens: 26_400_000,
       reportedLastTokens: 32_000,
+      reportedLastEffectiveTokens: 24_000,
       compactionAnchorNonCachedTokens: 21_676_000,
       compactionAnchorUsedTokens: 38_700,
       remainingTokens: 195_300,
       usedPercent: 24,
+    });
+  });
+
+  it("recovers from legacy snapshots clamped exactly to the model limit", () => {
+    expect(
+      normalizeCodexContextWindow(
+        {
+          tokenUsage: {
+            total: {
+              totalTokens: 258_000,
+              inputTokens: 258_000,
+              cachedInputTokens: 220_000,
+              outputTokens: 6_000,
+              reasoningOutputTokens: 2_000,
+            },
+            last: {
+              totalTokens: 18_000,
+              inputTokens: 16_000,
+              cachedInputTokens: 3_000,
+              outputTokens: 1_500,
+              reasoningOutputTokens: 500,
+            },
+            modelContextWindow: 258_000,
+          },
+        },
+        "2026-03-07T04:00:00.000Z",
+        {
+          provider: "codex",
+          usedTokens: 258_000,
+          reportedTotalTokens: 258_000,
+          maxTokens: 258_000,
+          remainingTokens: 0,
+          usedPercent: 100,
+          updatedAt: "2026-03-07T03:00:00.000Z",
+        },
+      ),
+    ).toMatchObject({
+      usedTokens: 49_700,
+      reportedTotalTokens: 258_000,
+      reportedLastTokens: 18_000,
+      reportedLastEffectiveTokens: 11_000,
+      compactionAnchorNonCachedTokens: 19_000,
+      compactionAnchorUsedTokens: 38_700,
+      remainingTokens: 208_300,
+      usedPercent: 19,
     });
   });
 

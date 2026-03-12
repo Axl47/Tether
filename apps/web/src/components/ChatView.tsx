@@ -5525,9 +5525,10 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
       <div className="mt-3 flex flex-wrap gap-2">
         {activeQuestion.options.map((option) => {
           const isSelected = progress.selectedOptionLabel === option.label;
-          return (
+          const optionKey = `${activeQuestion.id}:${option.label}`;
+          const optionButton = (
             <Button
-              key={`${activeQuestion.id}:${option.label}`}
+              key={optionKey}
               size="sm"
               variant={isSelected ? "default" : "outline"}
               disabled={isResponding}
@@ -5543,10 +5544,22 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                   targetButton.focus({ preventScroll: true });
                 });
               }}
-              title={option.description}
             >
               {option.label}
             </Button>
+          );
+
+          if (!option.description) {
+            return optionButton;
+          }
+
+          return (
+            <Tooltip key={optionKey}>
+              <TooltipTrigger render={optionButton} />
+              <TooltipPopup side="top" className="max-w-72 whitespace-normal">
+                {option.description}
+              </TooltipPopup>
+            </Tooltip>
           );
         })}
       </div>

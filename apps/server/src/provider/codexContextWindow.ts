@@ -140,10 +140,10 @@ function resolveCompactionAnchoredEstimate(input: {
       previousContextWindow?.reportedTotalTokens ?? previousContextWindow?.usedTokens;
     const canRecoverOverflowEstimate =
       effectiveReportedLastTotal !== undefined &&
-      (effectiveReportedTotal > maxTokens ||
+      (effectiveReportedTotal >= maxTokens ||
         (previousReportedTotalTokens !== undefined &&
           previousContextWindow !== null &&
-          previousReportedTotalTokens > previousContextWindow.maxTokens));
+          previousReportedTotalTokens >= previousContextWindow.maxTokens));
 
     if (canRecoverOverflowEstimate) {
       const recoveredAnchorUsedTokens = resolveCompactionResetTokens(maxTokens);
@@ -242,6 +242,9 @@ export function normalizeCodexContextWindow(
     usedTokens,
     reportedTotalTokens,
     ...(reportedLastTokens !== undefined ? { reportedLastTokens } : {}),
+    ...(effectiveReportedLastTotal !== undefined
+      ? { reportedLastEffectiveTokens: effectiveReportedLastTotal }
+      : {}),
     ...(estimatedUsage.compactionAnchorNonCachedTokens !== undefined
       ? { compactionAnchorNonCachedTokens: estimatedUsage.compactionAnchorNonCachedTokens }
       : {}),
