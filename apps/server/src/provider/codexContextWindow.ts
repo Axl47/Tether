@@ -1,11 +1,6 @@
 import type { OrchestrationContextWindow } from "@t3tools/contracts";
 
-import {
-  asNonNegativeInteger,
-  asRecord,
-  clampPercent,
-  resolveContextUsedTokens,
-} from "./contextWindowCommon.ts";
+import { asNonNegativeInteger, asRecord, clampPercent } from "./contextWindowCommon.ts";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -63,6 +58,15 @@ function resolveTotalUsageRecord(records: ReadonlyArray<UnknownRecord>): Unknown
   return records.find(recordHasTotalTokenFields) ?? null;
 }
 
+function resolveLastUsageRecord(records: ReadonlyArray<UnknownRecord>): UnknownRecord | null {
+  const nestedRecord = pickFirstRecord(records, ["last_token_usage", "lastTokenUsage", "last"]);
+  if (nestedRecord) {
+    return nestedRecord;
+  }
+
+  return null;
+}
+
 function pickFirstNumber(
   records: ReadonlyArray<UnknownRecord>,
   keys: ReadonlyArray<string>,
@@ -86,11 +90,13 @@ export function normalizeCodexContextWindow(
   const infoTokenUsage = asRecord(pickValue(info, ["tokenUsage", "token_usage"]));
   const records = compactRecords([payload, info, tokenUsage, infoTokenUsage]);
   const totalUsage = resolveTotalUsageRecord(records);
+  const lastUsage = resolveLastUsageRecord(records);
   const maxTokens = pickFirstNumber(records, [
     "model_context_window",
     "modelContextWindow",
     "context_window",
   ]);
+  const usedTokens = pickNumber(totalUsage, ["total_tokens", "totalTokens"]);
   const inputTokens = pickNumber(totalUsage, ["input_tokens", "inputTokens"]);
   const cachedInputTokens = pickNumber(totalUsage, ["cached_input_tokens", "cachedInputTokens"]);
   const outputTokens = pickNumber(totalUsage, ["output_tokens", "outputTokens"]);
@@ -98,14 +104,7 @@ export function normalizeCodexContextWindow(
     "reasoning_output_tokens",
     "reasoningOutputTokens",
   ]);
-  const usedTokens = resolveContextUsedTokens({
-    totalTokens: pickNumber(totalUsage, ["total_tokens", "totalTokens"]),
-    inputTokens,
-    cachedInputTokens,
-    outputTokens,
-    reasoningOutputTokens,
-    maxTokens,
-  });
+  const reportedLastTokens = pickNumber(lastUsage, ["total_tokens", "totalTokens"]);
 
   if (usedTokens === undefined || maxTokens === undefined || maxTokens <= 0) {
     return null;
@@ -117,6 +116,7 @@ export function normalizeCodexContextWindow(
   return {
     provider: "codex",
     usedTokens,
+    ...(reportedLastTokens !== undefined ? { reportedLastTokens } : {}),
     maxTokens,
     remainingTokens,
     usedPercent,

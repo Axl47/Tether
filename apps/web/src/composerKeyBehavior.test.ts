@@ -8,7 +8,7 @@ describe("shouldSubmitComposerOnEnter", () => {
       shouldSubmitComposerOnEnter({
         isMobileViewport: false,
         shiftKey: false,
-        canSubmit: true,
+        canDispatch: true,
       }),
     ).toBe(true);
   });
@@ -18,7 +18,7 @@ describe("shouldSubmitComposerOnEnter", () => {
       shouldSubmitComposerOnEnter({
         isMobileViewport: false,
         shiftKey: true,
-        canSubmit: true,
+        canDispatch: true,
       }),
     ).toBe(false);
   });
@@ -28,18 +28,28 @@ describe("shouldSubmitComposerOnEnter", () => {
       shouldSubmitComposerOnEnter({
         isMobileViewport: true,
         shiftKey: false,
-        canSubmit: true,
+        canDispatch: true,
       }),
     ).toBe(false);
   });
 
-  it("returns false when submission is not available", () => {
+  it("returns false when dispatch is not available", () => {
     expect(
       shouldSubmitComposerOnEnter({
         isMobileViewport: false,
         shiftKey: false,
-        canSubmit: false,
+        canDispatch: false,
       }),
     ).toBe(false);
+  });
+
+  it("returns true when queueing is available during a running turn", () => {
+    expect(
+      shouldSubmitComposerOnEnter({
+        isMobileViewport: false,
+        shiftKey: false,
+        canDispatch: true,
+      }),
+    ).toBe(true);
   });
 });

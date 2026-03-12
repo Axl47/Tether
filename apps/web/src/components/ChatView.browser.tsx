@@ -1915,7 +1915,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("inserts a newline instead of sending when Enter is pressed during a running turn", async () => {
+  it("queues a follow-up when Enter is pressed during a running turn", async () => {
     useComposerDraftStore.getState().setPrompt(THREAD_ID, "Draft while running");
 
     const mounted = await mountChatView({
@@ -1937,9 +1937,11 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       await vi.waitFor(
         () => {
-          const prompt = useComposerDraftStore.getState().draftsByThreadId[THREAD_ID]?.prompt ?? "";
-          expect(prompt).toContain("\n");
-          expect(prompt.replaceAll("\n", "")).toBe("Draft while running");
+          expect(
+            useComposerDraftStore
+              .getState()
+              .queuedMessagesByThreadId[THREAD_ID]?.map((entry) => entry.prompt),
+          ).toEqual(["Draft while running"]);
         },
         { timeout: 8_000, interval: 16 },
       );
@@ -1952,6 +1954,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
             request.type === "thread.turn.start",
         ),
       ).toBeUndefined();
+      expect(useComposerDraftStore.getState().draftsByThreadId[THREAD_ID]?.prompt ?? "").toBe("");
     } finally {
       await mounted.cleanup();
     }
@@ -2621,6 +2624,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
               contextWindow: {
                 provider: "codex" as const,
                 usedTokens: 119000,
+                reportedLastTokens: 8500,
                 maxTokens: 258000,
                 remainingTokens: 139000,
                 usedPercent: 46,
@@ -2651,7 +2655,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await vi.waitFor(
         () => {
           expect(document.body.textContent).toContain("Reported token usage");
-          expect(document.body.textContent).toContain("119k active tokens reported");
+          expect(document.body.textContent).toContain("Total reported: 119k tokens");
+          expect(document.body.textContent).toContain("Last turn: 8.5k tokens");
           expect(document.body.textContent).toContain("Model context window: 258k tokens");
           expect(document.body.textContent).toContain(
             "Input 110k, cached 65k, output 9k, reasoning 320",
@@ -2684,6 +2689,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
               contextWindow: {
                 provider: "codex" as const,
                 usedTokens: 9_300_000,
+                reportedLastTokens: 12_800,
                 maxTokens: 258_000,
                 remainingTokens: 0,
                 usedPercent: 100,
@@ -2707,18 +2713,18 @@ describe("ChatView timeline estimator parity (full app)", () => {
           ) as HTMLButtonElement | null,
         "Unable to find context-window badge.",
       );
-      expect(badge.textContent?.trim()).toBe("258k");
+      expect(badge.textContent?.trim()).toBe("9.3m");
 
       badge.focus();
 
       await vi.waitFor(
         () => {
           expect(document.body.textContent).toContain("Reported token usage");
-          expect(document.body.textContent).toContain("258k active tokens reported");
+          expect(document.body.textContent).toContain("Total reported: 9.3m tokens");
+          expect(document.body.textContent).toContain("Last turn: 12.8k tokens");
           expect(document.body.textContent).toContain("Model context window: 258k tokens");
-          expect(document.body.textContent).toContain("Reported session total: 9.3m tokens");
           expect(document.body.textContent).toContain(
-            "Reported totals: Input 9.1m, cached 2.4m, output 180k, reasoning 9k",
+            "Input 9.1m, cached 2.4m, output 180k, reasoning 9k",
           );
         },
         { timeout: 8_000, interval: 16 },

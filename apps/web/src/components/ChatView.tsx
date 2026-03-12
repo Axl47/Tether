@@ -3919,7 +3919,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
       shouldSubmitComposerOnEnter({
         isMobileViewport,
         shiftKey: event.shiftKey,
-        canSubmit: phase !== "running" || hasActivePendingUserInput,
+        canDispatch:
+          hasActivePendingUserInput ||
+          (!isConnecting &&
+            !isPendingThreadRun &&
+            !isSendBusy &&
+            !sendInFlightRef.current &&
+            (phase !== "running" || isServerThread)),
       })
     ) {
       void onSend();

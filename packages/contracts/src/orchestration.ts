@@ -204,6 +204,7 @@ export type OrchestrationSession = typeof OrchestrationSession.Type;
 export const OrchestrationContextWindow = Schema.Struct({
   provider: ProviderKind,
   usedTokens: NonNegativeInt,
+  reportedLastTokens: Schema.optional(NonNegativeInt),
   maxTokens: NonNegativeInt,
   remainingTokens: NonNegativeInt,
   usedPercent: NonNegativeInt.check(Schema.isLessThanOrEqualTo(100)),

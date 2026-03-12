@@ -56,6 +56,38 @@ describe("normalizeCodexContextWindow", () => {
     });
   });
 
+  it("carries the last-turn token total when available", () => {
+    expect(
+      normalizeCodexContextWindow(
+        {
+          tokenUsage: {
+            total: {
+              totalTokens: 119000,
+              inputTokens: 110000,
+              cachedInputTokens: 60000,
+              outputTokens: 9000,
+            },
+            last: {
+              totalTokens: 8500,
+              inputTokens: 8000,
+              cachedInputTokens: 2000,
+              outputTokens: 500,
+              reasoningOutputTokens: 0,
+            },
+            modelContextWindow: 258000,
+          },
+        },
+        "2026-03-07T00:00:00.000Z",
+      ),
+    ).toMatchObject({
+      usedTokens: 119000,
+      reportedLastTokens: 8500,
+      maxTokens: 258000,
+      remainingTokens: 139000,
+      usedPercent: 46,
+    });
+  });
+
   it("parses the live thread token-usage payload shape from Codex notifications", () => {
     expect(
       normalizeCodexContextWindow(
@@ -85,6 +117,7 @@ describe("normalizeCodexContextWindow", () => {
     ).toEqual({
       provider: "codex",
       usedTokens: 11347,
+      reportedLastTokens: 11347,
       maxTokens: 258400,
       remainingTokens: 247053,
       usedPercent: 4,
@@ -138,33 +171,6 @@ describe("normalizeCodexContextWindow", () => {
     });
   });
 
-  it("excludes cached input tokens when totals include them", () => {
-    expect(
-      normalizeCodexContextWindow(
-        {
-          tokenUsage: {
-            totalTokens: 115,
-            inputTokens: 80,
-            cachedInputTokens: 20,
-            outputTokens: 15,
-            modelContextWindow: 258400,
-          },
-        },
-        "2026-03-07T00:00:00.000Z",
-      ),
-    ).toEqual({
-      provider: "codex",
-      usedTokens: 95,
-      maxTokens: 258400,
-      remainingTokens: 258305,
-      usedPercent: 0,
-      inputTokens: 80,
-      cachedInputTokens: 20,
-      outputTokens: 15,
-      updatedAt: "2026-03-07T00:00:00.000Z",
-    });
-  });
-
   it("carries bucket fields from root-level totals objects", () => {
     expect(
       normalizeCodexContextWindow(
@@ -194,7 +200,7 @@ describe("normalizeCodexContextWindow", () => {
     });
   });
 
-  it("prefers the live context footprint over oversized cumulative totals", () => {
+  it("keeps oversized reported totals instead of capping them to the model window", () => {
     expect(
       normalizeCodexContextWindow(
         {
@@ -211,7 +217,7 @@ describe("normalizeCodexContextWindow", () => {
         "2026-03-07T00:00:00.000Z",
       ),
     ).toMatchObject({
-      usedTokens: 258_000,
+      usedTokens: 9_300_000,
       maxTokens: 258_000,
       remainingTokens: 0,
       usedPercent: 100,

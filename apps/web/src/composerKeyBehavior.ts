@@ -1,7 +1,7 @@
 export function shouldSubmitComposerOnEnter(options: {
   isMobileViewport: boolean;
   shiftKey: boolean;
-  canSubmit: boolean;
+  canDispatch: boolean;
 }): boolean {
-  return !options.shiftKey && !options.isMobileViewport && options.canSubmit;
+  return !options.shiftKey && !options.isMobileViewport && options.canDispatch;
 }

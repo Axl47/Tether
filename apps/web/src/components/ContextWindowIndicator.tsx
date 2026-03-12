@@ -3,7 +3,6 @@ import type { OrchestrationContextWindow } from "@t3tools/contracts";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import {
   formatCompactTokenCount,
-  hasReportedSessionTokenTotal,
   resolveContextTokensUsed,
   resolveContextWindowSeverity,
 } from "./ContextWindowIndicator.logic";
@@ -35,7 +34,6 @@ export default function ContextWindowIndicator(props: {
   const isReportedUsageOnly = contextWindow.provider === "codex";
   const remainingPercent = Math.max(0, 100 - contextWindow.usedPercent);
   const contextTokensUsed = resolveContextTokensUsed(contextWindow);
-  const showsReportedSessionTotal = hasReportedSessionTokenTotal(contextWindow);
   const severity = isReportedUsageOnly
     ? "default"
     : resolveContextWindowSeverity(contextWindow.usedPercent);
@@ -60,7 +58,7 @@ export default function ContextWindowIndicator(props: {
             )}
           >
             {isReportedUsageOnly
-              ? formatCompactTokenCount(contextTokensUsed)
+              ? formatCompactTokenCount(contextWindow.usedTokens)
               : `${contextWindow.usedPercent}%`}
           </button>
         }
@@ -72,7 +70,10 @@ export default function ContextWindowIndicator(props: {
           </p>
           {isReportedUsageOnly ? (
             <>
-              <p>{formatCompactTokenCount(contextTokensUsed)} active tokens reported</p>
+              <p>Total reported: {formatCompactTokenCount(contextWindow.usedTokens)} tokens</p>
+              {contextWindow.reportedLastTokens !== undefined ? (
+                <p>Last turn: {formatCompactTokenCount(contextWindow.reportedLastTokens)} tokens</p>
+              ) : null}
               <p>Model context window: {formatCompactTokenCount(contextWindow.maxTokens)} tokens</p>
             </>
           ) : (
@@ -86,16 +87,7 @@ export default function ContextWindowIndicator(props: {
               </p>
             </>
           )}
-          {showsReportedSessionTotal ? (
-            <p>
-              Reported session total: {formatCompactTokenCount(contextWindow.usedTokens)} tokens
-            </p>
-          ) : null}
-          {breakdown ? (
-            <p className="text-muted-foreground">
-              {showsReportedSessionTotal ? `Reported totals: ${breakdown}` : breakdown}
-            </p>
-          ) : null}
+          {breakdown ? <p className="text-muted-foreground">{breakdown}</p> : null}
         </div>
       </TooltipPopup>
     </Tooltip>
