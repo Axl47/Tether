@@ -19,6 +19,7 @@ import { OrchestrationProjectionSnapshotQueryLive } from "./orchestration/Layers
 import { ProviderRuntimeIngestionLive } from "./orchestration/Layers/ProviderRuntimeIngestion";
 import { ThreadForceDeleteLive } from "./orchestration/Layers/ThreadForceDelete";
 import { ThreadTitleManagerLive } from "./orchestration/Layers/ThreadTitleManager";
+import { RuntimeReceiptBusLive } from "./orchestration/Layers/RuntimeReceiptBus";
 import { ProviderUnsupportedError } from "./provider/Errors";
 import { makeClaudeCodeAdapterLive } from "./provider/Layers/ClaudeCodeAdapter";
 import { makeCodexAdapterLive } from "./provider/Layers/CodexAdapter";
@@ -97,6 +98,7 @@ export function makeServerRuntimeServicesLayer() {
     OrchestrationProjectionSnapshotQueryLive,
     CheckpointStoreLive,
     checkpointDiffQueryLayer,
+    RuntimeReceiptBusLive,
   );
   const runtimeIngestionLayer = ProviderRuntimeIngestionLive.pipe(
     Layer.provideMerge(runtimeServicesLayer),

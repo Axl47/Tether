@@ -291,13 +291,9 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           );
         }
 
-        yield* upsertSessionBinding(
-          session,
-          threadId,
-          input.providerOptions !== undefined
-            ? { providerOptions: input.providerOptions }
-            : undefined,
-        );
+        yield* upsertSessionBinding(session, threadId, {
+          providerOptions: input.providerOptions,
+        });
         yield* analytics.record("provider.session.started", {
           provider: session.provider,
           runtimeMode: input.runtimeMode,
@@ -541,7 +537,12 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
       listSessions,
       getCapabilities,
       rollbackConversation,
-      streamEvents: Stream.fromPubSub(runtimeEventPubSub),
+      // Each access creates a fresh PubSub subscription so that multiple
+      // consumers (ProviderRuntimeIngestion, CheckpointReactor, etc.) each
+      // independently receive all runtime events.
+      get streamEvents(): ProviderServiceShape["streamEvents"] {
+        return Stream.fromPubSub(runtimeEventPubSub);
+      },
     } satisfies ProviderServiceShape;
   });
 

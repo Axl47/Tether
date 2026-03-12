@@ -1920,6 +1920,7 @@ export default function Sidebar() {
                               <button
                                 type="button"
                                 aria-label={`Create new thread in ${project.name}`}
+                                data-testid="new-thread-button"
                                 className="inline-flex size-5 items-center justify-center rounded-md p-0 text-muted-foreground/70 transition-colors hover:bg-secondary hover:text-foreground"
                                 onClick={(event) => {
                                   event.preventDefault();

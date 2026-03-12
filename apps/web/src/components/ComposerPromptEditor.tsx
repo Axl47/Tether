@@ -748,6 +748,7 @@ function ComposerPromptEditorInner({
               "block max-h-[200px] min-h-17.5 w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent text-left text-base leading-relaxed text-foreground focus:outline-none sm:text-sm",
               className,
             )}
+            data-testid="composer-editor"
             aria-placeholder={placeholder}
             autoCapitalize="off"
             autoComplete="off"

@@ -8,7 +8,6 @@ const STATUS_UPSTREAM_REFRESH_INTERVAL = Duration.seconds(15);
 const STATUS_UPSTREAM_REFRESH_TIMEOUT = Duration.seconds(5);
 const STATUS_UPSTREAM_REFRESH_CACHE_CAPACITY = 2_048;
 const DEFAULT_BASE_BRANCH_CANDIDATES = ["main", "master"] as const;
-const ENABLE_STATUS_UPSTREAM_REFRESH = process.env.T3CODE_ENABLE_STATUS_UPSTREAM_REFRESH === "1";
 
 class StatusUpstreamRefreshCacheKey extends Data.Class<{
   cwd: string;
@@ -655,9 +654,7 @@ const makeGitCore = Effect.gen(function* () {
 
   const statusDetails: GitCoreShape["statusDetails"] = (cwd) =>
     Effect.gen(function* () {
-      if (ENABLE_STATUS_UPSTREAM_REFRESH) {
-        yield* refreshStatusUpstreamIfStale(cwd).pipe(Effect.catch(() => Effect.void));
-      }
+      yield* refreshStatusUpstreamIfStale(cwd).pipe(Effect.ignoreCause({ log: true }));
 
       const [statusStdout, unstagedNumstatStdout, stagedNumstatStdout] = yield* Effect.all(
         [
@@ -1368,7 +1365,7 @@ const makeGitCore = Effect.gen(function* () {
 
       // Refresh upstream refs in the background so checkout remains responsive.
       yield* Effect.forkScoped(
-        refreshCheckedOutBranchUpstream(input.cwd).pipe(Effect.catch(() => Effect.void)),
+        refreshCheckedOutBranchUpstream(input.cwd).pipe(Effect.ignoreCause({ log: true })),
       );
     });
 

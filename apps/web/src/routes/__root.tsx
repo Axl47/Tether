@@ -15,7 +15,7 @@ import { Button } from "../components/ui/button";
 import { AnchoredToastProvider, ToastProvider, toastManager } from "../components/ui/toast";
 import { serverConfigQueryOptions, serverQueryKeys } from "../lib/serverReactQuery";
 import { readNativeApi } from "../nativeApi";
-import { useComposerDraftStore } from "../composerDraftStore";
+import { clearPromotedDraftThreads, useComposerDraftStore } from "../composerDraftStore";
 import { useStore } from "../store";
 import { usePlanModePanelStore } from "../planModePanelStore";
 import { useTerminalStateStore } from "../terminalStateStore";
@@ -154,7 +154,6 @@ function EventRouter() {
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const pathnameRef = useRef(pathname);
-  const lastConfigIssuesSignatureRef = useRef<string | null>(null);
   const handledBootstrapThreadIdRef = useRef<string | null>(null);
 
   pathnameRef.current = pathname;
@@ -174,6 +173,7 @@ function EventRouter() {
       latestSequence = Math.max(latestSequence, snapshot.snapshotSequence);
       syncServerReadModel(snapshot);
       syncPendingRuns(snapshot);
+      clearPromotedDraftThreads(new Set(snapshot.threads.map((t) => t.id)));
       const draftThreadIds = Object.keys(
         useComposerDraftStore.getState().draftThreadsByThreadId,
       ) as ThreadId[];
@@ -272,14 +272,13 @@ function EventRouter() {
         handledBootstrapThreadIdRef.current = payload.bootstrapThreadId;
       })().catch(() => undefined);
     });
+    // onServerConfigUpdated replays the latest cached value synchronously
+    // during subscribe. Skip the toast for that replay so effect re-runs
+    // don't produce duplicate toasts.
+    let subscribed = false;
     const unsubServerConfigUpdated = onServerConfigUpdated((payload) => {
-      const signature = JSON.stringify(payload.issues);
-      if (lastConfigIssuesSignatureRef.current === signature) {
-        return;
-      }
-      lastConfigIssuesSignatureRef.current = signature;
-
       void queryClient.invalidateQueries({ queryKey: serverQueryKeys.config() });
+      if (!subscribed) return;
       const issue = payload.issues.find((entry) => entry.kind.startsWith("keybindings."));
       if (!issue) {
         toastManager.add({
@@ -314,6 +313,7 @@ function EventRouter() {
         },
       });
     });
+    subscribed = true;
     return () => {
       disposed = true;
       needsProviderInvalidation = false;

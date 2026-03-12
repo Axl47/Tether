@@ -11,7 +11,8 @@ import {
   type OrchestrationThreadActivity,
   type ProviderRuntimeEvent,
 } from "@t3tools/contracts";
-import { Cache, Cause, Duration, Effect, Layer, Option, Queue, Ref, Stream } from "effect";
+import { Cache, Cause, Duration, Effect, Layer, Option, Ref, Stream } from "effect";
+import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { normalizeClaudeContextWindow } from "../../provider/claudeContextWindow.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
@@ -1311,25 +1312,35 @@ const make = Effect.gen(function* () {
       if (event.type === "turn.diff.updated") {
         const turnId = toTurnId(event.turnId);
         if (turnId && (yield* isGitRepoForThread(thread.id))) {
-          const assistantMessageId = yield* resolveAssistantMessageId({
-            event,
-            threadId: thread.id,
-            turnId,
-            createFallback: true,
-          });
-          yield* orchestrationEngine.dispatch({
-            type: "thread.turn.diff.complete",
-            commandId: providerCommandId(event, "thread-turn-diff-complete"),
-            threadId: thread.id,
-            turnId,
-            completedAt: now,
-            checkpointRef: CheckpointRef.makeUnsafe(`provider-diff:${event.eventId}`),
-            status: "missing",
-            files: [],
-            assistantMessageId,
-            checkpointTurnCount: thread.checkpoints.length + 1,
-            createdAt: now,
-          });
+          // Skip if a checkpoint already exists for this turn. A real
+          // (non-placeholder) capture from CheckpointReactor should not
+          // be clobbered, and dispatching a duplicate placeholder for the
+          // same turnId would produce an unstable checkpointTurnCount.
+          if (!thread.checkpoints.some((c) => c.turnId === turnId)) {
+            const assistantMessageId = yield* resolveAssistantMessageId({
+              event,
+              threadId: thread.id,
+              turnId,
+              createFallback: true,
+            });
+            const maxTurnCount = thread.checkpoints.reduce(
+              (max, c) => Math.max(max, c.checkpointTurnCount),
+              0,
+            );
+            yield* orchestrationEngine.dispatch({
+              type: "thread.turn.diff.complete",
+              commandId: providerCommandId(event, "thread-turn-diff-complete"),
+              threadId: thread.id,
+              turnId,
+              completedAt: now,
+              checkpointRef: CheckpointRef.makeUnsafe(`provider-diff:${event.eventId}`),
+              status: "missing",
+              files: [],
+              assistantMessageId,
+              checkpointTurnCount: maxTurnCount + 1,
+              createdAt: now,
+            });
+          }
         }
       }
 
@@ -1369,16 +1380,12 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const start: ProviderRuntimeIngestionShape["start"] = Effect.gen(function* () {
-    const inputQueue = yield* Queue.unbounded<RuntimeIngestionInput>();
-    yield* Effect.addFinalizer(() => Queue.shutdown(inputQueue).pipe(Effect.asVoid));
+  const worker = yield* makeDrainableWorker(processInputSafely);
 
-    yield* Effect.forkScoped(
-      Effect.forever(Queue.take(inputQueue).pipe(Effect.flatMap(processInputSafely))),
-    );
+  const start: ProviderRuntimeIngestionShape["start"] = Effect.gen(function* () {
     yield* Effect.forkScoped(
       Stream.runForEach(providerService.streamEvents, (event) =>
-        Queue.offer(inputQueue, { source: "runtime", event }).pipe(Effect.asVoid),
+        worker.enqueue({ source: "runtime", event }),
       ),
     );
     yield* Effect.forkScoped(
@@ -1386,13 +1393,14 @@ const make = Effect.gen(function* () {
         if (event.type !== "thread.turn-start-requested") {
           return Effect.void;
         }
-        return Queue.offer(inputQueue, { source: "domain", event }).pipe(Effect.asVoid);
+        return worker.enqueue({ source: "domain", event });
       }),
     );
   });
 
   return {
     start,
+    drain: worker.drain,
   } satisfies ProviderRuntimeIngestionShape;
 });
 
