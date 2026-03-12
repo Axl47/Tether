@@ -20,9 +20,7 @@ function makeTempDir(prefix: string): string {
   return dir;
 }
 
-async function withRouteServer(
-  run: (baseUrl: string) => Promise<void>,
-): Promise<void> {
+async function withRouteServer(run: (baseUrl: string) => Promise<void>): Promise<void> {
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
     if (tryHandleProjectFaviconRequest(url, res)) {

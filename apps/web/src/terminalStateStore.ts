@@ -7,7 +7,7 @@
 
 import type { ThreadId } from "@t3tools/contracts";
 import { create } from "zustand";
-import { createJSONStorage, persist } from "zustand/middleware";
+import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
 import {
   DEFAULT_THREAD_TERMINAL_HEIGHT,
   DEFAULT_THREAD_TERMINAL_ID,
@@ -26,6 +26,13 @@ interface ThreadTerminalState {
 }
 
 const TERMINAL_STATE_STORAGE_KEY = "tether:terminal-state:v1";
+const terminalStateStorage: StateStorage =
+  typeof localStorage !== "undefined" &&
+  typeof localStorage.getItem === "function" &&
+  typeof localStorage.setItem === "function" &&
+  typeof localStorage.removeItem === "function"
+    ? localStorage
+    : { getItem: () => null, setItem: () => {}, removeItem: () => {} };
 
 function normalizeTerminalIds(terminalIds: string[]): string[] {
   const ids = [
@@ -631,7 +638,7 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
     {
       name: TERMINAL_STATE_STORAGE_KEY,
       version: 1,
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() => terminalStateStorage),
       partialize: (state) => ({
         terminalStateByThreadId: state.terminalStateByThreadId,
       }),

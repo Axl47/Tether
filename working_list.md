@@ -2,18 +2,20 @@
 
 ## Pending
 
-- [ ] Run browser-only ChatView tests if a full Playwright/browser validation pass is needed later
+- [ ] Commit the integration branch with a conventional commit message
 
 ## In Progress
 
-- [~] None
+- [~] Investigate why `apps/web/src/components/ChatView.browser.tsx` hangs in browser-mode shutdown after beginning test execution
 
 ## Done
 
-- [x] Create ExecPlan and initialize the working list
-- [x] Add contracts and RPC support for project script steps and `projects.readFile`
-- [x] Refactor project script execution into shared web helpers
-- [x] Update the project action editor for ordered multi-step commands
-- [x] Refactor project action runtime launching and React Native Android compatibility
-- [x] Add and update automated tests
+- [x] Inspect the latest upstream refs and confirm PR `#3` follows the refreshed `upstream-pingdotgg/main` line
+- [x] Create fresh branch `codex/merge-upstream-pingdotgg-main-v2` from current local `main`
+- [x] Refresh ExecPlan and working list for the fresh upstream PR 3 merge branch
+- [x] Merge `upstream-pingdotgg/main` (`ff6a66d`) into `codex/merge-upstream-pingdotgg-main-v2` and document the conflict set
+- [x] Resolve sidebar/status overlap so live-activity pills remain upstream-correct and awaiting-input stays orange
+- [x] Resolve ChatView/project-actions overlap so queued follow-ups, header plan toggle, and multi-terminal actions all survive
+- [x] Resolve server/contracts/branding overlap, keeping runtime/ws fixes while preserving `ProjectScript.steps`, `projects.readFile`, and Tether naming
+- [x] Run conflict checks and targeted overlap tests for server/runtime and web state surfaces
 - [x] Run `bun lint` and `bun typecheck`

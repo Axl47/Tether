@@ -47,9 +47,7 @@ function createSendTurnHarness() {
     .mockReturnValue(context);
   const sendRequest = vi
     .spyOn(
-      manager as unknown as {
-        sendRequest: (...args: unknown[]) => Promise<unknown>;
-      },
+      manager as unknown as { sendRequest: (...args: unknown[]) => Promise<unknown> },
       "sendRequest",
     )
     .mockResolvedValue({
@@ -58,10 +56,7 @@ function createSendTurnHarness() {
       },
     });
   const updateSession = vi
-    .spyOn(
-      manager as unknown as { updateSession: (...args: unknown[]) => void },
-      "updateSession",
-    )
+    .spyOn(manager as unknown as { updateSession: (...args: unknown[]) => void }, "updateSession")
     .mockImplementation(() => {});
 
   return { manager, context, requireSession, sendRequest, updateSession };
@@ -89,16 +84,11 @@ function createThreadControlHarness() {
     )
     .mockReturnValue(context);
   const sendRequest = vi.spyOn(
-    manager as unknown as {
-      sendRequest: (...args: unknown[]) => Promise<unknown>;
-    },
+    manager as unknown as { sendRequest: (...args: unknown[]) => Promise<unknown> },
     "sendRequest",
   );
   const updateSession = vi
-    .spyOn(
-      manager as unknown as { updateSession: (...args: unknown[]) => void },
-      "updateSession",
-    )
+    .spyOn(manager as unknown as { updateSession: (...args: unknown[]) => void }, "updateSession")
     .mockImplementation(() => {});
 
   return { manager, context, requireSession, sendRequest, updateSession };
@@ -136,16 +126,10 @@ function createPendingUserInputHarness() {
     )
     .mockReturnValue(context);
   const writeMessage = vi
-    .spyOn(
-      manager as unknown as { writeMessage: (...args: unknown[]) => void },
-      "writeMessage",
-    )
+    .spyOn(manager as unknown as { writeMessage: (...args: unknown[]) => void }, "writeMessage")
     .mockImplementation(() => {});
   const emitEvent = vi
-    .spyOn(
-      manager as unknown as { emitEvent: (...args: unknown[]) => void },
-      "emitEvent",
-    )
+    .spyOn(manager as unknown as { emitEvent: (...args: unknown[]) => void }, "emitEvent")
     .mockImplementation(() => {});
 
   return { manager, context, requireSession, writeMessage, emitEvent };
@@ -169,8 +153,7 @@ describe("classifyCodexStderrLine", () => {
   });
 
   it("keeps unknown structured errors", () => {
-    const line =
-      "2026-02-08T04:24:20.085687Z ERROR codex_core::runtime: unrecoverable failure";
+    const line = "2026-02-08T04:24:20.085687Z ERROR codex_core::runtime: unrecoverable failure";
     expect(classifyCodexStderrLine(line)).toEqual({
       message: line,
     });
@@ -191,9 +174,7 @@ describe("normalizeCodexModelSlug", () => {
   });
 
   it("prefers codex id when model differs", () => {
-    expect(normalizeCodexModelSlug("gpt-5.3", "gpt-5.3-codex")).toBe(
-      "gpt-5.3-codex",
-    );
+    expect(normalizeCodexModelSlug("gpt-5.3", "gpt-5.3-codex")).toBe("gpt-5.3-codex");
   });
 
   it("keeps non-aliased models as-is", () => {
@@ -205,17 +186,13 @@ describe("normalizeCodexModelSlug", () => {
 describe("isRecoverableThreadResumeError", () => {
   it("matches not-found resume errors", () => {
     expect(
-      isRecoverableThreadResumeError(
-        new Error("thread/resume failed: thread not found"),
-      ),
+      isRecoverableThreadResumeError(new Error("thread/resume failed: thread not found")),
     ).toBe(true);
   });
 
   it("ignores non-resume errors", () => {
     expect(
-      isRecoverableThreadResumeError(
-        new Error("thread/start failed: permission denied"),
-      ),
+      isRecoverableThreadResumeError(new Error("thread/start failed: permission denied")),
     ).toBe(false);
   });
 
@@ -308,8 +285,7 @@ describe("startSession", () => {
 
   it("emits session/startFailed when resolving cwd throws before process launch", async () => {
     const manager = new CodexAppServerManager();
-    const events: Array<{ method: string; kind: string; message?: string }> =
-      [];
+    const events: Array<{ method: string; kind: string; message?: string }> = [];
     manager.on("event", (event) => {
       events.push({
         method: event.method,
@@ -343,8 +319,7 @@ describe("startSession", () => {
 
   it("fails fast with an upgrade message when codex is below the minimum supported version", async () => {
     const manager = new CodexAppServerManager();
-    const events: Array<{ method: string; kind: string; message?: string }> =
-      [];
+    const events: Array<{ method: string; kind: string; message?: string }> = [];
     manager.on("event", (event) => {
       events.push({
         method: event.method,
@@ -574,20 +549,14 @@ describe("sendTurn", () => {
 
 describe("thread checkpoint control", () => {
   it("reads thread turns from thread/read", async () => {
-    const { manager, context, requireSession, sendRequest } =
-      createThreadControlHarness();
+    const { manager, context, requireSession, sendRequest } = createThreadControlHarness();
     sendRequest.mockResolvedValue({
       thread: {
         id: "thread_1",
         turns: [
           {
             id: "turn_1",
-            items: [
-              {
-                type: "userMessage",
-                content: [{ type: "text", text: "hello" }],
-              },
-            ],
+            items: [{ type: "userMessage", content: [{ type: "text", text: "hello" }] }],
           },
         ],
       },
@@ -605,9 +574,7 @@ describe("thread checkpoint control", () => {
       turns: [
         {
           id: "turn_1",
-          items: [
-            { type: "userMessage", content: [{ type: "text", text: "hello" }] },
-          ],
+          items: [{ type: "userMessage", content: [{ type: "text", text: "hello" }] }],
         },
       ],
     });
@@ -620,9 +587,7 @@ describe("thread checkpoint control", () => {
       turns: [
         {
           id: "turn_1",
-          items: [
-            { type: "userMessage", content: [{ type: "text", text: "hello" }] },
-          ],
+          items: [{ type: "userMessage", content: [{ type: "text", text: "hello" }] }],
         },
       ],
     });
@@ -638,17 +603,14 @@ describe("thread checkpoint control", () => {
       turns: [
         {
           id: "turn_1",
-          items: [
-            { type: "userMessage", content: [{ type: "text", text: "hello" }] },
-          ],
+          items: [{ type: "userMessage", content: [{ type: "text", text: "hello" }] }],
         },
       ],
     });
   });
 
   it("rolls back turns via thread/rollback and resets session running state", async () => {
-    const { manager, context, sendRequest, updateSession } =
-      createThreadControlHarness();
+    const { manager, context, sendRequest, updateSession } = createThreadControlHarness();
     sendRequest.mockResolvedValue({
       thread: {
         id: "thread_1",
@@ -786,100 +748,83 @@ describe("respondToUserInput", () => {
   });
 });
 
-describe.skipIf(!process.env.CODEX_BINARY_PATH)(
-  "startSession live Codex resume",
-  () => {
-    it("keeps prior thread history when resuming with a changed runtime mode", async () => {
-      const workspaceDir = mkdtempSync(
-        path.join(os.tmpdir(), "codex-live-resume-"),
+describe.skipIf(!process.env.CODEX_BINARY_PATH)("startSession live Codex resume", () => {
+  it("keeps prior thread history when resuming with a changed runtime mode", async () => {
+    const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "codex-live-resume-"));
+    writeFileSync(path.join(workspaceDir, "README.md"), "hello\n", "utf8");
+
+    const manager = new CodexAppServerManager();
+
+    try {
+      const firstSession = await manager.startSession({
+        threadId: asThreadId("thread-live"),
+        provider: "codex",
+        cwd: workspaceDir,
+        runtimeMode: "full-access",
+        providerOptions: {
+          codex: {
+            ...(process.env.CODEX_BINARY_PATH ? { binaryPath: process.env.CODEX_BINARY_PATH } : {}),
+            ...(process.env.CODEX_HOME_PATH ? { homePath: process.env.CODEX_HOME_PATH } : {}),
+          },
+        },
+      });
+
+      const firstTurn = await manager.sendTurn({
+        threadId: firstSession.threadId,
+        input: `Reply with exactly the word ALPHA ${randomUUID()}`,
+      });
+
+      expect(firstTurn.threadId).toBe(firstSession.threadId);
+
+      await vi.waitFor(
+        async () => {
+          const snapshot = await manager.readThread(firstSession.threadId);
+          expect(snapshot.turns.length).toBeGreaterThan(0);
+        },
+        { timeout: 120_000, interval: 1_000 },
       );
-      writeFileSync(path.join(workspaceDir, "README.md"), "hello\n", "utf8");
 
-      const manager = new CodexAppServerManager();
+      const firstSnapshot = await manager.readThread(firstSession.threadId);
+      const originalThreadId = firstSnapshot.threadId;
+      const originalTurnCount = firstSnapshot.turns.length;
 
-      try {
-        const firstSession = await manager.startSession({
-          threadId: asThreadId("thread-live"),
-          provider: "codex",
-          cwd: workspaceDir,
-          runtimeMode: "full-access",
-          providerOptions: {
-            codex: {
-              ...(process.env.CODEX_BINARY_PATH
-                ? { binaryPath: process.env.CODEX_BINARY_PATH }
-                : {}),
-              ...(process.env.CODEX_HOME_PATH
-                ? { homePath: process.env.CODEX_HOME_PATH }
-                : {}),
-            },
+      manager.stopSession(firstSession.threadId);
+
+      const resumedSession = await manager.startSession({
+        threadId: firstSession.threadId,
+        provider: "codex",
+        cwd: workspaceDir,
+        runtimeMode: "approval-required",
+        resumeCursor: firstSession.resumeCursor,
+        providerOptions: {
+          codex: {
+            ...(process.env.CODEX_BINARY_PATH ? { binaryPath: process.env.CODEX_BINARY_PATH } : {}),
+            ...(process.env.CODEX_HOME_PATH ? { homePath: process.env.CODEX_HOME_PATH } : {}),
           },
-        });
+        },
+      });
 
-        const firstTurn = await manager.sendTurn({
-          threadId: firstSession.threadId,
-          input: `Reply with exactly the word ALPHA ${randomUUID()}`,
-        });
+      expect(resumedSession.threadId).toBe(originalThreadId);
 
-        expect(firstTurn.threadId).toBe(firstSession.threadId);
+      const resumedSnapshotBeforeTurn = await manager.readThread(resumedSession.threadId);
+      expect(resumedSnapshotBeforeTurn.threadId).toBe(originalThreadId);
+      expect(resumedSnapshotBeforeTurn.turns.length).toBeGreaterThanOrEqual(originalTurnCount);
 
-        await vi.waitFor(
-          async () => {
-            const snapshot = await manager.readThread(firstSession.threadId);
-            expect(snapshot.turns.length).toBeGreaterThan(0);
-          },
-          { timeout: 120_000, interval: 1_000 },
-        );
+      await manager.sendTurn({
+        threadId: resumedSession.threadId,
+        input: `Reply with exactly the word BETA ${randomUUID()}`,
+      });
 
-        const firstSnapshot = await manager.readThread(firstSession.threadId);
-        const originalThreadId = firstSnapshot.threadId;
-        const originalTurnCount = firstSnapshot.turns.length;
-
-        manager.stopSession(firstSession.threadId);
-
-        const resumedSession = await manager.startSession({
-          threadId: firstSession.threadId,
-          provider: "codex",
-          cwd: workspaceDir,
-          runtimeMode: "approval-required",
-          resumeCursor: firstSession.resumeCursor,
-          providerOptions: {
-            codex: {
-              ...(process.env.CODEX_BINARY_PATH
-                ? { binaryPath: process.env.CODEX_BINARY_PATH }
-                : {}),
-              ...(process.env.CODEX_HOME_PATH
-                ? { homePath: process.env.CODEX_HOME_PATH }
-                : {}),
-            },
-          },
-        });
-
-        expect(resumedSession.threadId).toBe(originalThreadId);
-
-        const resumedSnapshotBeforeTurn = await manager.readThread(
-          resumedSession.threadId,
-        );
-        expect(resumedSnapshotBeforeTurn.threadId).toBe(originalThreadId);
-        expect(resumedSnapshotBeforeTurn.turns.length).toBeGreaterThanOrEqual(
-          originalTurnCount,
-        );
-
-        await manager.sendTurn({
-          threadId: resumedSession.threadId,
-          input: `Reply with exactly the word BETA ${randomUUID()}`,
-        });
-
-        await vi.waitFor(
-          async () => {
-            const snapshot = await manager.readThread(resumedSession.threadId);
-            expect(snapshot.turns.length).toBeGreaterThan(originalTurnCount);
-          },
-          { timeout: 120_000, interval: 1_000 },
-        );
-      } finally {
-        manager.stopAll();
-        rmSync(workspaceDir, { recursive: true, force: true });
-      }
-    }, 180_000);
-  },
-);
+      await vi.waitFor(
+        async () => {
+          const snapshot = await manager.readThread(resumedSession.threadId);
+          expect(snapshot.turns.length).toBeGreaterThan(originalTurnCount);
+        },
+        { timeout: 120_000, interval: 1_000 },
+      );
+    } finally {
+      manager.stopAll();
+      rmSync(workspaceDir, { recursive: true, force: true });
+    }
+  }, 180_000);
+});

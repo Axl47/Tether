@@ -2,9 +2,13 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import { defineConfig } from "vite";
+import packageJson from "./package.json" with { type: "json" };
 
 const port = Number(process.env.PORT ?? 5733);
-const sourcemapEnv = process.env.T3CODE_WEB_SOURCEMAP?.trim().toLowerCase();
+const sourcemapEnv = (
+  process.env.TETHER_WEB_SOURCEMAP ??
+  process.env.T3CODE_WEB_SOURCEMAP
+)?.trim().toLowerCase();
 
 const buildSourcemap =
   sourcemapEnv === "0" || sourcemapEnv === "false"
@@ -29,9 +33,7 @@ export default defineConfig({
   define: {
     // In dev mode, tell the web app where the WebSocket server lives
     "import.meta.env.VITE_WS_URL": JSON.stringify(process.env.VITE_WS_URL ?? ""),
-  },
-  experimental: {
-    enableNativePlugin: true,
+    "import.meta.env.APP_VERSION": JSON.stringify(packageJson.version),
   },
   resolve: {
     tsconfigPaths: true,

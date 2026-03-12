@@ -253,7 +253,7 @@ describe("ProviderCommandReactor", () => {
     );
     scope = await Effect.runPromise(Scope.make("sequential"));
     await Effect.runPromise(reactor.start.pipe(Scope.provide(scope)));
-    await Effect.runPromise(Effect.sleep("10 millis"));
+    const drain = () => Effect.runPromise(reactor.drain);
 
     await Effect.runPromise(
       engine.dispatch({
@@ -293,6 +293,7 @@ describe("ProviderCommandReactor", () => {
       renameBranch,
       generateBranchName,
       stateDir,
+      drain,
     };
   }
 
@@ -622,7 +623,7 @@ describe("ProviderCommandReactor", () => {
       return thread?.runtimeMode === "approval-required";
     });
     await waitFor(() => harness.startSession.mock.calls.length === 2);
-    await Effect.runPromise(Effect.sleep("30 millis"));
+    await harness.drain();
 
     expect(harness.stopSession.mock.calls.length).toBe(0);
     expect(harness.sendTurn.mock.calls.length).toBe(1);

@@ -8,6 +8,7 @@ import {
   TerminalCloseInput,
   TerminalOpenInput,
   TerminalResizeInput,
+  TerminalRestartInput,
   TerminalWriteInput,
   type TerminalEvent,
   type TerminalSessionSnapshot,
@@ -46,6 +47,7 @@ const TERMINAL_ENV_BLOCKLIST = new Set([
 ]);
 
 const decodeTerminalOpenInput = Schema.decodeUnknownSync(TerminalOpenInput);
+const decodeTerminalRestartInput = Schema.decodeUnknownSync(TerminalRestartInput);
 const decodeTerminalWriteInput = Schema.decodeUnknownSync(TerminalWriteInput);
 const decodeTerminalResizeInput = Schema.decodeUnknownSync(TerminalResizeInput);
 const decodeTerminalClearInput = Schema.decodeUnknownSync(TerminalClearInput);
@@ -525,8 +527,8 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
     });
   }
 
-  async restart(raw: TerminalOpenInput): Promise<TerminalSessionSnapshot> {
-    const input = decodeTerminalOpenInput(raw);
+  async restart(raw: TerminalRestartInput): Promise<TerminalSessionSnapshot> {
+    const input = decodeTerminalRestartInput(raw);
     return this.runWithThreadLock(input.threadId, async () => {
       await this.assertValidCwd(input.cwd);
 
