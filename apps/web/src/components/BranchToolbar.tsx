@@ -1,4 +1,4 @@
-import type { ThreadId } from "@t3tools/contracts";
+import type { RuntimeMode, ThreadId } from "@t3tools/contracts";
 import { useCallback } from "react";
 
 import { newCommandId } from "../lib/utils";
@@ -11,11 +11,14 @@ import {
   resolveEffectiveEnvMode,
 } from "./BranchToolbar.logic";
 import { BranchToolbarBranchSelector } from "./BranchToolbarBranchSelector";
+import RuntimeModeToggle from "./RuntimeModeToggle";
 import { Button } from "./ui/button";
 
 interface BranchToolbarProps {
   threadId: ThreadId;
   onEnvModeChange: (mode: EnvMode) => void;
+  runtimeMode: RuntimeMode;
+  onRuntimeModeChange: (mode: RuntimeMode) => void;
   envLocked: boolean;
   onCheckoutPullRequestRequest?: (reference: string) => void;
   onComposerFocusRequest?: () => void;
@@ -24,6 +27,8 @@ interface BranchToolbarProps {
 export default function BranchToolbar({
   threadId,
   onEnvModeChange,
+  runtimeMode,
+  onRuntimeModeChange,
   envLocked,
   onCheckoutPullRequestRequest,
   onComposerFocusRequest,
@@ -120,6 +125,12 @@ export default function BranchToolbar({
             {effectiveEnvMode === "worktree" ? "New worktree" : "Local"}
           </Button>
         )}
+        <RuntimeModeToggle
+          runtimeMode={runtimeMode}
+          onChange={onRuntimeModeChange}
+          size="xs"
+          className="text-muted-foreground/70 hover:text-foreground/80"
+        />
       </div>
 
       <BranchToolbarBranchSelector

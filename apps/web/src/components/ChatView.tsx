@@ -127,6 +127,7 @@ import { summarizeTurnDiffStats } from "../lib/turnDiffTree";
 import BranchToolbar from "./BranchToolbar";
 import GitActionsControl from "./GitActionsControl";
 import PlanSidebar from "./PlanSidebar";
+import RuntimeModeToggle from "./RuntimeModeToggle";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import ChatMarkdown from "./ChatMarkdown";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
@@ -146,8 +147,6 @@ import {
   LoaderCircleIcon,
   ListTodoIcon,
   ImagePlusIcon,
-  LockIcon,
-  LockOpenIcon,
   MessageSquareIcon,
   Undo2Icon,
   XIcon,
@@ -4498,31 +4497,21 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         </span>
                       </Button>
 
-                      {/* Divider */}
-                      <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
-
-                      {/* Runtime mode toggle */}
-                      <Button
-                        variant="ghost"
-                        className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
-                        size="sm"
-                        type="button"
-                        onClick={() =>
-                          void handleRuntimeModeChange(
-                            runtimeMode === "full-access" ? "approval-required" : "full-access",
-                          )
-                        }
-                        title={
-                          runtimeMode === "full-access"
-                            ? "Full access — click to require approvals"
-                            : "Approval required — click for full access"
-                        }
-                      >
-                        {runtimeMode === "full-access" ? <LockOpenIcon /> : <LockIcon />}
-                        <span className="sr-only sm:not-sr-only">
-                          {runtimeMode === "full-access" ? "Full access" : "Supervised"}
-                        </span>
-                      </Button>
+                      {!isGitRepo ? (
+                        <>
+                          {/* Divider */}
+                          <Separator
+                            orientation="vertical"
+                            className="mx-0.5 hidden h-4 sm:block"
+                          />
+                          <RuntimeModeToggle
+                            runtimeMode={runtimeMode}
+                            onChange={handleRuntimeModeChange}
+                            size="sm"
+                            className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
+                          />
+                        </>
+                      ) : null}
                       {!isComposerApprovalState && pendingUserInputs.length === 0 ? (
                         <>
                           <Separator
@@ -4749,6 +4738,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
         <BranchToolbar
           threadId={activeThread.id}
           onEnvModeChange={onEnvModeChange}
+          runtimeMode={runtimeMode}
+          onRuntimeModeChange={handleRuntimeModeChange}
           envLocked={envLocked}
           onComposerFocusRequest={scheduleComposerFocus}
         />
