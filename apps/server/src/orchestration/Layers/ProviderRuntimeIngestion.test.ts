@@ -908,15 +908,14 @@ describe("ProviderRuntimeIngestion", () => {
     const thread = await waitForThread(
       harness.engine,
       (entry) =>
-        entry.contextWindow?.provider === "claudeCode" &&
-        entry.contextWindow.usedTokens === 109_000,
+        entry.contextWindow?.provider === "claudeCode" && entry.contextWindow.usedTokens === 89_000,
     );
     expect(thread.contextWindow).toMatchObject({
       provider: "claudeCode",
-      usedTokens: 109_000,
+      usedTokens: 89_000,
       maxTokens: 200_000,
-      remainingTokens: 91_000,
-      usedPercent: 55,
+      remainingTokens: 111_000,
+      usedPercent: 45,
       inputTokens: 85_000,
       cachedInputTokens: 20_000,
       outputTokens: 4_000,

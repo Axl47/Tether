@@ -1,6 +1,11 @@
 import type { OrchestrationContextWindow } from "@t3tools/contracts";
 
-import { asNonNegativeInteger, asRecord, clampPercent } from "./contextWindowCommon.ts";
+import {
+  asNonNegativeInteger,
+  asRecord,
+  clampPercent,
+  resolveContextUsedTokens,
+} from "./contextWindowCommon.ts";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -81,17 +86,11 @@ export function normalizeCodexContextWindow(
   const infoTokenUsage = asRecord(pickValue(info, ["tokenUsage", "token_usage"]));
   const records = compactRecords([payload, info, tokenUsage, infoTokenUsage]);
   const totalUsage = resolveTotalUsageRecord(records);
-  const usedTokens = pickNumber(totalUsage, ["total_tokens", "totalTokens"]);
   const maxTokens = pickFirstNumber(records, [
     "model_context_window",
     "modelContextWindow",
     "context_window",
   ]);
-
-  if (usedTokens === undefined || maxTokens === undefined || maxTokens <= 0) {
-    return null;
-  }
-
   const inputTokens = pickNumber(totalUsage, ["input_tokens", "inputTokens"]);
   const cachedInputTokens = pickNumber(totalUsage, ["cached_input_tokens", "cachedInputTokens"]);
   const outputTokens = pickNumber(totalUsage, ["output_tokens", "outputTokens"]);
@@ -99,6 +98,19 @@ export function normalizeCodexContextWindow(
     "reasoning_output_tokens",
     "reasoningOutputTokens",
   ]);
+  const usedTokens = resolveContextUsedTokens({
+    totalTokens: pickNumber(totalUsage, ["total_tokens", "totalTokens"]),
+    inputTokens,
+    cachedInputTokens,
+    outputTokens,
+    reasoningOutputTokens,
+    maxTokens,
+  });
+
+  if (usedTokens === undefined || maxTokens === undefined || maxTokens <= 0) {
+    return null;
+  }
+
   const remainingTokens = Math.max(0, maxTokens - usedTokens);
   const usedPercent = clampPercent((usedTokens / maxTokens) * 100);
 

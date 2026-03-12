@@ -30,10 +30,10 @@ describe("normalizeClaudeContextWindow", () => {
       ),
     ).toEqual({
       provider: "claudeCode",
-      usedTokens: 109_000,
+      usedTokens: 89_000,
       maxTokens: 200_000,
-      remainingTokens: 91_000,
-      usedPercent: 55,
+      remainingTokens: 111_000,
+      usedPercent: 45,
       inputTokens: 85_000,
       cachedInputTokens: 20_000,
       outputTokens: 4_000,
@@ -62,10 +62,10 @@ describe("normalizeClaudeContextWindow", () => {
       ),
     ).toEqual({
       provider: "claudeCode",
-      usedTokens: 65_000,
+      usedTokens: 55_000,
       maxTokens: 180_000,
-      remainingTokens: 115_000,
-      usedPercent: 36,
+      remainingTokens: 125_000,
+      usedPercent: 31,
       inputTokens: 53_000,
       cachedInputTokens: 10_000,
       outputTokens: 2_000,
@@ -126,5 +126,28 @@ describe("normalizeClaudeContextWindow", () => {
         "2026-03-10T00:00:00.000Z",
       ),
     ).toBeNull();
+  });
+
+  it("drops cache-read tokens from occupancy when total_tokens includes them", () => {
+    expect(
+      normalizeClaudeContextWindow(
+        {
+          usage: {
+            total_tokens: 109_000,
+            input_tokens: 80_000,
+            cache_creation_input_tokens: 5_000,
+            cache_read_input_tokens: 20_000,
+            output_tokens: 4_000,
+            context_window: 200_000,
+          },
+        },
+        "2026-03-10T00:00:00.000Z",
+      ),
+    ).toMatchObject({
+      usedTokens: 89_000,
+      remainingTokens: 111_000,
+      usedPercent: 45,
+      cachedInputTokens: 20_000,
+    });
   });
 });

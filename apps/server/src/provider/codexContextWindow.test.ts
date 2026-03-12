@@ -138,6 +138,33 @@ describe("normalizeCodexContextWindow", () => {
     });
   });
 
+  it("excludes cached input tokens when totals include them", () => {
+    expect(
+      normalizeCodexContextWindow(
+        {
+          tokenUsage: {
+            totalTokens: 115,
+            inputTokens: 80,
+            cachedInputTokens: 20,
+            outputTokens: 15,
+            modelContextWindow: 258400,
+          },
+        },
+        "2026-03-07T00:00:00.000Z",
+      ),
+    ).toEqual({
+      provider: "codex",
+      usedTokens: 95,
+      maxTokens: 258400,
+      remainingTokens: 258305,
+      usedPercent: 0,
+      inputTokens: 80,
+      cachedInputTokens: 20,
+      outputTokens: 15,
+      updatedAt: "2026-03-07T00:00:00.000Z",
+    });
+  });
+
   it("carries bucket fields from root-level totals objects", () => {
     expect(
       normalizeCodexContextWindow(
@@ -164,6 +191,31 @@ describe("normalizeCodexContextWindow", () => {
       outputTokens: 15,
       reasoningOutputTokens: 5,
       updatedAt: "2026-03-07T00:00:00.000Z",
+    });
+  });
+
+  it("prefers the live context footprint over oversized cumulative totals", () => {
+    expect(
+      normalizeCodexContextWindow(
+        {
+          tokenUsage: {
+            total: {
+              totalTokens: 9_300_000,
+              inputTokens: 248_000,
+              cachedInputTokens: 2_400_000,
+              outputTokens: 10_000,
+            },
+            modelContextWindow: 258_000,
+          },
+        },
+        "2026-03-07T00:00:00.000Z",
+      ),
+    ).toMatchObject({
+      usedTokens: 258_000,
+      maxTokens: 258_000,
+      remainingTokens: 0,
+      usedPercent: 100,
+      cachedInputTokens: 2_400_000,
     });
   });
 
