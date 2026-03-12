@@ -145,7 +145,6 @@ import {
   GripVerticalIcon,
   LoaderCircleIcon,
   ListTodoIcon,
-  GitCommitIcon,
   ImagePlusIcon,
   LockIcon,
   LockOpenIcon,
@@ -4958,32 +4957,6 @@ const ChatHeaderDropdown = memo(function ChatHeaderDropdown({
   );
 });
 
-const ChatHeaderGitButton = memo(function ChatHeaderGitButton({
-  activeThreadId,
-  gitCwd,
-  availableEditors,
-}: {
-  activeThreadId: ThreadId;
-  gitCwd: string | null;
-  availableEditors: ReadonlyArray<EditorId>;
-}) {
-  return (
-    <Menu>
-      <MenuTrigger render={<Button aria-label="Git" size="icon-xs" variant="outline" />}>
-        <GitCommitIcon className="size-3.5" />
-      </MenuTrigger>
-      <MenuPopup align="end" className="min-w-48" keepMounted>
-        <GitActionsControl
-          gitCwd={gitCwd}
-          activeThreadId={activeThreadId}
-          availableEditors={availableEditors}
-          mode="menu-items"
-        />
-      </MenuPopup>
-    </Menu>
-  );
-});
-
 const ActionsDropdownContent = memo(function ActionsDropdownContent({
   scripts,
   keybindings,
@@ -5179,10 +5152,11 @@ const ChatHeader = memo(function ChatHeader({
           />
         )}
         {activeProjectName && isGitRepo ? (
-          <ChatHeaderGitButton
+          <GitActionsControl
             activeThreadId={activeThreadId}
             gitCwd={gitCwd}
             availableEditors={availableEditors}
+            mode="menu-button"
           />
         ) : null}
         <Tooltip>

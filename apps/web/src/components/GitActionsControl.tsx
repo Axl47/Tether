@@ -47,7 +47,7 @@ interface GitActionsControlProps {
   gitCwd: string | null;
   activeThreadId: ThreadId | null;
   availableEditors: ReadonlyArray<EditorId>;
-  mode?: "toolbar" | "menu-items";
+  mode?: "toolbar" | "menu-button" | "menu-items";
 }
 
 interface PendingDefaultBranchAction {
@@ -734,6 +734,29 @@ export default function GitActionsControl({
               </MenuPopup>
             </Menu>
           </Group>
+        )
+      ) : mode === "menu-button" ? (
+        !isRepo ? (
+          <Button
+            variant="ghost"
+            disabled={initMutation.isPending}
+            onClick={() => initMutation.mutate()}
+          >
+            {initMutation.isPending ? "Initializing..." : "Initialize Git"}
+          </Button>
+        ) : (
+          <Menu
+            onOpenChange={(open) => {
+              if (open) void invalidateGitQueries(queryClient);
+            }}
+          >
+            <MenuTrigger render={<Button aria-label="Git" size="icon-xs" variant="outline" />}>
+              <GitCommitIcon className="size-3.5" />
+            </MenuTrigger>
+            <MenuPopup align="end" className="min-w-48">
+              {gitMenuContent}
+            </MenuPopup>
+          </Menu>
         )
       ) : !isRepo ? (
         <Button
