@@ -56,12 +56,14 @@ function makeSnapshot(input: {
           completedAt: "2026-01-01T00:00:00.000Z",
           assistantMessageId: null,
         },
+        lastAutoRenameUserMessageId: null,
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
         deletedAt: null,
         messages: [],
         activities: [],
         proposedPlans: [],
+        contextWindow: null,
         checkpoints: [
           {
             turnId: TurnId.makeUnsafe("turn-1"),

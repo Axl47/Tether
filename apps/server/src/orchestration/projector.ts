@@ -14,6 +14,7 @@ import {
   ProjectDeletedPayload,
   ProjectMetaUpdatedPayload,
   ThreadActivityAppendedPayload,
+  ThreadContextWindowSetPayload,
   ThreadCreatedPayload,
   ThreadDeletedPayload,
   ThreadInteractionModeSetPayload,
@@ -258,10 +259,13 @@ export function projectEvent(
             branch: payload.branch,
             worktreePath: payload.worktreePath,
             latestTurn: null,
+            lastAutoRenameUserMessageId: null,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
             deletedAt: null,
             messages: [],
+            proposedPlans: [],
+            contextWindow: null,
             activities: [],
             checkpoints: [],
             session: null,
@@ -298,6 +302,9 @@ export function projectEvent(
             ...(payload.model !== undefined ? { model: payload.model } : {}),
             ...(payload.branch !== undefined ? { branch: payload.branch } : {}),
             ...(payload.worktreePath !== undefined ? { worktreePath: payload.worktreePath } : {}),
+            ...(payload.lastAutoRenameUserMessageId !== undefined
+              ? { lastAutoRenameUserMessageId: payload.lastAutoRenameUserMessageId }
+              : {}),
             updatedAt: payload.updatedAt,
           }),
         })),
@@ -472,6 +479,22 @@ export function projectEvent(
         };
       });
 
+    case "thread.context-window-set":
+      return decodeForEvent(
+        ThreadContextWindowSetPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            contextWindow: payload.contextWindow,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
     case "thread.turn-diff-completed":
       return Effect.gen(function* () {
         const payload = yield* decodeForEvent(
@@ -584,6 +607,7 @@ export function projectEvent(
               messages,
               proposedPlans,
               activities,
+              contextWindow: null,
               latestTurn,
               updatedAt: event.occurredAt,
             }),

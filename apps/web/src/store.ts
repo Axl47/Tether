@@ -6,15 +6,11 @@ import {
   type OrchestrationReadModel,
   type OrchestrationSessionStatus,
 } from "@t3tools/contracts";
-import {
-  getModelOptions,
-  normalizeModelSlug,
-  resolveModelSlug,
-  resolveModelSlugForProvider,
-} from "@t3tools/shared/model";
+import { resolveModelSlug, resolveModelSlugForProvider } from "@t3tools/shared/model";
+import { Debouncer } from "@tanstack/react-pacer";
 import { create } from "zustand";
 import { type ChatMessage, type Project, type Thread } from "./types";
-import { Debouncer } from "@tanstack/react-pacer";
+import { inferProviderForThreadModel } from "./threadSelectionDefaults";
 
 // ── State ────────────────────────────────────────────────────────────
 
@@ -193,24 +189,8 @@ function toLegacySessionStatus(
 }
 
 function toLegacyProvider(providerName: string | null): ProviderKind {
-  if (providerName === "codex") {
+  if (providerName === "codex" || providerName === "claudeCode" || providerName === "gemini") {
     return providerName;
-  }
-  return "codex";
-}
-
-const CODEX_MODEL_SLUGS = new Set<string>(getModelOptions("codex").map((option) => option.slug));
-
-function inferProviderForThreadModel(input: {
-  readonly model: string;
-  readonly sessionProviderName: string | null;
-}): ProviderKind {
-  if (input.sessionProviderName === "codex") {
-    return input.sessionProviderName;
-  }
-  const normalizedCodex = normalizeModelSlug(input.model, "codex");
-  if (normalizedCodex && CODEX_MODEL_SLUGS.has(normalizedCodex)) {
-    return "codex";
   }
   return "codex";
 }
@@ -311,6 +291,7 @@ export function syncServerReadModel(state: AppState, readModel: OrchestrationRea
           createdAt: proposedPlan.createdAt,
           updatedAt: proposedPlan.updatedAt,
         })),
+        contextWindow: thread.contextWindow,
         error: thread.session?.lastError ?? null,
         createdAt: thread.createdAt,
         updatedAt: thread.updatedAt,

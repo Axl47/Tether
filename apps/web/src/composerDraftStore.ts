@@ -301,7 +301,7 @@ function hasSendableDraftContent(
 }
 
 function normalizeProviderKind(value: unknown): ProviderKind | null {
-  return value === "codex" ? value : null;
+  return value === "codex" || value === "claudeCode" || value === "gemini" ? value : null;
 }
 
 function revokeObjectPreviewUrl(previewUrl: string): void {
@@ -806,7 +806,8 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
               options?.envMode ??
               (nextWorktreePath ? "worktree" : (existingThread?.envMode ?? "local")),
           };
-          const hasSameProjectMapping = previousThreadIdForProject === threadId;
+          const hasSameProjectMapping =
+            state.projectDraftThreadIdByProjectId[projectId] === threadId;
           const hasSameDraftThread =
             existingThread &&
             existingThread.projectId === nextDraftThread.projectId &&
@@ -827,18 +828,12 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             ...state.draftThreadsByThreadId,
             [threadId]: nextDraftThread,
           };
-          let nextDraftsByThreadId = state.draftsByThreadId;
           let nextQueuedMessagesByThreadId = state.queuedMessagesByThreadId;
           if (
             previousThreadIdForProject &&
             previousThreadIdForProject !== threadId &&
             !Object.values(nextProjectDraftThreadIdByProjectId).includes(previousThreadIdForProject)
           ) {
-            delete nextDraftThreadsByThreadId[previousThreadIdForProject];
-            if (state.draftsByThreadId[previousThreadIdForProject] !== undefined) {
-              nextDraftsByThreadId = { ...state.draftsByThreadId };
-              delete nextDraftsByThreadId[previousThreadIdForProject];
-            }
             if (state.queuedMessagesByThreadId[previousThreadIdForProject] !== undefined) {
               revokeComposerImages(
                 state.queuedMessagesByThreadId[previousThreadIdForProject]!.flatMap(
@@ -852,7 +847,6 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             }
           }
           return {
-            draftsByThreadId: nextDraftsByThreadId,
             queuedMessagesByThreadId: nextQueuedMessagesByThreadId,
             draftThreadsByThreadId: nextDraftThreadsByThreadId,
             projectDraftThreadIdByProjectId: nextProjectDraftThreadIdByProjectId,
@@ -930,17 +924,8 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           const { [projectId]: _removed, ...restProjectMappingsRaw } =
             state.projectDraftThreadIdByProjectId;
           const restProjectMappings = restProjectMappingsRaw as Record<ProjectId, ThreadId>;
-          const nextDraftThreadsByThreadId: Record<ThreadId, DraftThreadState> = {
-            ...state.draftThreadsByThreadId,
-          };
-          let nextDraftsByThreadId = state.draftsByThreadId;
           let nextQueuedMessagesByThreadId = state.queuedMessagesByThreadId;
           if (!Object.values(restProjectMappings).includes(threadId)) {
-            delete nextDraftThreadsByThreadId[threadId];
-            if (state.draftsByThreadId[threadId] !== undefined) {
-              nextDraftsByThreadId = { ...state.draftsByThreadId };
-              delete nextDraftsByThreadId[threadId];
-            }
             if (state.queuedMessagesByThreadId[threadId] !== undefined) {
               revokeComposerImages(
                 state.queuedMessagesByThreadId[threadId]!.flatMap(
@@ -954,9 +939,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             }
           }
           return {
-            draftsByThreadId: nextDraftsByThreadId,
             queuedMessagesByThreadId: nextQueuedMessagesByThreadId,
-            draftThreadsByThreadId: nextDraftThreadsByThreadId,
             projectDraftThreadIdByProjectId: restProjectMappings,
           };
         });
@@ -972,17 +955,8 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           const { [projectId]: _removed, ...restProjectMappingsRaw } =
             state.projectDraftThreadIdByProjectId;
           const restProjectMappings = restProjectMappingsRaw as Record<ProjectId, ThreadId>;
-          const nextDraftThreadsByThreadId: Record<ThreadId, DraftThreadState> = {
-            ...state.draftThreadsByThreadId,
-          };
-          let nextDraftsByThreadId = state.draftsByThreadId;
           let nextQueuedMessagesByThreadId = state.queuedMessagesByThreadId;
           if (!Object.values(restProjectMappings).includes(threadId)) {
-            delete nextDraftThreadsByThreadId[threadId];
-            if (state.draftsByThreadId[threadId] !== undefined) {
-              nextDraftsByThreadId = { ...state.draftsByThreadId };
-              delete nextDraftsByThreadId[threadId];
-            }
             if (state.queuedMessagesByThreadId[threadId] !== undefined) {
               revokeComposerImages(
                 state.queuedMessagesByThreadId[threadId]!.flatMap(
@@ -996,9 +970,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             }
           }
           return {
-            draftsByThreadId: nextDraftsByThreadId,
             queuedMessagesByThreadId: nextQueuedMessagesByThreadId,
-            draftThreadsByThreadId: nextDraftThreadsByThreadId,
             projectDraftThreadIdByProjectId: restProjectMappings,
           };
         });
@@ -1086,9 +1058,9 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
         if (threadId.length === 0) {
           return;
         }
-        const normalizedModel = normalizeModelSlug(model) ?? null;
         set((state) => {
           const existing = state.draftsByThreadId[threadId];
+          const normalizedModel = normalizeModelSlug(model, existing?.provider ?? "codex") ?? null;
           if (!existing && normalizedModel === null) {
             return state;
           }

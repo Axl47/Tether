@@ -4,7 +4,12 @@ import { useCallback, useState } from "react";
 import { type ProviderKind } from "@t3tools/contracts";
 import { getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
 
-import { MAX_CUSTOM_MODEL_LENGTH, useAppSettings } from "../appSettings";
+import {
+  MAX_CUSTOM_MODEL_LENGTH,
+  getCustomModelsForProvider,
+  patchCustomModelsForProvider,
+  useAppSettings,
+} from "../appSettings";
 import { isElectron } from "../env";
 import { useTheme } from "../hooks/useTheme";
 import { serverConfigQueryOptions } from "../lib/serverReactQuery";
@@ -48,37 +53,21 @@ const MODEL_PROVIDER_SETTINGS: Array<{
     placeholder: "your-codex-model-slug",
     example: "gpt-6.7-codex-ultra-preview",
   },
+  {
+    provider: "claudeCode",
+    title: "Claude Code",
+    description: "Save additional Claude model slugs for the picker and `/model` command.",
+    placeholder: "your-claude-model-slug",
+    example: "claude-sonnet-5-0",
+  },
+  {
+    provider: "gemini",
+    title: "Gemini",
+    description: "Save additional Gemini model slugs for the picker and `/model` command.",
+    placeholder: "your-gemini-model-slug",
+    example: "gemini-3.1-pro-preview-customtools",
+  },
 ] as const;
-
-function getCustomModelsForProvider(
-  settings: ReturnType<typeof useAppSettings>["settings"],
-  provider: ProviderKind,
-) {
-  switch (provider) {
-    case "codex":
-    default:
-      return settings.customCodexModels;
-  }
-}
-
-function getDefaultCustomModelsForProvider(
-  defaults: ReturnType<typeof useAppSettings>["defaults"],
-  provider: ProviderKind,
-) {
-  switch (provider) {
-    case "codex":
-    default:
-      return defaults.customCodexModels;
-  }
-}
-
-function patchCustomModels(provider: ProviderKind, models: string[]) {
-  switch (provider) {
-    case "codex":
-    default:
-      return { customCodexModels: models };
-  }
-}
 
 function SettingsRouteView() {
   const { theme, setTheme, resolvedTheme } = useTheme();
@@ -90,6 +79,8 @@ function SettingsRouteView() {
     Record<ProviderKind, string>
   >({
     codex: "",
+    claudeCode: "",
+    gemini: "",
   });
   const [customModelErrorByProvider, setCustomModelErrorByProvider] = useState<
     Partial<Record<ProviderKind, string | null>>
@@ -150,7 +141,7 @@ function SettingsRouteView() {
         return;
       }
 
-      updateSettings(patchCustomModels(provider, [...customModels, normalized]));
+      updateSettings(patchCustomModelsForProvider(provider, [...customModels, normalized]));
       setCustomModelInputByProvider((existing) => ({
         ...existing,
         [provider]: "",
@@ -167,7 +158,7 @@ function SettingsRouteView() {
     (provider: ProviderKind, slug: string) => {
       const customModels = getCustomModelsForProvider(settings, provider);
       updateSettings(
-        patchCustomModels(
+        patchCustomModelsForProvider(
           provider,
           customModels.filter((model) => model !== slug),
         ),
@@ -181,7 +172,7 @@ function SettingsRouteView() {
   );
 
   return (
-    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate">
+    <SidebarInset className="h-[var(--app-viewport-height)] min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
         {isElectron && (
           <div className="drag-region flex h-[52px] shrink-0 items-center border-b border-border px-5">
@@ -393,8 +384,8 @@ function SettingsRouteView() {
                                 variant="outline"
                                 onClick={() =>
                                   updateSettings(
-                                    patchCustomModels(provider, [
-                                      ...getDefaultCustomModelsForProvider(defaults, provider),
+                                    patchCustomModelsForProvider(provider, [
+                                      ...getCustomModelsForProvider(defaults, provider),
                                     ]),
                                   )
                                 }

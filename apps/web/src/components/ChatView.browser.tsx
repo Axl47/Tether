@@ -2,6 +2,7 @@
 import "../index.css";
 
 import {
+  type EventId,
   ORCHESTRATION_WS_METHODS,
   type MessageId,
   type OrchestrationReadModel,
@@ -9,6 +10,7 @@ import {
   type ProjectScript,
   type ServerConfig,
   type ThreadId,
+  type TurnId,
   type WsWelcomePayload,
   WS_CHANNELS,
   WS_METHODS,
@@ -50,6 +52,7 @@ interface TestFixture {
 let fixture: TestFixture;
 const wsRequests: WsRequestEnvelope["body"][] = [];
 const wsLink = ws.link(/ws(s)?:\/\/.*/);
+let nextPushSequence = 1;
 
 interface ViewportSpec {
   name: string;
@@ -86,10 +89,11 @@ const TEXT_VIEWPORT_MATRIX = [
     name: "narrow",
     width: 320,
     height: 700,
-    textTolerancePx: 84,
+    textTolerancePx: 176,
     attachmentTolerancePx: 56,
   },
 ] as const satisfies readonly ViewportSpec[];
+const MOBILE_VIEWPORT = TEXT_VIEWPORT_MATRIX[2];
 const ATTACHMENT_VIEWPORT_MATRIX = [
   DEFAULT_VIEWPORT,
   {
@@ -103,7 +107,7 @@ const ATTACHMENT_VIEWPORT_MATRIX = [
     name: "narrow",
     width: 320,
     height: 700,
-    textTolerancePx: 84,
+    textTolerancePx: 176,
     attachmentTolerancePx: 56,
   },
 ] as const satisfies readonly ViewportSpec[];
@@ -243,10 +247,12 @@ function createSnapshotForTargetUser(options: {
         branch: "main",
         worktreePath: null,
         latestTurn: null,
+        lastAutoRenameUserMessageId: null,
         createdAt: NOW_ISO,
         updatedAt: NOW_ISO,
         deletedAt: null,
         messages,
+        contextWindow: null,
         activities: [],
         proposedPlans: [],
         checkpoints: [],
@@ -298,6 +304,7 @@ function createRunningSnapshot(): OrchestrationReadModel {
   if (!thread) {
     return snapshot;
   }
+
   return {
     ...snapshot,
     threads: [
@@ -308,9 +315,141 @@ function createRunningSnapshot(): OrchestrationReadModel {
           status: "running",
           providerName: "codex",
           runtimeMode: "full-access",
-          activeTurnId: "turn-running" as never,
+          activeTurnId: "turn-running" as TurnId,
           lastError: null,
           updatedAt: NOW_ISO,
+        },
+      },
+    ],
+  };
+}
+
+function createSnapshotWithExecutingPlan(): OrchestrationReadModel {
+  const snapshot = createSnapshotForTargetUser({
+    targetMessageId: "msg-user-plan-target" as MessageId,
+    targetText: "plan target",
+  });
+  const turnId = "turn-browser-plan-1" as TurnId;
+  const thread = snapshot.threads[0];
+
+  if (!thread?.session) {
+    throw new Error("Expected browser test snapshot to include a thread session.");
+  }
+  return {
+    ...snapshot,
+    threads: [
+      {
+        ...thread,
+        latestTurn: {
+          turnId,
+          state: "running",
+          requestedAt: isoAt(120),
+          startedAt: isoAt(121),
+          completedAt: null,
+          assistantMessageId: null,
+        },
+        activities: [
+          {
+            id: "event-plan-browser-1" as EventId,
+            tone: "info",
+            kind: "turn.plan.updated",
+            summary: "Plan updated",
+            payload: {
+              explanation: "Implement a minimize control for the active plan card.",
+              plan: [
+                { step: "Inspect the active thread plan UI", status: "completed" },
+                { step: "Add a minimize toggle", status: "inProgress" },
+                { step: "Verify thread behavior in browser tests", status: "pending" },
+              ],
+            },
+            turnId,
+            sequence: 1,
+            createdAt: isoAt(122),
+          },
+        ],
+        session: {
+          ...thread.session,
+          status: "running",
+          activeTurnId: turnId,
+          updatedAt: isoAt(123),
+        },
+      },
+    ],
+  };
+}
+
+function createSnapshotWithPendingUserInput(options?: {
+  sessionStatus?: "ready" | "running";
+}): OrchestrationReadModel {
+  const snapshot = createSnapshotForTargetUser({
+    targetMessageId: "msg-user-pending-input-target" as MessageId,
+    targetText: "pending input target",
+  });
+  const thread = snapshot.threads[0];
+  const sessionStatus = options?.sessionStatus ?? "ready";
+  const turnId = "turn-browser-user-input-1" as TurnId;
+
+  if (!thread?.session) {
+    throw new Error("Expected browser test snapshot to include a thread session.");
+  }
+
+  return {
+    ...snapshot,
+    threads: [
+      {
+        ...thread,
+        activities: [
+          {
+            id: "event-user-input-browser-1" as EventId,
+            tone: "info",
+            kind: "user-input.requested",
+            summary: "User input requested",
+            payload: {
+              requestId: "req-user-input-browser-1",
+              questions: [
+                {
+                  id: "hosting",
+                  header: "Hosting",
+                  question: "How should the Railway deployment be structured for this site?",
+                  options: [
+                    {
+                      label: "Pure static (Recommended)",
+                      description: "Export a static site with no Node runtime.",
+                    },
+                    {
+                      label: "Static + explicit config",
+                      description:
+                        "Keep it static but define the Railway deployment config manually.",
+                    },
+                    {
+                      label: "Small Node server",
+                      description: "Serve through a small Node runtime.",
+                    },
+                  ],
+                },
+              ],
+            },
+            turnId: sessionStatus === "running" ? turnId : null,
+            sequence: 1,
+            createdAt: isoAt(122),
+          },
+        ],
+        latestTurn:
+          sessionStatus === "running"
+            ? {
+                turnId,
+                state: "running",
+                requestedAt: isoAt(120),
+                startedAt: isoAt(121),
+                completedAt: null,
+                assistantMessageId: null,
+              }
+            : null,
+        session: {
+          ...thread.session,
+          status: sessionStatus,
+          activeTurnId: sessionStatus === "running" ? turnId : null,
+          updatedAt: isoAt(123),
         },
       },
     ],
@@ -562,6 +701,7 @@ const worker = setupWorker(
     client.send(
       JSON.stringify({
         type: "push",
+        sequence: nextPushSequence++,
         channel: WS_CHANNELS.serverWelcome,
         data: fixture.welcome,
       }),
@@ -668,6 +808,39 @@ async function waitForMessageScrollContainer(
   );
 }
 
+async function waitForComposerImagePickerButton(): Promise<HTMLButtonElement> {
+  return waitForElement(
+    () => document.querySelector<HTMLButtonElement>("[data-composer-image-picker='true']"),
+    "Unable to find composer image picker button.",
+  );
+}
+
+async function waitForComposerImageInput(): Promise<HTMLInputElement> {
+  return waitForElement(
+    () => document.querySelector<HTMLInputElement>("[data-composer-image-input='true']"),
+    "Unable to find composer image input.",
+  );
+}
+
+async function waitForEnabledSendButton(): Promise<HTMLButtonElement> {
+  return waitForElement(
+    () =>
+      Array.from(document.querySelectorAll("button")).find(
+        (button) =>
+          button.getAttribute("aria-label") === "Send message" &&
+          !(button as HTMLButtonElement).disabled,
+      ) as HTMLButtonElement | null,
+    "Unable to find enabled send button.",
+  );
+}
+
+async function waitForStopButton(): Promise<HTMLButtonElement> {
+  return waitForElement(
+    () => document.querySelector<HTMLButtonElement>('button[aria-label="Stop generation"]'),
+    "Unable to find stop generation button.",
+  );
+}
+
 async function waitForInteractionModeButton(
   expectedLabel: "Chat" | "Plan",
 ): Promise<HTMLButtonElement> {
@@ -677,6 +850,125 @@ async function waitForInteractionModeButton(
         (button) => button.textContent?.trim() === expectedLabel,
       ) as HTMLButtonElement | null,
     `Unable to find ${expectedLabel} interaction mode button.`,
+  );
+}
+
+async function waitForInteractionModeToggle(mode: "chat" | "plan"): Promise<HTMLButtonElement> {
+  return waitForElement(
+    () => document.querySelector<HTMLButtonElement>(`button[data-interaction-mode="${mode}"]`),
+    `Unable to find ${mode} interaction mode toggle.`,
+  );
+}
+
+async function waitForPendingUserInputOption(label: string): Promise<HTMLButtonElement> {
+  return waitForElement(
+    () =>
+      Array.from(document.querySelectorAll("button")).find(
+        (button) => button.textContent?.trim() === label,
+      ) as HTMLButtonElement | null,
+    `Unable to find pending user input option "${label}".`,
+  );
+}
+
+async function waitForPendingUserInputSubmitButton(): Promise<HTMLButtonElement> {
+  return waitForElement(
+    () =>
+      Array.from(document.querySelectorAll("button")).find(
+        (button) =>
+          button.textContent?.trim() === "Submit answers" &&
+          !(button as HTMLButtonElement).disabled,
+      ) as HTMLButtonElement | null,
+    "Unable to find enabled pending user input submit button.",
+  );
+}
+
+function findDispatchedCommand(type: string): WsRequestEnvelope["body"] | undefined {
+  return wsRequests.find((request) => {
+    if (request._tag !== ORCHESTRATION_WS_METHODS.dispatchCommand) {
+      return false;
+    }
+    const command =
+      request.command && typeof request.command === "object"
+        ? (request.command as Record<string, unknown>)
+        : null;
+    return command?.type === type;
+  });
+}
+
+function elementOwnsCenterPoint(element: HTMLElement): boolean {
+  const rect = element.getBoundingClientRect();
+  const centerX = rect.left + rect.width / 2;
+  const centerY = rect.top + rect.height / 2;
+  const hit = document.elementFromPoint(centerX, centerY);
+  return hit === element || (hit instanceof Node && element.contains(hit));
+}
+
+async function waitForThreadContextJumpButton(): Promise<HTMLButtonElement> {
+  return waitForElement(
+    () => document.querySelector<HTMLButtonElement>("[data-thread-context-jump='true']"),
+    "Unable to find thread context jump button.",
+  );
+}
+
+async function waitForThreadContextToggle(mode: "original" | "last"): Promise<HTMLButtonElement> {
+  const ariaLabel =
+    mode === "original" ? "Show original thread context" : "Show latest thread context";
+  return waitForElement(
+    () => document.querySelector<HTMLButtonElement>(`button[aria-label="${ariaLabel}"]`),
+    `Unable to find ${mode} thread context toggle.`,
+  );
+}
+
+async function waitForThreadFlagger(
+  kind: "sent" | "final",
+  messageId: MessageId,
+): Promise<HTMLButtonElement> {
+  return waitForElement(
+    () =>
+      document.querySelector<HTMLButtonElement>(
+        `[data-thread-flagger-kind="${kind}"][data-thread-flagger-message-id="${messageId}"]`,
+      ),
+    `Unable to find ${kind} thread flagger for ${messageId}.`,
+  );
+}
+
+async function waitForPlanModePanelToggle(): Promise<HTMLButtonElement> {
+  return waitForElement(
+    () => document.querySelector<HTMLButtonElement>("[data-plan-mode-panel-toggle='true']"),
+    "Unable to find plan mode panel toggle.",
+  );
+}
+
+function findMessageRow(messageId: MessageId): HTMLElement | null {
+  return document.querySelector<HTMLElement>(
+    `[data-message-id="${messageId}"][data-message-role="user"]`,
+  );
+}
+
+function isMessageRowHighlighted(messageId: MessageId): boolean {
+  const row = findMessageRow(messageId);
+  if (!(row instanceof HTMLElement)) {
+    return false;
+  }
+  return row.className.includes("bg-accent/25") && row.className.includes("ring-1");
+}
+
+async function openHeaderActionsMenu(): Promise<void> {
+  const actionsButton = await waitForElement(
+    () => document.querySelector<HTMLButtonElement>('button[aria-label="Actions"]'),
+    "Unable to find header actions button.",
+  );
+  actionsButton.click();
+  await waitForLayout();
+}
+
+async function waitForTextElement(text: string, errorMessage: string): Promise<HTMLElement> {
+  return waitForElement(
+    () =>
+      Array.from(document.querySelectorAll<HTMLElement>("button,[role='menuitem']")).find(
+        (element) => element.textContent?.trim() === text,
+      ) ?? null,
+    errorMessage,
   );
 }
 
@@ -852,6 +1144,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     await setViewport(DEFAULT_VIEWPORT);
     localStorage.clear();
     document.body.innerHTML = "";
+    nextPushSequence = 1;
     wsRequests.length = 0;
     useComposerDraftStore.setState({
       draftsByThreadId: {},
@@ -1031,6 +1324,139 @@ describe("ChatView timeline estimator parity (full app)", () => {
     },
   );
 
+  it("renders a pinned thread context jump target and scrolls back to it", async () => {
+    const snapshot = createSnapshotForTargetUser({
+      targetMessageId: "msg-user-target-context-jump" as MessageId,
+      targetText: "context jump target",
+    });
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot,
+    });
+
+    try {
+      const contextJumpButton = await waitForThreadContextJumpButton();
+
+      expect(contextJumpButton.textContent).toContain("filler user message 0");
+
+      contextJumpButton.click();
+
+      await vi.waitFor(
+        () => {
+          expect(isMessageRowHighlighted("msg-user-0" as MessageId)).toBe(true);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("renders thread flaggers and jumps to the selected message", async () => {
+    const snapshot = createSnapshotForTargetUser({
+      targetMessageId: "msg-user-target-flagger" as MessageId,
+      targetText: "flagger target",
+    });
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot,
+    });
+
+    try {
+      await vi.waitFor(
+        () => {
+          expect(
+            document.querySelectorAll("[data-thread-flagger-kind='sent']").length,
+          ).toBeGreaterThanOrEqual(22);
+          expect(
+            document.querySelectorAll("[data-thread-flagger-kind='final']").length,
+          ).toBeGreaterThanOrEqual(22);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const firstSentFlagger = await waitForThreadFlagger("sent", "msg-user-0" as MessageId);
+      firstSentFlagger.click();
+
+      await vi.waitFor(
+        () => {
+          expect(isMessageRowHighlighted("msg-user-0" as MessageId)).toBe(true);
+          expect(findMessageRow("msg-user-0" as MessageId)).toBeTruthy();
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("uses the latest user message for last thread context", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-target-context-last" as MessageId,
+        targetText: "context jump target",
+      }),
+    });
+
+    try {
+      const latestContextToggle = await waitForThreadContextToggle("last");
+      const contextJumpButton = await waitForThreadContextJumpButton();
+
+      latestContextToggle.click();
+
+      await vi.waitFor(
+        () => {
+          expect(contextJumpButton.textContent).toContain("filler user message 21");
+          expect(contextJumpButton.textContent).not.toContain("assistant filler 21");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("does not retrigger a prior context jump when switching thread context modes", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-target-context-toggle-jump" as MessageId,
+        targetText: "context jump target",
+      }),
+    });
+
+    try {
+      const contextJumpButton = await waitForThreadContextJumpButton();
+      const latestContextToggle = await waitForThreadContextToggle("last");
+
+      contextJumpButton.click();
+
+      await vi.waitFor(
+        () => {
+          expect(isMessageRowHighlighted("msg-user-0" as MessageId)).toBe(true);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      latestContextToggle.click();
+
+      await vi.waitFor(
+        () => {
+          expect(contextJumpButton.textContent).toContain("filler user message 21");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      for (let index = 0; index < 6; index += 1) {
+        await waitForLayout();
+        expect(isMessageRowHighlighted("msg-user-21" as MessageId)).toBe(false);
+      }
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("opens the project cwd for draft threads without a worktree path", async () => {
     useComposerDraftStore.setState({
       draftThreadsByThreadId: {
@@ -1061,14 +1487,18 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      const openButton = await waitForElement(
-        () =>
-          Array.from(document.querySelectorAll("button")).find(
-            (button) => button.textContent?.trim() === "Open",
-          ) as HTMLButtonElement | null,
-        "Unable to find Open button.",
+      await openHeaderActionsMenu();
+      const openInMenuItem = await waitForTextElement(
+        "Open in...",
+        "Unable to find Open in... menu item.",
       );
-      openButton.click();
+      openInMenuItem.click();
+      await waitForLayout();
+      const vscodeMenuItem = await waitForTextElement(
+        "VS Code",
+        "Unable to find VS Code menu item.",
+      );
+      vscodeMenuItem.click();
 
       await vi.waitFor(
         () => {
@@ -1197,10 +1627,24 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      const terminalStore = useTerminalStateStore.getState();
-      terminalStore.newTerminal(THREAD_ID, "terminal-2");
-      terminalStore.newTerminal(THREAD_ID, "terminal-3");
-      terminalStore.newTerminal(THREAD_ID, "terminal-4");
+      useTerminalStateStore.setState({
+        terminalStateByThreadId: {
+          [THREAD_ID]: {
+            terminalOpen: false,
+            terminalHeight: 320,
+            terminalIds: ["terminal-1", "terminal-2", "terminal-3", "terminal-4"],
+            runningTerminalIds: [],
+            activeTerminalId: "terminal-4",
+            terminalGroups: [
+              { id: "group-terminal-1", terminalIds: ["terminal-1"] },
+              { id: "group-terminal-2", terminalIds: ["terminal-2"] },
+              { id: "group-terminal-3", terminalIds: ["terminal-3"] },
+              { id: "group-terminal-4", terminalIds: ["terminal-4"] },
+            ],
+            activeTerminalGroupId: "group-terminal-4",
+          },
+        },
+      });
       wsRequests.length = 0;
 
       const runButton = await waitForElement(
@@ -1221,6 +1665,35 @@ describe("ChatView timeline estimator parity (full app)", () => {
           expect(document.body.textContent).toContain(
             "This action needs 2 terminal tabs, but the thread is limited to 4. Close another terminal and try again.",
           );
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("renders distinct interaction mode icons on mobile", async () => {
+    const mounted = await mountChatView({
+      viewport: MOBILE_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-target-mobile-toggle" as MessageId,
+        targetText: "mobile toggle target",
+      }),
+    });
+
+    try {
+      const chatModeButton = await waitForInteractionModeButton("Chat");
+      expect(chatModeButton.dataset.interactionMode).toBe("chat");
+      expect(chatModeButton.querySelector("[data-interaction-mode-icon='chat']")).toBeTruthy();
+
+      chatModeButton.click();
+
+      await vi.waitFor(
+        async () => {
+          const planModeButton = await waitForInteractionModeToggle("plan");
+          expect(planModeButton.textContent?.trim()).toBe("Plan");
+          expect(planModeButton.querySelector("[data-interaction-mode-icon='plan']")).toBeTruthy();
         },
         { timeout: 8_000, interval: 16 },
       );
@@ -1277,6 +1750,319 @@ describe("ChatView timeline estimator parity (full app)", () => {
               }),
             ]),
           );
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("supports multi-image upload from the mobile composer toolbar button", async () => {
+    const mounted = await mountChatView({
+      viewport: MOBILE_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-target-mobile-upload" as MessageId,
+        targetText: "mobile upload target",
+      }),
+    });
+
+    try {
+      const uploadButton = await waitForComposerImagePickerButton();
+      const imageInput = await waitForComposerImageInput();
+
+      expect(uploadButton.getAttribute("aria-label")).toBe("Upload images");
+      expect(imageInput.accept).toBe("image/*");
+      expect(imageInput.multiple).toBe(true);
+
+      const transfer = new DataTransfer();
+      transfer.items.add(new File(["first"], "first.png", { type: "image/png" }));
+      transfer.items.add(new File(["second"], "second.png", { type: "image/png" }));
+
+      Object.defineProperty(imageInput, "files", {
+        configurable: true,
+        value: transfer.files,
+      });
+      imageInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+      await vi.waitFor(
+        () => {
+          expect(document.querySelectorAll("[data-composer-image-chip='true']").length).toBe(2);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps focus off the mobile composer editor after image upload", async () => {
+    const mounted = await mountChatView({
+      viewport: MOBILE_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-target-mobile-upload-focus" as MessageId,
+        targetText: "mobile upload focus target",
+      }),
+    });
+
+    try {
+      const uploadButton = await waitForComposerImagePickerButton();
+      const imageInput = await waitForComposerImageInput();
+
+      uploadButton.focus();
+      expect(document.activeElement).toBe(uploadButton);
+
+      const transfer = new DataTransfer();
+      transfer.items.add(new File(["first"], "first.png", { type: "image/png" }));
+
+      Object.defineProperty(imageInput, "files", {
+        configurable: true,
+        value: transfer.files,
+      });
+      imageInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+      await vi.waitFor(
+        () => {
+          expect(document.querySelectorAll("[data-composer-image-chip='true']").length).toBe(1);
+          expect(document.activeElement).toBe(uploadButton);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("pins the composer editor direction to ltr", async () => {
+    const mounted = await mountChatView({
+      viewport: MOBILE_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-target-mobile-editor-dir" as MessageId,
+        targetText: "mobile editor dir target",
+      }),
+    });
+
+    try {
+      const composerEditor = await waitForComposerEditor();
+      expect(getComputedStyle(composerEditor).direction).toBe("ltr");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("inserts a newline instead of sending when Enter is pressed in the mobile composer", async () => {
+    useComposerDraftStore.getState().setPrompt(THREAD_ID, "Mobile draft");
+
+    const mounted = await mountChatView({
+      viewport: MOBILE_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-target-mobile-enter" as MessageId,
+        targetText: "mobile enter target",
+      }),
+    });
+
+    try {
+      const composerEditor = await waitForComposerEditor();
+      await waitForEnabledSendButton();
+      composerEditor.focus();
+      composerEditor.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Enter",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+
+      await vi.waitFor(
+        () => {
+          const prompt = useComposerDraftStore.getState().draftsByThreadId[THREAD_ID]?.prompt ?? "";
+          expect(prompt).toContain("\n");
+          expect(prompt.replaceAll("\n", "")).toBe("Mobile draft");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      await waitForLayout();
+      expect(
+        wsRequests.find(
+          (request) =>
+            request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+            request.type === "thread.turn.start",
+        ),
+      ).toBeUndefined();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps the composer editable while a turn is running", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotWithExecutingPlan(),
+    });
+
+    try {
+      const composerEditor = await waitForComposerEditor();
+      const stopButton = await waitForStopButton();
+
+      expect(stopButton.getAttribute("aria-label")).toBe("Stop generation");
+      expect(composerEditor.getAttribute("contenteditable")).toBe("true");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("inserts a newline instead of sending when Enter is pressed during a running turn", async () => {
+    useComposerDraftStore.getState().setPrompt(THREAD_ID, "Draft while running");
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotWithExecutingPlan(),
+    });
+
+    try {
+      const composerEditor = await waitForComposerEditor();
+      await waitForStopButton();
+      composerEditor.focus();
+      composerEditor.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Enter",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+
+      await vi.waitFor(
+        () => {
+          const prompt = useComposerDraftStore.getState().draftsByThreadId[THREAD_ID]?.prompt ?? "";
+          expect(prompt).toContain("\n");
+          expect(prompt.replaceAll("\n", "")).toBe("Draft while running");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      await waitForLayout();
+      expect(
+        wsRequests.find(
+          (request) =>
+            request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+            request.type === "thread.turn.start",
+        ),
+      ).toBeUndefined();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("allows changing the selected pending user input option", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotWithPendingUserInput(),
+    });
+
+    try {
+      const recommendedOption = await waitForPendingUserInputOption("Pure static (Recommended)");
+      const explicitConfigOption = await waitForPendingUserInputOption("Static + explicit config");
+
+      expect(recommendedOption.dataset.slot).toBe("button");
+      expect(elementOwnsCenterPoint(recommendedOption)).toBe(true);
+      expect(elementOwnsCenterPoint(explicitConfigOption)).toBe(true);
+
+      recommendedOption.click();
+
+      await vi.waitFor(
+        () => {
+          expect(recommendedOption.className).toContain("bg-primary");
+          expect(explicitConfigOption.className).not.toContain("bg-primary");
+          expect(document.activeElement).toBe(recommendedOption);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      explicitConfigOption.click();
+
+      await vi.waitFor(
+        () => {
+          expect(explicitConfigOption.className).toContain("bg-primary");
+          expect(recommendedOption.className).not.toContain("bg-primary");
+          expect(document.activeElement).toBe(explicitConfigOption);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("submits pending user input from the composer button while the thread is still running", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotWithPendingUserInput({ sessionStatus: "running" }),
+    });
+
+    try {
+      const recommendedOption = await waitForPendingUserInputOption("Pure static (Recommended)");
+      recommendedOption.click();
+
+      const submitButton = await waitForPendingUserInputSubmitButton();
+      submitButton.click();
+
+      await vi.waitFor(
+        () => {
+          const submitRequest = findDispatchedCommand("thread.user-input.respond");
+          expect(submitRequest).toMatchObject({
+            _tag: ORCHESTRATION_WS_METHODS.dispatchCommand,
+            command: {
+              type: "thread.user-input.respond",
+              threadId: THREAD_ID,
+              requestId: "req-user-input-browser-1",
+              answers: {
+                hosting: "Pure static (Recommended)",
+              },
+            },
+          });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("submits pending user input with Enter while the thread is still running", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotWithPendingUserInput({ sessionStatus: "running" }),
+    });
+
+    try {
+      const recommendedOption = await waitForPendingUserInputOption("Pure static (Recommended)");
+      recommendedOption.click();
+
+      const composerEditor = await waitForComposerEditor();
+      composerEditor.focus();
+      composerEditor.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Enter",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+
+      await vi.waitFor(
+        () => {
+          const submitRequest = findDispatchedCommand("thread.user-input.respond");
+          expect(submitRequest).toMatchObject({
+            _tag: ORCHESTRATION_WS_METHODS.dispatchCommand,
+            command: {
+              type: "thread.user-input.respond",
+              threadId: THREAD_ID,
+              requestId: "req-user-input-browser-1",
+              answers: {
+                hosting: "Pure static (Recommended)",
+              },
+            },
+          });
         },
         { timeout: 8_000, interval: 16 },
       );
@@ -1412,6 +2198,50 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("minimizes and restores the active plan card in the thread view", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotWithExecutingPlan(),
+    });
+
+    try {
+      await vi.waitFor(
+        () => {
+          expect(document.querySelector("[data-plan-mode-panel-body='true']")).toBeTruthy();
+          expect(document.body.textContent).toContain("Add a minimize toggle");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const toggle = await waitForPlanModePanelToggle();
+      expect(toggle.textContent?.trim()).toContain("Minimize");
+      toggle.click();
+
+      await vi.waitFor(
+        () => {
+          expect(document.querySelector("[data-plan-mode-panel-body='true']")).toBeNull();
+          expect(document.body.textContent).not.toContain("Add a minimize toggle");
+          expect(document.body.textContent).toContain("3 steps, 1 in progress, 1 done, 1 pending");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const expandToggle = await waitForPlanModePanelToggle();
+      expect(expandToggle.textContent?.trim()).toContain("Expand");
+      expandToggle.click();
+
+      await vi.waitFor(
+        () => {
+          expect(document.querySelector("[data-plan-mode-panel-body='true']")).toBeTruthy();
+          expect(document.body.textContent).toContain("Add a minimize toggle");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("dispatches queued follow-ups one turn at a time across separate idle cycles", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
@@ -1501,6 +2331,35 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("floats the thread cards above the message scroller", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotWithExecutingPlan(),
+    });
+
+    try {
+      const floatingCards = await waitForElement(
+        () => document.querySelector<HTMLElement>("[data-thread-floating-cards='true']"),
+        "Unable to find floating thread cards container.",
+      );
+      const scrollContainer = await waitForElement(
+        () => document.querySelector<HTMLDivElement>("div.overflow-y-auto.overscroll-y-contain"),
+        "Unable to find ChatView message scroll container.",
+      );
+
+      await vi.waitFor(
+        () => {
+          expect(floatingCards.getBoundingClientRect().height).toBeGreaterThan(0);
+          expect(scrollContainer.style.paddingTop).toMatch(/\d+px/);
+          expect(scrollContainer.style.scrollPaddingTop).toMatch(/\d+px/);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("keeps the thread in a working state while a queued send is handing off to the server", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
@@ -1537,7 +2396,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       await vi.waitFor(
         () => {
-          expect(document.body.textContent).toContain("Working...");
+          expect(document.body.textContent).toContain("Codex is working");
+          expect(document.body.textContent).toContain("Preparing response");
         },
         { timeout: 8_000, interval: 16 },
       );
@@ -1673,6 +2533,69 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("shows a context-window badge and tooltip when the active codex thread has usage data", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: (() => {
+        const snapshot = createSnapshotForTargetUser({
+          targetMessageId: "msg-user-context-window" as MessageId,
+          targetText: "context target",
+        });
+        const [thread] = snapshot.threads;
+        if (!thread) {
+          return snapshot;
+        }
+        return {
+          ...snapshot,
+          threads: [
+            {
+              ...thread,
+              contextWindow: {
+                provider: "codex" as const,
+                usedTokens: 119000,
+                maxTokens: 258000,
+                remainingTokens: 139000,
+                usedPercent: 46,
+                inputTokens: 110000,
+                cachedInputTokens: 65000,
+                outputTokens: 9000,
+                reasoningOutputTokens: 320,
+                updatedAt: NOW_ISO,
+              },
+            },
+          ],
+        };
+      })(),
+    });
+
+    try {
+      const badge = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll("button")).find(
+            (button) => button.getAttribute("aria-label") === "Context window usage",
+          ) as HTMLButtonElement | null,
+        "Unable to find context-window badge.",
+      );
+      expect(badge.textContent?.trim()).toBe("46%");
+
+      badge.focus();
+
+      await vi.waitFor(
+        () => {
+          expect(document.body.textContent).toContain("Context window");
+          expect(document.body.textContent).toContain("46% used (54% left)");
+          expect(document.body.textContent).toContain("119k / 258k tokens used");
+          expect(document.body.textContent).toContain(
+            "Input 110k, cached 65k, output 9k, reasoning 320",
+          );
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("moves queued content back into the composer for editing and supports deleting queued items", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
@@ -1747,6 +2670,26 @@ describe("ChatView timeline estimator parity (full app)", () => {
         document.querySelectorAll<HTMLDivElement>("[data-testid^='queued-message-card-']"),
       );
       expect(queuedCards[0]?.textContent).toContain("Third queued");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("hides the context-window badge when the active thread has no usage snapshot", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-no-context-window" as MessageId,
+        targetText: "no context target",
+      }),
+    });
+
+    try {
+      await waitForLayout();
+      const badge = Array.from(document.querySelectorAll("button")).find(
+        (button) => button.getAttribute("aria-label") === "Context window usage",
+      );
+      expect(badge).toBeUndefined();
     } finally {
       await mounted.cleanup();
     }

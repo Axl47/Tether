@@ -1,6 +1,7 @@
 import {
   type ApprovalRequestId,
   DEFAULT_MODEL_BY_PROVIDER,
+  EDITORS,
   type EditorId,
   type KeybindingCommand,
   type CodexReasoningEffort,
@@ -48,15 +49,12 @@ import {
   useVirtualizer,
 } from "@tanstack/react-virtual";
 import { gitBranchesQueryOptions, gitCreateWorktreeMutationOptions } from "~/lib/gitReactQuery";
+import { copyTextToClipboard } from "~/lib/clipboard";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { serverConfigQueryOptions, serverQueryKeys } from "~/lib/serverReactQuery";
 
 import { isElectron } from "../env";
-import {
-  closeDiffSearchParams,
-  parseDiffRouteSearch,
-  stripDiffSearchParams,
-} from "../diffRouteSearch";
+import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
 import {
   type ComposerSlashCommand,
   type ComposerTrigger,
@@ -66,6 +64,7 @@ import {
   parseStandaloneComposerSlashCommand,
   replaceTextRange,
 } from "../composer-logic";
+import { shouldSubmitComposerOnEnter } from "../composerKeyBehavior";
 import {
   derivePendingApprovals,
   derivePendingUserInputs,
@@ -77,6 +76,7 @@ import {
   type PendingApproval,
   type PendingUserInput,
   type ProviderPickerKind,
+  type WorkLogEntry,
   PROVIDER_OPTIONS,
   deriveWorkLogEntries,
   hasToolActivityForTurn,
@@ -91,17 +91,21 @@ import {
   setPendingUserInputCustomAnswer,
   type PendingUserInputDraftAnswer,
 } from "../pendingUserInput";
-import { preferredTerminalEditor, writePreferredTerminalEditor } from "../terminal-links";
 import { useStore } from "../store";
 import {
   buildPlanImplementationThreadTitle,
   buildPlanImplementationPrompt,
   buildProposedPlanMarkdownFilename,
-  downloadPlanAsTextFile,
-  normalizePlanMarkdownForExport,
   proposedPlanTitle,
   resolvePlanFollowUpSubmission,
 } from "../proposedPlan";
+import {
+  describeThreadContextMessage,
+  resolveLatestThreadContextMessage,
+  resolveThreadContextMessage,
+} from "../threadContext";
+import { buildLocalDraftThread } from "../draftThreads";
+import { getLatestStartedThreadSelection } from "../threadSelectionDefaults";
 import { truncateTitle } from "../truncateTitle";
 import {
   DEFAULT_INTERACTION_MODE,
@@ -109,29 +113,20 @@ import {
   DEFAULT_THREAD_TERMINAL_ID,
   MAX_THREAD_TERMINAL_COUNT,
   type ChatMessage,
-  type Thread,
-  type TurnDiffFileChange,
   type TurnDiffSummary,
 } from "../types";
 import { basenameOfPath, getVscodeIconUrlForEntry } from "../vscode-icons";
 import { useTheme } from "../hooks/useTheme";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
-import {
-  buildTurnDiffTree,
-  summarizeTurnDiffStats,
-  type TurnDiffTreeNode,
-} from "../lib/turnDiffTree";
+import { summarizeTurnDiffStats } from "../lib/turnDiffTree";
 import BranchToolbar from "./BranchToolbar";
 import GitActionsControl from "./GitActionsControl";
-import {
-  isOpenFavoriteEditorShortcut,
-  resolveShortcutCommand,
-  shortcutLabelForCommand,
-} from "../keybindings";
-import ChatMarkdown from "./ChatMarkdown";
 import PlanSidebar from "./PlanSidebar";
+import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
+import ChatMarkdown from "./ChatMarkdown";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
-import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
 import {
   BotIcon,
   ChevronDownIcon,
@@ -146,17 +141,22 @@ import {
   GripVerticalIcon,
   LoaderCircleIcon,
   ListTodoIcon,
+  GitCommitIcon,
+  ImagePlusIcon,
   LockIcon,
   LockOpenIcon,
+  MessageSquareIcon,
   Undo2Icon,
   XIcon,
   CopyIcon,
   CheckIcon,
+  ZapIcon,
+  TerminalIcon,
 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Separator } from "./ui/separator";
-import { Group, GroupSeparator } from "./ui/group";
+import { Group } from "./ui/group";
 import {
   Menu,
   MenuGroup,
@@ -207,13 +207,18 @@ import {
 import { buildProjectScriptLaunchPlan, serializeProjectScript } from "~/lib/projectScriptExecution";
 import { Toggle } from "./ui/toggle";
 import { SidebarTrigger } from "./ui/sidebar";
-import { newCommandId, newMessageId, newThreadId } from "~/lib/utils";
+import { newCommandId, newMessageId, newThreadId, randomUuid } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
-import { getAppModelOptions, resolveAppModelSelection, useAppSettings } from "../appSettings";
+import {
+  getAppModelOptions,
+  getCustomModelsForProvider,
+  resolveAppModelSelection,
+  useAppSettings,
+} from "../appSettings";
+import { extractInlineAssistantImage } from "../assistantInlineImage";
 import {
   type ComposerImageAttachment,
   type DraftThreadEnvMode,
-  type DraftThreadState,
   type PersistedComposerImageAttachment,
   type QueuedComposerMessageState,
   useComposerDraftStore,
@@ -224,12 +229,17 @@ import { queuedMessagePreview } from "../queuedTurns";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { clamp } from "effect/Number";
 import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
+import ContextWindowIndicator from "./ContextWindowIndicator";
 import { estimateTimelineMessageHeight } from "./timelineHeight";
+import { useThreadRunStateStore } from "../threadRunStateStore";
+import { deriveTimelineScrollbarMarkers } from "../timelineScrollbarMarkers";
 
 function formatMessageMeta(createdAt: string, duration: string | null): string {
   if (!duration) return formatTimestamp(createdAt);
   return `${formatTimestamp(createdAt)} • ${duration}`;
 }
+
+type ThreadContextMode = "original" | "last";
 
 function formatWorkingTimer(startIso: string, endIso: string): string | null {
   const startedAtMs = Date.parse(startIso);
@@ -253,9 +263,8 @@ function formatWorkingTimer(startIso: string, endIso: string): string | null {
 
   return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
 }
-
+const LAST_EDITOR_KEY = "tether:last-editor";
 const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY = "tether:last-invoked-script-by-project";
-const MAX_VISIBLE_WORK_LOG_ENTRIES = 6;
 const ALWAYS_UNVIRTUALIZED_TAIL_ROWS = 8;
 const ATTACHMENT_PREVIEW_HANDOFF_TTL_MS = 5000;
 const MANUAL_SCROLL_SETTLE_WINDOW_MS = 180;
@@ -293,11 +302,48 @@ function readLastInvokedScriptByProjectFromStorage(): Record<string, string> {
   }
 }
 
-function workToneClass(tone: "thinking" | "tool" | "info" | "error"): string {
-  if (tone === "error") return "text-rose-300/50 dark:text-rose-300/50";
-  if (tone === "tool") return "text-muted-foreground/70";
-  if (tone === "thinking") return "text-muted-foreground/50";
-  return "text-muted-foreground/40";
+function providerDisplayName(provider: ProviderKind | null | undefined): string {
+  if (provider === "gemini") return "Gemini";
+  if (provider === "codex") return "Codex";
+  return "Assistant";
+}
+
+function summarizeActiveWorkEntry(entry: WorkLogEntry | null): {
+  title: string;
+  detail: string | null;
+} {
+  if (!entry) {
+    return {
+      title: "Preparing response",
+      detail: null,
+    };
+  }
+
+  const title = entry.label.trim().length > 0 ? entry.label : "Working";
+  const detailSource =
+    entry.command ??
+    entry.detail ??
+    (entry.changedFiles && entry.changedFiles.length > 0
+      ? entry.changedFiles.slice(0, 3).join(", ")
+      : null);
+  const detail = detailSource?.trim().length ? detailSource.trim() : null;
+  return { title, detail };
+}
+
+function normalizePlanMarkdownForExport(planMarkdown: string): string {
+  return `${planMarkdown.trimEnd()}\n`;
+}
+
+function downloadTextFile(filename: string, contents: string): void {
+  const blob = new Blob([contents], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  window.setTimeout(() => {
+    URL.revokeObjectURL(url);
+  }, 0);
 }
 
 interface ExpandedImageItem {
@@ -330,35 +376,6 @@ function buildExpandedImagePreview(
       name: image.name,
     })),
     index: selectedIndex,
-  };
-}
-
-function buildLocalDraftThread(
-  threadId: ThreadId,
-  draftThread: DraftThreadState,
-  fallbackModel: string,
-  error: string | null,
-): Thread {
-  return {
-    id: threadId,
-    codexThreadId: null,
-    projectId: draftThread.projectId,
-    title: "New thread",
-    model: fallbackModel,
-    runtimeMode: draftThread.runtimeMode,
-    interactionMode: draftThread.interactionMode,
-    session: null,
-    messages: [],
-    error,
-    createdAt: draftThread.createdAt,
-    updatedAt: draftThread.createdAt,
-    latestTurn: null,
-    lastVisitedAt: draftThread.createdAt,
-    branch: draftThread.branch,
-    worktreePath: draftThread.worktreePath,
-    turnDiffSummaries: [],
-    activities: [],
-    proposedPlans: [],
   };
 }
 
@@ -417,6 +434,7 @@ type ComposerCommandItem =
       model: ModelSlug;
       label: string;
       description: string;
+      showFastBadge: boolean;
     };
 
 type SendPhase = "idle" | "preparing-worktree" | "sending-turn";
@@ -440,7 +458,7 @@ function readFileAsDataUrl(file: File): Promise<string> {
 
 function buildTemporaryWorktreeBranchName(): string {
   // Keep the 8-hex suffix shape for backend temporary-branch detection.
-  const token = crypto.randomUUID().slice(0, 8).toLowerCase();
+  const token = randomUuid().slice(0, 8).toLowerCase();
   return `${WORKTREE_BRANCH_PREFIX}/${token}`;
 }
 
@@ -527,6 +545,9 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
         </Badge>
       ) : null}
       <span className="flex min-w-0 items-center gap-1.5 truncate">
+        {props.item.type === "model" && props.item.showFastBadge ? (
+          <ZapIcon className="size-3.5 shrink-0 text-amber-500" />
+        ) : null}
         <span className="truncate">{props.item.label}</span>
       </span>
       <span className="truncate text-muted-foreground/70 text-xs">{props.item.description}</span>
@@ -596,6 +617,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     select: (params) => parseDiffRouteSearch(params),
   });
   const { resolvedTheme } = useTheme();
+  const isMobileViewport = useMediaQuery("(max-width: 767px)");
   const queryClient = useQueryClient();
   const createWorktreeMutation = useMutation(gitCreateWorktreeMutationOptions({ queryClient }));
   const composerDraft = useComposerThreadDraft(threadId);
@@ -654,7 +676,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
     Record<ThreadId, string | null>
   >({});
   const [sendPhase, setSendPhase] = useState<SendPhase>("idle");
-  const [sendStartedAt, setSendStartedAt] = useState<string | null>(null);
   const [isConnecting, _setIsConnecting] = useState(false);
   const [isRevertingCheckpoint, setIsRevertingCheckpoint] = useState(false);
   const [respondingRequestIds, setRespondingRequestIds] = useState<ApprovalRequestId[]>([]);
@@ -674,6 +695,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
   // Used by "Implement in new thread" to carry the sidebar-open intent across navigation.
   const planSidebarOpenOnNextThreadRef = useRef(false);
   const [nowTick, setNowTick] = useState(() => Date.now());
+  const [animatedAssistantMessageId, setAnimatedAssistantMessageId] = useState<MessageId | null>(
+    null,
+  );
   const [terminalFocusRequestId, setTerminalFocusRequestId] = useState(0);
   const [composerHighlightedItemId, setComposerHighlightedItemId] = useState<string | null>(null);
   const [attachmentPreviewHandoffByMessageId, setAttachmentPreviewHandoffByMessageId] = useState<
@@ -693,6 +717,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const lastManualScrollAtRef = useRef(0);
   const isPointerScrollActiveRef = useRef(false);
   const lastTouchClientYRef = useRef<number | null>(null);
+  const floatingThreadCardsRef = useRef<HTMLDivElement | null>(null);
   const pendingUserScrollUpIntentRef = useRef(false);
   const pendingAutoScrollFrameRef = useRef<number | null>(null);
   const pendingInteractionAnchorRef = useRef<{
@@ -701,6 +726,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   } | null>(null);
   const pendingInteractionAnchorFrameRef = useRef<number | null>(null);
   const composerEditorRef = useRef<ComposerPromptEditorHandle>(null);
+  const composerImageInputRef = useRef<HTMLInputElement>(null);
   const composerFormRef = useRef<HTMLFormElement>(null);
   const composerFormHeightRef = useRef(0);
   const composerImagesRef = useRef<ComposerImageAttachment[]>([]);
@@ -711,6 +737,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const attachmentPreviewHandoffByMessageIdRef = useRef<Record<string, string[]>>({});
   const attachmentPreviewHandoffTimeoutByMessageIdRef = useRef<Record<string, number>>({});
   const sendInFlightRef = useRef(false);
+  const previousWorkingRef = useRef(false);
   const dragDepthRef = useRef(0);
   const terminalOpenByThreadRef = useRef<Record<string, boolean>>({});
   const setMessagesScrollContainerRef = useCallback((element: HTMLDivElement | null) => {
@@ -727,6 +754,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const storeNewTerminal = useTerminalStateStore((s) => s.newTerminal);
   const storeSetActiveTerminal = useTerminalStateStore((s) => s.setActiveTerminal);
   const storeCloseTerminal = useTerminalStateStore((s) => s.closeTerminal);
+  const optimisticThreadRun = useThreadRunStateStore(
+    (state) => state.pendingRunByThreadId[threadId] ?? null,
+  );
+  const startPendingRun = useThreadRunStateStore((state) => state.startPendingRun);
+  const clearPendingRun = useThreadRunStateStore((state) => state.clearPendingRun);
 
   const setPrompt = useCallback(
     (nextPrompt: string) => {
@@ -759,27 +791,59 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const localDraftThread = useMemo(
     () =>
       draftThread
-        ? buildLocalDraftThread(
+        ? buildLocalDraftThread({
             threadId,
             draftThread,
-            fallbackDraftProject?.model ?? DEFAULT_MODEL_BY_PROVIDER.codex,
-            localDraftError,
-          )
+            fallbackModel: fallbackDraftProject?.model ?? DEFAULT_MODEL_BY_PROVIDER.codex,
+            composerDraft,
+            error: localDraftError,
+          })
         : undefined,
-    [draftThread, fallbackDraftProject?.model, localDraftError, threadId],
+    [composerDraft, draftThread, fallbackDraftProject?.model, localDraftError, threadId],
   );
   const activeThread = serverThread ?? localDraftThread;
   const runtimeMode =
     composerDraft.runtimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
   const interactionMode =
     composerDraft.interactionMode ?? activeThread?.interactionMode ?? DEFAULT_INTERACTION_MODE;
+  const interactionModeToggle = useMemo(
+    () =>
+      interactionMode === "plan"
+        ? {
+            mode: "plan" as const,
+            label: "Plan",
+            title: "Plan mode — click to return to normal chat mode",
+            icon: ListTodoIcon,
+          }
+        : {
+            mode: "chat" as const,
+            label: "Chat",
+            title: "Default mode — click to enter plan mode",
+            icon: MessageSquareIcon,
+          },
+    [interactionMode],
+  );
+  const InteractionModeIcon = interactionModeToggle.icon;
   const isServerThread = serverThread !== undefined;
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
-  const diffOpen = rawSearch.diff === "1";
+  const activeContextWindow =
+    isServerThread && activeThread?.session?.provider === "codex"
+      ? activeThread.contextWindow
+      : null;
+  const [floatingThreadCardsHeight, setFloatingThreadCardsHeight] = useState(0);
+  const diffSearch = useMemo(
+    () => parseDiffRouteSearch(rawSearch as Record<string, unknown>),
+    [rawSearch],
+  );
+  const diffOpen = diffSearch.diff === "1";
   const activeThreadId = activeThread?.id ?? null;
   const activeLatestTurn = activeThread?.latestTurn ?? null;
   const latestTurnSettled = isLatestTurnSettled(activeLatestTurn, activeThread?.session ?? null);
   const activeProject = projects.find((p) => p.id === activeThread?.projectId);
+  const latestStartedThreadSelection = useMemo(
+    () => getLatestStartedThreadSelection(threads),
+    [threads],
+  );
 
   useEffect(() => {
     if (!activeThread?.id) return;
@@ -807,15 +871,22 @@ export default function ChatView({ threadId }: ChatViewProps) {
       activeThread.messages.length > 0 ||
       activeThread.session !== null),
   );
+  const defaultDraftSelection =
+    !hasThreadStarted && composerDraft.provider === null && composerDraft.model === null
+      ? latestStartedThreadSelection
+      : null;
   const lockedProvider: ProviderKind | null = hasThreadStarted
     ? (sessionProvider ?? selectedProviderByThreadId ?? null)
     : null;
-  const selectedProvider: ProviderKind = lockedProvider ?? selectedProviderByThreadId ?? "codex";
+  const selectedProvider: ProviderKind =
+    lockedProvider ?? selectedProviderByThreadId ?? defaultDraftSelection?.provider ?? "codex";
   const baseThreadModel = resolveModelSlugForProvider(
     selectedProvider,
-    activeThread?.model ?? activeProject?.model ?? getDefaultModel(selectedProvider),
+    defaultDraftSelection?.provider === selectedProvider
+      ? defaultDraftSelection.model
+      : (activeThread?.model ?? activeProject?.model ?? getDefaultModel(selectedProvider)),
   );
-  const customModelsForSelectedProvider = settings.customCodexModels;
+  const customModelsForSelectedProvider = getCustomModelsForProvider(settings, selectedProvider);
   const selectedModel = useMemo(() => {
     const draftModel = composerDraft.model;
     if (!draftModel) {
@@ -885,9 +956,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const phase = derivePhase(activeThread?.session ?? null);
   const isSendBusy = sendPhase !== "idle";
   const isPreparingWorktree = sendPhase === "preparing-worktree";
+  const isPendingThreadRun = optimisticThreadRun !== null;
   const isWorking =
     phase === "running" ||
     hasQueuedDispatchInFlight ||
+    isPendingThreadRun ||
     isSendBusy ||
     isConnecting ||
     isRevertingCheckpoint;
@@ -895,7 +968,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
     activeThread?.session ?? null,
-    sendStartedAt,
+    optimisticThreadRun?.startedAt ?? null,
   );
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
   const workLogEntries = useMemo(
@@ -947,6 +1020,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const activePendingIsResponding = activePendingUserInput
     ? respondingUserInputRequestIds.includes(activePendingUserInput.requestId)
     : false;
+  const hasActivePendingUserInput = activePendingProgress !== null;
   const activeProposedPlan = useMemo(() => {
     if (!latestTurnSettled) {
       return null;
@@ -969,6 +1043,34 @@ export default function ChatView({ threadId }: ChatViewProps) {
     activePlan !== null || activeProposedPlan !== null || planSidebarOpen;
   const activePendingApproval = pendingApprovals[0] ?? null;
   const isComposerApprovalState = activePendingApproval !== null;
+  const activeAssistantLabel = providerDisplayName(
+    activeThread?.session?.provider ?? selectedProvider,
+  );
+  const activeWorkEntry = workLogEntries.at(-1) ?? null;
+  const activeWorkSummary = useMemo(() => {
+    if (activeWorkEntry) {
+      return summarizeActiveWorkEntry(activeWorkEntry);
+    }
+    if (optimisticThreadRun?.phase === "preparing-worktree") {
+      return {
+        title: "Preparing workspace",
+        detail: "Creating and configuring an isolated worktree before the turn starts.",
+      };
+    }
+    if (optimisticThreadRun?.phase === "sending-turn") {
+      return {
+        title: "Starting turn",
+        detail: "Handing the request to the provider and waiting for live events.",
+      };
+    }
+    return summarizeActiveWorkEntry(null);
+  }, [activeWorkEntry, optimisticThreadRun?.phase]);
+  const composerLocked =
+    isConnecting ||
+    isPendingThreadRun ||
+    isComposerApprovalState ||
+    isSendBusy ||
+    isRevertingCheckpoint;
   const hasComposerHeader =
     isComposerApprovalState ||
     pendingUserInputs.length > 0 ||
@@ -1107,6 +1209,46 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
     return [...serverMessagesWithPreviewHandoff, ...pendingMessages];
   }, [serverMessages, attachmentPreviewHandoffByMessageId, optimisticUserMessages]);
+  const originalThreadContextMessage = useMemo(
+    () => resolveThreadContextMessage(timelineMessages),
+    [timelineMessages],
+  );
+  const latestThreadContextMessage = useMemo(
+    () => resolveLatestThreadContextMessage(timelineMessages),
+    [timelineMessages],
+  );
+  const [threadContextMode, setThreadContextMode] = useState<ThreadContextMode>(() => {
+    try {
+      const stored = localStorage.getItem("t3code:threadContextMode");
+      if (stored === "last" || stored === "original") return stored;
+    } catch {}
+    return "original";
+  });
+  const handleThreadContextModeChange = useCallback((mode: ThreadContextMode) => {
+    setThreadContextMode(mode);
+    try {
+      localStorage.setItem("t3code:threadContextMode", mode);
+    } catch {}
+  }, []);
+  const threadContextMessage =
+    threadContextMode === "last" ? latestThreadContextMessage : originalThreadContextMessage;
+  const hasFloatingThreadCards = threadContextMessage !== null || activePlan !== null;
+  const [threadContextJumpRequest, setThreadContextJumpRequest] = useState<{
+    messageId: MessageId;
+    key: number;
+  } | null>(null);
+  const onJumpToThreadContext = useCallback(() => {
+    if (!threadContextMessage) {
+      return;
+    }
+    setThreadContextJumpRequest((current) => ({
+      messageId: threadContextMessage.id,
+      key: (current?.key ?? 0) + 1,
+    }));
+  }, [threadContextMessage]);
+  useEffect(() => {
+    setThreadContextJumpRequest(null);
+  }, [activeThread?.id]);
   const timelineEntries = useMemo(
     () =>
       deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], workLogEntries),
@@ -1169,6 +1311,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
     latestTurnHasToolActivity,
     latestTurnSettled,
   ]);
+  const latestCompletedAssistantMessage = useMemo(
+    () =>
+      timelineMessages
+        .toReversed()
+        .find((message) => message.role === "assistant" && !message.streaming) ?? null,
+    [timelineMessages],
+  );
+  useEffect(() => {
+    const wasWorking = previousWorkingRef.current;
+    if (wasWorking && !isWorking && latestCompletedAssistantMessage?.id) {
+      setAnimatedAssistantMessageId(latestCompletedAssistantMessage.id);
+    }
+    previousWorkingRef.current = isWorking;
+  }, [isWorking, latestCompletedAssistantMessage?.id]);
   const completionDividerBeforeEntryId = useMemo(() => {
     if (!latestTurnSettled) return null;
     if (!activeLatestTurn?.startedAt) return null;
@@ -1282,6 +1438,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         model: slug,
         label: name,
         description: `${providerLabel} · ${slug}`,
+        showFastBadge: false,
       }));
   }, [composerTrigger, searchableModelOptions, workspaceEntries]);
   const composerMenuOpen = Boolean(composerTrigger);
@@ -1342,6 +1499,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
     () => shortcutLabelForCommand(keybindings, "terminal.close"),
     [keybindings],
   );
+  const terminalToggleShortcutLabel = useMemo(
+    () => shortcutLabelForCommand(keybindings, "terminal.toggle"),
+    [keybindings],
+  );
   const diffPanelShortcutLabel = useMemo(
     () => shortcutLabelForCommand(keybindings, "diff.toggle"),
     [keybindings],
@@ -1353,7 +1514,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       replace: true,
       search: (previous) => {
         if (diffOpen) {
-          return closeDiffSearchParams(previous);
+          return stripDiffSearchParams(previous);
         }
         const rest = stripDiffSearchParams(previous);
         return { ...rest, diff: "1" };
@@ -1429,13 +1590,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
   }, [activeThreadId, setTerminalOpen, terminalState.terminalOpen]);
   const splitTerminal = useCallback(() => {
     if (!activeThreadId || hasReachedTerminalLimit) return;
-    const terminalId = `terminal-${crypto.randomUUID()}`;
+    const terminalId = `terminal-${randomUuid()}`;
     storeSplitTerminal(activeThreadId, terminalId);
     setTerminalFocusRequestId((value) => value + 1);
   }, [activeThreadId, storeSplitTerminal, hasReachedTerminalLimit]);
   const createNewTerminal = useCallback(() => {
     if (!activeThreadId || hasReachedTerminalLimit) return;
-    const terminalId = `terminal-${crypto.randomUUID()}`;
+    const terminalId = `terminal-${randomUuid()}`;
     storeNewTerminal(activeThreadId, terminalId);
     setTerminalFocusRequestId((value) => value + 1);
   }, [activeThreadId, storeNewTerminal, hasReachedTerminalLimit]);
@@ -1689,8 +1850,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     async (scriptId: string) => {
       if (!activeProject) return;
       const nextScripts = activeProject.scripts.filter((script) => script.id !== scriptId);
-
-      const deletedName = activeProject.scripts.find((s) => s.id === scriptId)?.name;
+      const deletedName = activeProject.scripts.find((script) => script.id === scriptId)?.name;
 
       try {
         await persistProjectScripts({
@@ -1857,7 +2017,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
         "button, summary, [role='button'], [data-scroll-anchor-target]",
       );
       if (!trigger || !scrollContainer.contains(trigger)) return;
-      if (trigger.closest("[data-scroll-anchor-ignore]")) return;
 
       pendingInteractionAnchorRef.current = {
         element: trigger,
@@ -1997,17 +2156,17 @@ export default function ChatView({ threadId }: ChatViewProps) {
   useLayoutEffect(() => {
     if (!activeThread?.id) return;
     shouldAutoScrollRef.current = true;
-    scheduleStickToBottom();
+    forceStickToBottom();
     const timeout = window.setTimeout(() => {
       const scrollContainer = messagesScrollRef.current;
       if (!scrollContainer) return;
       if (isScrollContainerNearBottom(scrollContainer)) return;
-      scheduleStickToBottom();
+      forceStickToBottom();
     }, 96);
     return () => {
       window.clearTimeout(timeout);
     };
-  }, [activeThread?.id, scheduleStickToBottom]);
+  }, [activeThread?.id, forceStickToBottom]);
   useLayoutEffect(() => {
     const composerForm = composerFormRef.current;
     if (!composerForm) return;
@@ -2033,6 +2192,32 @@ export default function ChatView({ threadId }: ChatViewProps) {
       observer.disconnect();
     };
   }, [activeThread?.id, scheduleStickToBottom]);
+  useLayoutEffect(() => {
+    const floatingThreadCards = floatingThreadCardsRef.current;
+    if (!floatingThreadCards || !hasFloatingThreadCards) {
+      setFloatingThreadCardsHeight(0);
+      return;
+    }
+
+    const syncFloatingThreadCardsHeight = () => {
+      const nextHeight = Math.ceil(floatingThreadCards.getBoundingClientRect().height);
+      setFloatingThreadCardsHeight((current) => (current === nextHeight ? current : nextHeight));
+    };
+
+    syncFloatingThreadCardsHeight();
+
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => {
+      syncFloatingThreadCardsHeight();
+    });
+    observer.observe(floatingThreadCards);
+    return () => {
+      observer.disconnect();
+    };
+  }, [activeThread?.id, hasFloatingThreadCards]);
   useEffect(() => {
     if (!shouldAutoScrollRef.current) return;
     scheduleStickToBottom();
@@ -2125,14 +2310,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
       return [];
     });
     setSendPhase("idle");
-    setSendStartedAt(null);
+    clearPendingRun(threadId);
     setComposerHighlightedItemId(null);
     setComposerCursor(promptRef.current.length);
     setComposerTrigger(detectComposerTrigger(promptRef.current, promptRef.current.length));
     dragDepthRef.current = 0;
     setIsDragOverComposer(false);
     setExpandedImage(null);
-  }, [threadId]);
+  }, [clearPendingRun, threadId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2256,24 +2441,34 @@ export default function ChatView({ threadId }: ChatViewProps) {
       : "local";
 
   useEffect(() => {
-    if (phase !== "running") return;
+    if (!isWorking) return;
     const timer = window.setInterval(() => {
       setNowTick(Date.now());
     }, 1000);
     return () => {
       window.clearInterval(timer);
     };
-  }, [phase]);
+  }, [isWorking]);
 
-  const beginSendPhase = useCallback((nextPhase: Exclude<SendPhase, "idle">) => {
-    setSendStartedAt((current) => current ?? new Date().toISOString());
-    setSendPhase(nextPhase);
-  }, []);
+  const beginSendPhase = useCallback(
+    (nextPhase: Exclude<SendPhase, "idle">) => {
+      if (!activeThreadId) return;
+      startPendingRun(activeThreadId, {
+        phase: nextPhase,
+        provider: selectedProvider,
+        startedAt: new Date().toISOString(),
+      });
+      setSendPhase(nextPhase);
+    },
+    [activeThreadId, selectedProvider, startPendingRun],
+  );
 
   const resetSendPhase = useCallback(() => {
     setSendPhase("idle");
-    setSendStartedAt(null);
-  }, []);
+    if (activeThreadId) {
+      clearPendingRun(activeThreadId);
+    }
+  }, [activeThreadId, clearPendingRun]);
 
   useEffect(() => {
     if (sendPhase === "idle") {
@@ -2444,7 +2639,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       const previewUrl = URL.createObjectURL(file);
       nextImages.push({
         type: "image",
-        id: crypto.randomUUID(),
+        id: randomUuid(),
         name: file.name || "image",
         mimeType: file.type,
         sizeBytes: file.size,
@@ -2462,8 +2657,23 @@ export default function ChatView({ threadId }: ChatViewProps) {
     setThreadError(activeThreadId, error);
   };
 
+  const openComposerImagePicker = () => {
+    composerImageInputRef.current?.click();
+  };
+
   const removeComposerImage = (imageId: string) => {
     removeComposerImageFromDraft(imageId);
+  };
+
+  const onComposerImageInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.currentTarget.files ?? []);
+    if (files.length > 0) {
+      addComposerImages(files);
+      if (!isMobileViewport) {
+        scheduleComposerFocus();
+      }
+    }
+    event.currentTarget.value = "";
   };
 
   const onComposerPaste = (event: React.ClipboardEvent<HTMLElement>) => {
@@ -2521,7 +2731,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
     setIsDragOverComposer(false);
     const files = Array.from(event.dataTransfer.files);
     addComposerImages(files);
-    focusComposer();
+    if (!isMobileViewport) {
+      focusComposer();
+    }
   };
 
   const onRevertToTurnCount = useCallback(
@@ -2676,7 +2888,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const onSend = async (e?: { preventDefault: () => void }) => {
     e?.preventDefault();
     const api = readNativeApi();
-    if (!api || !activeThread || isSendBusy || isConnecting || sendInFlightRef.current) return;
+    if (
+      !api ||
+      !activeThread ||
+      isPendingThreadRun ||
+      isSendBusy ||
+      isConnecting ||
+      sendInFlightRef.current
+    ) {
+      return;
+    }
     if (activePendingProgress) {
       onAdvanceActivePendingUserInput();
       return;
@@ -2938,7 +3159,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           ? { modelOptions: selectedModelOptionsForDispatch }
           : {}),
         ...(providerOptionsForDispatch ? { providerOptions: providerOptionsForDispatch } : {}),
-        provider: selectedProvider,
+        ...(isFirstMessage ? { provider: selectedProvider } : {}),
         assistantDeliveryMode: settings.enableAssistantStreaming ? "streaming" : "buffered",
         runtimeMode,
         interactionMode,
@@ -3155,6 +3376,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         !api ||
         !activeThread ||
         !isServerThread ||
+        isPendingThreadRun ||
         isSendBusy ||
         isConnecting ||
         sendInFlightRef.current
@@ -3210,7 +3432,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
             text: trimmed,
             attachments: [],
           },
-          provider: selectedProvider,
           model: selectedModel || undefined,
           ...(selectedModelOptionsForDispatch
             ? { modelOptions: selectedModelOptionsForDispatch }
@@ -3221,13 +3442,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
           interactionMode: nextInteractionMode,
           createdAt: messageCreatedAt,
         });
-        // Optimistically open the plan sidebar when implementing (not refining).
-        // "default" mode here means the agent is executing the plan, which produces
-        // step-tracking activities that the sidebar will display.
-        if (nextInteractionMode === "default") {
-          planSidebarDismissedForTurnRef.current = null;
-          setPlanSidebarOpen(true);
-        }
         sendInFlightRef.current = false;
       } catch (err) {
         setOptimisticUserMessages((existing) =>
@@ -3246,6 +3460,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       beginSendPhase,
       forceStickToBottom,
       isConnecting,
+      isPendingThreadRun,
       isSendBusy,
       isServerThread,
       persistThreadSettingsForNextTurn,
@@ -3254,7 +3469,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
       selectedModel,
       selectedModelOptionsForDispatch,
       providerOptionsForDispatch,
-      selectedProvider,
       setComposerDraftInteractionMode,
       setThreadError,
       settings.enableAssistantStreaming,
@@ -3269,6 +3483,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       !activeProject ||
       !activeProposedPlan ||
       !isServerThread ||
+      isPendingThreadRun ||
       isSendBusy ||
       isConnecting ||
       sendInFlightRef.current
@@ -3308,8 +3523,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
         worktreePath: activeThread.worktreePath,
         createdAt,
       })
-      .then(() => {
-        return api.orchestration.dispatchCommand({
+      .then(() =>
+        api.orchestration.dispatchCommand({
           type: "thread.turn.start",
           commandId: newCommandId(),
           threadId: nextThreadId,
@@ -3329,13 +3544,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
           runtimeMode,
           interactionMode: "default",
           createdAt,
-        });
-      })
+        }),
+      )
       .then(() => api.orchestration.getSnapshot())
       .then((snapshot) => {
         syncServerReadModel(snapshot);
-        // Signal that the plan sidebar should open on the new thread.
-        planSidebarOpenOnNextThreadRef.current = true;
         return navigate({
           to: "/$threadId",
           params: { threadId: nextThreadId },
@@ -3369,6 +3582,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     activeThread,
     beginSendPhase,
     isConnecting,
+    isPendingThreadRun,
     isSendBusy,
     isServerThread,
     navigate,
@@ -3392,7 +3606,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       setComposerDraftProvider(activeThread.id, provider);
       setComposerDraftModel(
         activeThread.id,
-        resolveAppModelSelection(provider, settings.customCodexModels, model),
+        resolveAppModelSelection(provider, getCustomModelsForProvider(settings, provider), model),
       );
       scheduleComposerFocus();
     },
@@ -3402,7 +3616,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       scheduleComposerFocus,
       setComposerDraftModel,
       setComposerDraftProvider,
-      settings.customCodexModels,
+      settings,
     ],
   );
   const onEffortSelect = useCallback(
@@ -3482,6 +3696,38 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
     return { value: promptRef.current, cursor: composerCursor };
   }, [composerCursor]);
+  const focusPendingUserInputOptionFromComposer = useCallback(
+    (preferLast: boolean): boolean => {
+      const composerForm = composerFormRef.current;
+      if (!composerForm) {
+        return false;
+      }
+      const optionButtons = Array.from(
+        composerForm.querySelectorAll<HTMLButtonElement>(
+          "button[data-pending-user-input-option]:not(:disabled)",
+        ),
+      );
+      if (optionButtons.length === 0) {
+        return false;
+      }
+      const selectedLabel = activePendingProgress?.selectedOptionLabel;
+      const selectedButton =
+        selectedLabel === undefined
+          ? null
+          : (optionButtons.find(
+              (button) => button.dataset.pendingUserInputOption === selectedLabel,
+            ) ?? null);
+      const targetButton =
+        selectedButton ??
+        (preferLast ? (optionButtons.at(-1) ?? null) : (optionButtons[0] ?? null));
+      if (!targetButton) {
+        return false;
+      }
+      targetButton.focus({ preventScroll: true });
+      return true;
+    },
+    [activePendingProgress?.selectedOptionLabel],
+  );
 
   const resolveActiveComposerTrigger = useCallback((): {
     snapshot: { value: string; cursor: number };
@@ -3613,6 +3859,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
     key: "ArrowDown" | "ArrowUp" | "Enter" | "Tab",
     event: KeyboardEvent,
   ) => {
+    if (activePendingProgress?.activeQuestion && key === "Tab") {
+      return focusPendingUserInputOptionFromComposer(event.shiftKey);
+    }
+
     if (key === "Tab" && event.shiftKey) {
       toggleInteractionMode();
       return true;
@@ -3640,7 +3890,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
       }
     }
 
-    if (key === "Enter" && !event.shiftKey) {
+    if (
+      key === "Enter" &&
+      shouldSubmitComposerOnEnter({
+        isMobileViewport,
+        shiftKey: event.shiftKey,
+        canSubmit: phase !== "running" || hasActivePendingUserInput,
+      })
+    ) {
       void onSend();
       return true;
     }
@@ -3726,6 +3983,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
           }
           keybindings={keybindings}
           availableEditors={availableEditors}
+          terminalOpen={terminalState.terminalOpen}
+          terminalToggleShortcutLabel={terminalToggleShortcutLabel}
           diffToggleShortcutLabel={diffPanelShortcutLabel}
           gitCwd={gitCwd}
           diffOpen={diffOpen}
@@ -3737,6 +3996,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           onAddProjectScript={saveProjectScript}
           onUpdateProjectScript={updateProjectScript}
           onDeleteProjectScript={deleteProjectScript}
+          onToggleTerminal={toggleTerminalVisibility}
           onToggleDiff={onToggleDiff}
           onTogglePlanSidebar={onTogglePlanSidebar}
         />
@@ -3744,53 +4004,81 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
       {/* Error banner */}
       <ProviderHealthBanner status={activeProviderStatus} />
-      <ThreadErrorBanner
-        error={activeThread.error}
-        onDismiss={() => setThreadError(activeThread.id, null)}
-      />
-      {/* Main content area with optional plan sidebar */}
+      <ThreadErrorBanner error={activeThread.error} />
       <div className="flex min-h-0 flex-1">
-        {/* Chat column */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {/* Messages */}
-          <div
-            ref={setMessagesScrollContainerRef}
-            className="chat-messages-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain px-3 py-3 sm:px-5 sm:py-4"
-            onScroll={onMessagesScroll}
-            onClickCapture={onMessagesClickCapture}
-            onWheel={onMessagesWheel}
-            onPointerDown={onMessagesPointerDown}
-            onPointerUp={onMessagesPointerUp}
-            onPointerCancel={onMessagesPointerCancel}
-            onTouchStart={onMessagesTouchStart}
-            onTouchMove={onMessagesTouchMove}
-            onTouchEnd={onMessagesTouchEnd}
-            onTouchCancel={onMessagesTouchEnd}
-          >
-            <MessagesTimeline
-              key={activeThread.id}
-              hasMessages={timelineEntries.length > 0}
-              isWorking={isWorking}
-              activeTurnInProgress={isWorking || !latestTurnSettled}
-              activeTurnStartedAt={activeWorkStartedAt}
-              scrollContainer={messagesScrollElement}
-              shouldSuppressScrollAdjustment={shouldSuppressTimelineScrollAdjustment}
-              timelineEntries={timelineEntries}
-              completionDividerBeforeEntryId={completionDividerBeforeEntryId}
-              completionSummary={completionSummary}
-              turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
-              nowIso={nowIso}
-              expandedWorkGroups={expandedWorkGroups}
-              onToggleWorkGroup={onToggleWorkGroup}
-              onOpenTurnDiff={onOpenTurnDiff}
-              revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
-              onRevertUserMessage={onRevertUserMessage}
-              isRevertingCheckpoint={isRevertingCheckpoint}
-              onImageExpand={onExpandTimelineImage}
-              markdownCwd={gitCwd ?? undefined}
-              resolvedTheme={resolvedTheme}
-              workspaceRoot={activeProject?.cwd ?? undefined}
-            />
+          <div className="relative min-h-0 flex-1">
+            {hasFloatingThreadCards ? (
+              <div
+                ref={floatingThreadCardsRef}
+                data-thread-floating-cards="true"
+                className="pointer-events-none absolute inset-x-3 top-3 z-20 sm:inset-x-5 sm:top-4"
+              >
+                <div className="mx-auto flex max-w-3xl flex-col gap-3">
+                  <ThreadContextPanel
+                    contextMessage={threadContextMessage}
+                    contextMode={threadContextMode}
+                    messageCount={timelineMessages.filter((m) => m.role === "user").length}
+                    onContextModeChange={handleThreadContextModeChange}
+                    onJumpToMessage={onJumpToThreadContext}
+                  />
+                  <PlanModePanel activePlan={activePlan} />
+                </div>
+              </div>
+            ) : null}
+
+            <div
+              ref={setMessagesScrollContainerRef}
+              className="chat-messages-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain px-3 pb-3 sm:px-5 sm:pb-4"
+              style={{
+                paddingTop: `${floatingThreadCardsHeight + 16}px`,
+                scrollPaddingTop:
+                  floatingThreadCardsHeight > 0 ? `${floatingThreadCardsHeight + 16}px` : undefined,
+              }}
+              onScroll={onMessagesScroll}
+              onClickCapture={onMessagesClickCapture}
+              onWheel={onMessagesWheel}
+              onPointerDown={onMessagesPointerDown}
+              onPointerUp={onMessagesPointerUp}
+              onPointerCancel={onMessagesPointerCancel}
+              onTouchStart={onMessagesTouchStart}
+              onTouchMove={onMessagesTouchMove}
+              onTouchEnd={onMessagesTouchEnd}
+              onTouchCancel={onMessagesTouchEnd}
+            >
+              <MessagesTimeline
+                key={activeThread.id}
+                hasMessages={timelineEntries.length > 0}
+                isWorking={isWorking}
+                activeTurnInProgress={isWorking || !latestTurnSettled}
+                activeTurnStartedAt={activeWorkStartedAt}
+                activeAssistantLabel={activeAssistantLabel}
+                activeWorkSummary={activeWorkSummary}
+                liveWorkEntries={workLogEntries}
+                optimisticRunPhase={optimisticThreadRun?.phase ?? null}
+                scrollContainer={messagesScrollElement}
+                shouldSuppressScrollAdjustment={shouldSuppressTimelineScrollAdjustment}
+                scrollContainerPaddingTopPx={floatingThreadCardsHeight + 16}
+                timelineEntries={timelineEntries}
+                jumpToMessageId={threadContextJumpRequest?.messageId ?? null}
+                jumpToMessageRequestKey={threadContextJumpRequest?.key ?? 0}
+                completionDividerBeforeEntryId={completionDividerBeforeEntryId}
+                completionSummary={completionSummary}
+                animatedAssistantMessageId={animatedAssistantMessageId}
+                onAnimatedAssistantMessageComplete={() => setAnimatedAssistantMessageId(null)}
+                turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
+                nowIso={nowIso}
+                expandedWorkGroups={expandedWorkGroups}
+                onToggleWorkGroup={onToggleWorkGroup}
+                onOpenTurnDiff={onOpenTurnDiff}
+                revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
+                onRevertUserMessage={onRevertUserMessage}
+                isRevertingCheckpoint={isRevertingCheckpoint}
+                onImageExpand={onExpandTimelineImage}
+                markdownCwd={gitCwd ?? undefined}
+                workspaceRoot={activeProject?.cwd ?? undefined}
+              />
+            </div>
           </div>
 
           {/* Input bar */}
@@ -3825,7 +4113,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
                       answers={activePendingDraftAnswers}
                       questionIndex={activePendingQuestionIndex}
                       onSelectOption={onSelectActivePendingUserInputOption}
-                      onAdvance={onAdvanceActivePendingUserInput}
                     />
                   </div>
                 ) : showPlanFollowUpPrompt && activeProposedPlan ? (
@@ -4022,6 +4309,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         {composerImages.map((image) => (
                           <div
                             key={image.id}
+                            data-composer-image-chip="true"
                             className="relative h-16 w-16 overflow-hidden rounded-lg border border-border/80 bg-background"
                           >
                             {image.previewUrl ? (
@@ -4111,7 +4399,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                 ? "Ask for follow-up changes or attach images"
                                 : "Ask anything, @tag files/folders, or use /model"
                     }
-                    disabled={isConnecting || isComposerApprovalState}
+                    disabled={composerLocked}
                   />
                 </div>
 
@@ -4162,15 +4450,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         size="sm"
                         type="button"
                         onClick={toggleInteractionMode}
-                        title={
-                          interactionMode === "plan"
-                            ? "Plan mode — click to return to normal chat mode"
-                            : "Default mode — click to enter plan mode"
-                        }
+                        data-interaction-mode={interactionModeToggle.mode}
+                        title={interactionModeToggle.title}
                       >
-                        <BotIcon />
+                        <InteractionModeIcon
+                          data-interaction-mode-icon={interactionModeToggle.mode}
+                        />
                         <span className="sr-only sm:not-sr-only">
-                          {interactionMode === "plan" ? "Plan" : "Chat"}
+                          {interactionModeToggle.label}
                         </span>
                       </Button>
 
@@ -4199,10 +4486,44 @@ export default function ChatView({ threadId }: ChatViewProps) {
                           {runtimeMode === "full-access" ? "Full access" : "Supervised"}
                         </span>
                       </Button>
+                      {!isComposerApprovalState && pendingUserInputs.length === 0 ? (
+                        <>
+                          <Separator
+                            orientation="vertical"
+                            className="mx-0.5 hidden h-4 sm:block"
+                          />
+                          <input
+                            ref={composerImageInputRef}
+                            type="file"
+                            accept="image/*"
+                            multiple
+                            className="hidden"
+                            tabIndex={-1}
+                            data-composer-image-input="true"
+                            onChange={onComposerImageInputChange}
+                          />
+                          <Button
+                            variant="ghost"
+                            className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
+                            size="sm"
+                            type="button"
+                            title="Upload images"
+                            aria-label="Upload images"
+                            data-composer-image-picker="true"
+                            onClick={openComposerImagePicker}
+                          >
+                            <ImagePlusIcon />
+                            <span className="sr-only sm:not-sr-only">Upload images</span>
+                          </Button>
+                        </>
+                      ) : null}
                     </div>
 
                     {/* Right side: send / stop button */}
                     <div className="flex shrink-0 items-center gap-2">
+                      {activeContextWindow ? (
+                        <ContextWindowIndicator contextWindow={activeContextWindow} />
+                      ) : null}
                       {isPreparingWorktree ? (
                         <span className="text-muted-foreground/70 text-xs">
                           Preparing worktree...
@@ -4271,7 +4592,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                               type="submit"
                               size="sm"
                               className="h-9 rounded-full px-4 sm:h-8"
-                              disabled={isSendBusy || isConnecting}
+                              disabled={composerLocked}
                             >
                               {isConnecting || isSendBusy ? "Sending..." : "Refine"}
                             </Button>
@@ -4281,7 +4602,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                 type="submit"
                                 size="sm"
                                 className="h-9 rounded-l-full rounded-r-none px-4 sm:h-8"
-                                disabled={isSendBusy || isConnecting}
+                                disabled={composerLocked}
                               >
                                 {isConnecting || isSendBusy ? "Sending..." : "Implement"}
                               </Button>
@@ -4293,7 +4614,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                       variant="default"
                                       className="h-9 rounded-l-none rounded-r-full border-l-white/12 px-2 sm:h-8"
                                       aria-label="Implementation actions"
-                                      disabled={isSendBusy || isConnecting}
+                                      disabled={composerLocked}
                                     />
                                   }
                                 >
@@ -4301,7 +4622,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                 </MenuTrigger>
                                 <MenuPopup align="end" side="top">
                                   <MenuItem
-                                    disabled={isSendBusy || isConnecting}
+                                    disabled={composerLocked}
                                     onClick={() => void onImplementPlanInNewThread()}
                                   >
                                     Implement in new thread
@@ -4315,9 +4636,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                             type="submit"
                             className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/90 text-primary-foreground transition-all duration-150 hover:bg-primary hover:scale-105 disabled:opacity-30 disabled:hover:scale-100 sm:h-8 sm:w-8"
                             disabled={
-                              isSendBusy ||
-                              isConnecting ||
-                              (!prompt.trim() && composerImages.length === 0)
+                              composerLocked || (!prompt.trim() && composerImages.length === 0)
                             }
                             aria-label={
                               isConnecting
@@ -4375,9 +4694,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
             </form>
           </div>
         </div>
-        {/* end chat column */}
-
-        {/* Plan sidebar */}
         {planSidebarOpen ? (
           <PlanSidebar
             activePlan={activePlan}
@@ -4388,7 +4704,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
           />
         ) : null}
       </div>
-      {/* end horizontal flex container */}
 
       {isGitRepo && (
         <BranchToolbar
@@ -4498,6 +4813,263 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
 }
 
+interface ChatHeaderDropdownProps {
+  activeThreadId: ThreadId;
+  activeProjectName: string | undefined;
+  isGitRepo: boolean;
+  openInCwd: string | null;
+  activeProjectScripts: ProjectScript[] | undefined;
+  preferredScriptId: string | null;
+  keybindings: ResolvedKeybindingsConfig;
+  availableEditors: ReadonlyArray<EditorId>;
+  terminalOpen: boolean;
+  terminalToggleShortcutLabel: string | null;
+  gitCwd: string | null;
+  onRunProjectScript: (script: ProjectScript) => void;
+  onAddProjectScript: (input: NewProjectScriptInput) => Promise<void>;
+  onUpdateProjectScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void>;
+  onDeleteProjectScript: (scriptId: string) => Promise<void>;
+  onToggleTerminal: () => void;
+}
+
+const ChatHeaderDropdown = memo(function ChatHeaderDropdown({
+  activeThreadId,
+  activeProjectName,
+  isGitRepo,
+  openInCwd,
+  activeProjectScripts,
+  preferredScriptId,
+  keybindings,
+  availableEditors,
+  terminalOpen,
+  terminalToggleShortcutLabel,
+  gitCwd,
+  onRunProjectScript,
+  onAddProjectScript,
+  onUpdateProjectScript,
+  onDeleteProjectScript,
+  onToggleTerminal,
+}: ChatHeaderDropdownProps) {
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+
+  return (
+    <>
+      <Menu open={dropdownOpen} onOpenChange={setDropdownOpen}>
+        <MenuTrigger render={<Button aria-label="Actions" size="xs" variant="outline" />}>
+          <EllipsisIcon aria-hidden="true" className="size-4" />
+        </MenuTrigger>
+        <MenuPopup align="end" className="min-w-48">
+          {/* Terminal */}
+          <MenuItem
+            onClick={() => {
+              onToggleTerminal();
+              setDropdownOpen(false);
+            }}
+          >
+            <TerminalIcon className="size-4" />
+            {terminalOpen ? "Hide terminal" : "Show terminal"}
+            {terminalToggleShortcutLabel && (
+              <MenuShortcut>{terminalToggleShortcutLabel}</MenuShortcut>
+            )}
+          </MenuItem>
+
+          <MenuDivider />
+
+          {/* Git */}
+          {activeProjectName && isGitRepo && (
+            <MenuSub>
+              <MenuSubTrigger>
+                <GitCommitIcon className="size-4" />
+                Git
+              </MenuSubTrigger>
+              <MenuSubPopup>
+                <GitActionsDropdownContent />
+              </MenuSubPopup>
+            </MenuSub>
+          )}
+
+          {/* Folder / Open in editor */}
+          {activeProjectName && (
+            <MenuSub>
+              <MenuSubTrigger>
+                <FolderClosedIcon className="size-4" />
+                Open in...
+              </MenuSubTrigger>
+              <MenuSubPopup>
+                <OpenInDropdownContent
+                  keybindings={keybindings}
+                  availableEditors={availableEditors}
+                  openInCwd={openInCwd}
+                  onClose={() => setDropdownOpen(false)}
+                />
+              </MenuSubPopup>
+            </MenuSub>
+          )}
+
+          {/* Actions / Scripts */}
+          {activeProjectScripts && activeProjectScripts.length > 0 && (
+            <>
+              <MenuDivider />
+              <ActionsDropdownContent
+                scripts={activeProjectScripts}
+                keybindings={keybindings}
+                onRunScript={(script) => {
+                  onRunProjectScript(script);
+                  setDropdownOpen(false);
+                }}
+              />
+            </>
+          )}
+        </MenuPopup>
+      </Menu>
+      {/* Keep controls mounted (hidden) for their dialogs */}
+      <div className="sr-only">
+        {activeProjectScripts && (
+          <ProjectScriptsControl
+            scripts={activeProjectScripts}
+            keybindings={keybindings}
+            preferredScriptId={preferredScriptId}
+            onRunScript={onRunProjectScript}
+            onAddScript={onAddProjectScript}
+            onUpdateScript={onUpdateProjectScript}
+            onDeleteScript={onDeleteProjectScript}
+          />
+        )}
+        {activeProjectName && (
+          <GitActionsControl
+            gitCwd={gitCwd}
+            activeThreadId={activeThreadId}
+            availableEditors={availableEditors}
+          />
+        )}
+      </div>
+    </>
+  );
+});
+
+const GitActionsDropdownContent = memo(function GitActionsDropdownContent() {
+  // Delegate to the existing GitActionsControl which already handles everything
+  // For the submenu, we just render a placeholder that opens the git controls
+  return (
+    <MenuItem
+      onClick={() => {
+        // Click the hidden git actions button to open its menu
+        const gitButton = document.querySelector<HTMLButtonElement>(
+          '[aria-label="Git action options"]',
+        );
+        gitButton?.click();
+      }}
+    >
+      <GitCommitIcon className="size-4" />
+      Open Git actions
+    </MenuItem>
+  );
+});
+
+const ActionsDropdownContent = memo(function ActionsDropdownContent({
+  scripts,
+  keybindings,
+  onRunScript,
+}: {
+  scripts: ProjectScript[];
+  keybindings: ResolvedKeybindingsConfig;
+  onRunScript: (script: ProjectScript) => void;
+}) {
+  return (
+    <>
+      {scripts.map((script) => {
+        const shortcutLabel = shortcutLabelForCommand(
+          keybindings,
+          commandForProjectScript(script.id),
+        );
+        return (
+          <MenuItem key={script.id} onClick={() => onRunScript(script)}>
+            <ZapIcon className="size-4" />
+            {script.runOnWorktreeCreate ? `${script.name} (setup)` : script.name}
+            {shortcutLabel && <MenuShortcut>{shortcutLabel}</MenuShortcut>}
+          </MenuItem>
+        );
+      })}
+    </>
+  );
+});
+
+const OpenInDropdownContent = memo(function OpenInDropdownContent({
+  keybindings,
+  availableEditors,
+  openInCwd,
+  onClose,
+}: {
+  keybindings: ResolvedKeybindingsConfig;
+  availableEditors: ReadonlyArray<EditorId>;
+  openInCwd: string | null;
+  onClose: () => void;
+}) {
+  const allOptions = useMemo<Array<{ label: string; Icon: Icon; value: EditorId }>>(
+    () => [
+      { label: "Cursor", Icon: CursorIcon, value: "cursor" },
+      { label: "VS Code", Icon: VisualStudioCode, value: "vscode" },
+      { label: "Zed", Icon: Zed, value: "zed" },
+      {
+        label: isMacPlatform(navigator.platform)
+          ? "Finder"
+          : isWindowsPlatform(navigator.platform)
+            ? "Explorer"
+            : "Files",
+        Icon: FolderClosedIcon,
+        value: "file-manager",
+      },
+    ],
+    [],
+  );
+  const options = useMemo(
+    () => allOptions.filter((option) => availableEditors.includes(option.value)),
+    [allOptions, availableEditors],
+  );
+
+  const openFavoriteEditorShortcutLabel = useMemo(
+    () => shortcutLabelForCommand(keybindings, "editor.openFavorite"),
+    [keybindings],
+  );
+
+  const [lastEditor] = useState<EditorId>(() => {
+    const stored = localStorage.getItem(LAST_EDITOR_KEY);
+    return EDITORS.some((e) => e.id === stored) ? (stored as EditorId) : EDITORS[0].id;
+  });
+  const effectiveEditor = options.some((option) => option.value === lastEditor)
+    ? lastEditor
+    : (options[0]?.value ?? null);
+
+  const openInEditor = useCallback(
+    (editorId: EditorId) => {
+      const api = readNativeApi();
+      if (!api || !openInCwd) return;
+      void api.shell.openInEditor(openInCwd, editorId);
+      localStorage.setItem(LAST_EDITOR_KEY, editorId);
+      onClose();
+    },
+    [openInCwd, onClose],
+  );
+
+  if (options.length === 0) {
+    return <MenuItem disabled>No installed editors found</MenuItem>;
+  }
+
+  return (
+    <>
+      {options.map(({ label, Icon, value }) => (
+        <MenuItem key={value} onClick={() => openInEditor(value)}>
+          <Icon aria-hidden="true" className="size-4 text-muted-foreground" />
+          {label}
+          {value === effectiveEditor && openFavoriteEditorShortcutLabel && (
+            <MenuShortcut>{openFavoriteEditorShortcutLabel}</MenuShortcut>
+          )}
+        </MenuItem>
+      ))}
+    </>
+  );
+});
+
 interface ChatHeaderProps {
   activeThreadId: ThreadId;
   activeThreadTitle: string;
@@ -4508,6 +5080,8 @@ interface ChatHeaderProps {
   preferredScriptId: string | null;
   keybindings: ResolvedKeybindingsConfig;
   availableEditors: ReadonlyArray<EditorId>;
+  terminalOpen: boolean;
+  terminalToggleShortcutLabel: string | null;
   diffToggleShortcutLabel: string | null;
   gitCwd: string | null;
   diffOpen: boolean;
@@ -4517,6 +5091,7 @@ interface ChatHeaderProps {
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<void>;
   onUpdateProjectScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void>;
   onDeleteProjectScript: (scriptId: string) => Promise<void>;
+  onToggleTerminal: () => void;
   onToggleDiff: () => void;
   onTogglePlanSidebar: (open: boolean) => void;
 }
@@ -4531,6 +5106,8 @@ const ChatHeader = memo(function ChatHeader({
   preferredScriptId,
   keybindings,
   availableEditors,
+  terminalOpen,
+  terminalToggleShortcutLabel,
   diffToggleShortcutLabel,
   gitCwd,
   diffOpen,
@@ -4540,6 +5117,7 @@ const ChatHeader = memo(function ChatHeader({
   onAddProjectScript,
   onUpdateProjectScript,
   onDeleteProjectScript,
+  onToggleTerminal,
   onToggleDiff,
   onTogglePlanSidebar,
 }: ChatHeaderProps) {
@@ -4548,7 +5126,7 @@ const ChatHeader = memo(function ChatHeader({
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden sm:gap-3">
         <SidebarTrigger className="size-7 shrink-0 md:hidden" />
         <h2
-          className="min-w-0 shrink truncate text-sm font-medium text-foreground"
+          className="min-w-0 shrink overflow-x-auto whitespace-nowrap text-sm font-medium text-foreground [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           title={activeThreadTitle}
         >
           {activeThreadTitle}
@@ -4565,29 +5143,24 @@ const ChatHeader = memo(function ChatHeader({
         )}
       </div>
       <div className="@container/header-actions flex min-w-0 flex-1 items-center justify-end gap-2 @sm/header-actions:gap-3">
-        {activeProjectScripts && (
-          <ProjectScriptsControl
-            scripts={activeProjectScripts}
-            keybindings={keybindings}
-            preferredScriptId={preferredScriptId}
-            onRunScript={onRunProjectScript}
-            onAddScript={onAddProjectScript}
-            onUpdateScript={onUpdateProjectScript}
-            onDeleteScript={onDeleteProjectScript}
-          />
-        )}
         {activeProjectName && (
-          <OpenInPicker
-            keybindings={keybindings}
-            availableEditors={availableEditors}
-            openInCwd={openInCwd}
-          />
-        )}
-        {activeProjectName && (
-          <GitActionsControl
-            gitCwd={gitCwd}
+          <ChatHeaderDropdown
             activeThreadId={activeThreadId}
+            activeProjectName={activeProjectName}
+            isGitRepo={isGitRepo}
+            openInCwd={openInCwd}
+            activeProjectScripts={activeProjectScripts}
+            preferredScriptId={preferredScriptId}
+            keybindings={keybindings}
             availableEditors={availableEditors}
+            terminalOpen={terminalOpen}
+            terminalToggleShortcutLabel={terminalToggleShortcutLabel}
+            gitCwd={gitCwd}
+            onRunProjectScript={onRunProjectScript}
+            onAddProjectScript={onAddProjectScript}
+            onUpdateProjectScript={onUpdateProjectScript}
+            onDeleteProjectScript={onDeleteProjectScript}
+            onToggleTerminal={onToggleTerminal}
           />
         )}
         <Tooltip>
@@ -4640,13 +5213,7 @@ const ChatHeader = memo(function ChatHeader({
   );
 });
 
-const ThreadErrorBanner = memo(function ThreadErrorBanner({
-  error,
-  onDismiss,
-}: {
-  error: string | null;
-  onDismiss?: () => void;
-}) {
+const ThreadErrorBanner = memo(function ThreadErrorBanner({ error }: { error: string | null }) {
   if (!error) return null;
   return (
     <div className="pt-3 mx-auto max-w-3xl">
@@ -4655,18 +5222,6 @@ const ThreadErrorBanner = memo(function ThreadErrorBanner({
         <AlertDescription className="line-clamp-3" title={error}>
           {error}
         </AlertDescription>
-        {onDismiss && (
-          <AlertAction>
-            <button
-              type="button"
-              aria-label="Dismiss error"
-              className="inline-flex size-6 items-center justify-center rounded-md text-destructive/60 transition-colors hover:text-destructive"
-              onClick={onDismiss}
-            >
-              <XIcon className="size-3.5" />
-            </button>
-          </AlertAction>
-        )}
       </Alert>
     </div>
   );
@@ -4782,13 +5337,201 @@ const ComposerPendingApprovalActions = memo(function ComposerPendingApprovalActi
   );
 });
 
+interface PlanModePanelProps {
+  activePlan: ReturnType<typeof deriveActivePlanState>;
+}
+
+function summarizeActivePlanSteps(
+  steps: NonNullable<ReturnType<typeof deriveActivePlanState>>["steps"],
+): string {
+  const inProgressCount = steps.filter((step) => step.status === "inProgress").length;
+  const completedCount = steps.filter((step) => step.status === "completed").length;
+  const pendingCount = steps.length - inProgressCount - completedCount;
+  const parts = [`${steps.length} ${steps.length === 1 ? "step" : "steps"}`];
+
+  if (inProgressCount > 0) {
+    parts.push(`${inProgressCount} in progress`);
+  }
+  if (completedCount > 0) {
+    parts.push(`${completedCount} done`);
+  }
+  if (pendingCount > 0) {
+    parts.push(`${pendingCount} pending`);
+  }
+
+  return parts.join(", ");
+}
+
+type ThreadContextPanelProps = {
+  contextMessage: ChatMessage | null;
+  contextMode: ThreadContextMode;
+  messageCount: number;
+  onContextModeChange: (mode: ThreadContextMode) => void;
+  onJumpToMessage: () => void;
+};
+
+const ThreadContextPanel = memo(function ThreadContextPanel(props: ThreadContextPanelProps) {
+  const { contextMessage, contextMode, messageCount, onContextModeChange, onJumpToMessage } = props;
+  if (!contextMessage) {
+    return null;
+  }
+
+  return (
+    <div className="pointer-events-auto">
+      <div className="relative w-full rounded-xl border border-input/80 bg-background/85 px-4 py-3 text-foreground shadow-lg shadow-black/5 backdrop-blur-md transition-colors duration-150 before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-xl)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] supports-[backdrop-filter]:bg-background/72 dark:bg-input/55 dark:before:shadow-[0_-1px_--theme(--color-white/6%)]">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <Badge variant="outline">Context</Badge>
+            <span className="text-xs text-muted-foreground">
+              {contextMode === "last" ? "Updated" : "Started"}{" "}
+              {formatTimestamp(contextMessage.createdAt)}
+            </span>
+            <span className="text-xs text-muted-foreground/70">&middot; {messageCount} sent</span>
+          </div>
+          <Group
+            aria-label="Context message range"
+            className="flex gap-0.5 rounded-md bg-muted/60 p-0.5"
+          >
+            <Toggle
+              size="xs"
+              pressed={contextMode === "original"}
+              onPressedChange={(pressed) => {
+                if (pressed) {
+                  onContextModeChange("original");
+                }
+              }}
+              className="h-5 min-w-0 rounded-[4px] border-transparent px-1.5 text-[11px] text-muted-foreground shadow-none data-[pressed]:bg-background data-[pressed]:text-foreground data-[pressed]:shadow-xs/5"
+              aria-label="Show original thread context"
+            >
+              Original
+            </Toggle>
+            <Toggle
+              size="xs"
+              pressed={contextMode === "last"}
+              onPressedChange={(pressed) => {
+                if (pressed) {
+                  onContextModeChange("last");
+                }
+              }}
+              className="h-5 min-w-0 rounded-[4px] border-transparent px-1.5 text-[11px] text-muted-foreground shadow-none data-[pressed]:bg-background data-[pressed]:text-foreground data-[pressed]:shadow-xs/5"
+              aria-label="Show latest thread context"
+            >
+              Last
+            </Toggle>
+          </Group>
+        </div>
+        <button
+          type="button"
+          data-thread-context-jump="true"
+          data-thread-context-message-id={contextMessage.id}
+          className="group mt-2 flex w-full items-start justify-between gap-3 rounded-lg px-1 py-1 text-left transition-colors duration-150 hover:text-foreground"
+          onClick={onJumpToMessage}
+        >
+          <p className="min-w-0 flex-1 line-clamp-2 text-sm leading-6 text-foreground/90">
+            {describeThreadContextMessage(contextMessage)}
+          </p>
+          <span className="shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted-foreground/70 transition-colors duration-150 group-hover:text-foreground/80">
+            Jump
+          </span>
+        </button>
+      </div>
+    </div>
+  );
+});
+
+const PlanModePanel = memo(function PlanModePanel({ activePlan }: PlanModePanelProps) {
+  const [isMinimized, setIsMinimized] = useState(false);
+  const activePlanTurnId = activePlan?.turnId ?? null;
+
+  useEffect(() => {
+    if (activePlanTurnId) {
+      setIsMinimized(false);
+    }
+  }, [activePlanTurnId]);
+
+  if (!activePlan) return null;
+
+  const planSummary = summarizeActivePlanSteps(activePlan.steps);
+
+  return (
+    <div className="pointer-events-auto">
+      <div
+        data-plan-mode-panel="true"
+        className="rounded-xl border border-border/70 bg-background/82 p-4 shadow-lg shadow-black/5 backdrop-blur-md supports-[backdrop-filter]:bg-background/72"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary">Plan</Badge>
+              <span className="text-xs text-muted-foreground">
+                Updated {formatTimestamp(activePlan.createdAt)}
+              </span>
+            </div>
+            {isMinimized ? (
+              <p className="mt-2 text-sm text-muted-foreground">{planSummary}</p>
+            ) : null}
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            data-plan-mode-panel-toggle="true"
+            aria-expanded={!isMinimized}
+            aria-label={isMinimized ? "Expand plan card" : "Minimize plan card"}
+            className="shrink-0"
+            onClick={() => {
+              setIsMinimized((current) => !current);
+            }}
+          >
+            <ChevronDownIcon
+              className={cn("size-4 transition-transform", isMinimized ? "-rotate-90" : "rotate-0")}
+            />
+            {isMinimized ? "Expand" : "Minimize"}
+          </Button>
+        </div>
+        {!isMinimized ? (
+          <div data-plan-mode-panel-body="true">
+            {activePlan.explanation ? (
+              <p className="mt-2 text-sm text-muted-foreground">{activePlan.explanation}</p>
+            ) : null}
+            <div className="mt-3 space-y-2">
+              {activePlan.steps.map((step) => (
+                <div
+                  key={`${step.status}:${step.step}`}
+                  className="flex items-start gap-3 rounded-lg border border-border/60 bg-background/80 px-3 py-2"
+                >
+                  <Badge
+                    variant={
+                      step.status === "completed"
+                        ? "default"
+                        : step.status === "inProgress"
+                          ? "secondary"
+                          : "outline"
+                    }
+                  >
+                    {step.status === "inProgress"
+                      ? "In progress"
+                      : step.status === "completed"
+                        ? "Done"
+                        : "Pending"}
+                  </Badge>
+                  <div className="min-w-0 flex-1 text-sm">{step.step}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+});
+
 interface PendingUserInputPanelProps {
   pendingUserInputs: PendingUserInput[];
   respondingRequestIds: ApprovalRequestId[];
   answers: Record<string, PendingUserInputDraftAnswer>;
   questionIndex: number;
   onSelectOption: (questionId: string, optionLabel: string) => void;
-  onAdvance: () => void;
 }
 
 const ComposerPendingUserInputPanel = memo(function ComposerPendingUserInputPanel({
@@ -4797,7 +5540,6 @@ const ComposerPendingUserInputPanel = memo(function ComposerPendingUserInputPane
   answers,
   questionIndex,
   onSelectOption,
-  onAdvance,
 }: PendingUserInputPanelProps) {
   if (pendingUserInputs.length === 0) return null;
   const activePrompt = pendingUserInputs[0];
@@ -4811,7 +5553,6 @@ const ComposerPendingUserInputPanel = memo(function ComposerPendingUserInputPane
       answers={answers}
       questionIndex={questionIndex}
       onSelectOption={onSelectOption}
-      onAdvance={onAdvance}
     />
   );
 });
@@ -4822,132 +5563,53 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   answers,
   questionIndex,
   onSelectOption,
-  onAdvance,
 }: {
   prompt: PendingUserInput;
   isResponding: boolean;
   answers: Record<string, PendingUserInputDraftAnswer>;
   questionIndex: number;
   onSelectOption: (questionId: string, optionLabel: string) => void;
-  onAdvance: () => void;
 }) {
   const progress = derivePendingUserInputProgress(prompt.questions, answers, questionIndex);
   const activeQuestion = progress.activeQuestion;
-  const autoAdvanceTimerRef = useRef<number | null>(null);
-
-  // Clear auto-advance timer on unmount
-  useEffect(() => {
-    return () => {
-      if (autoAdvanceTimerRef.current !== null) {
-        window.clearTimeout(autoAdvanceTimerRef.current);
-      }
-    };
-  }, []);
-
-  const selectOptionAndAutoAdvance = useCallback(
-    (questionId: string, optionLabel: string) => {
-      onSelectOption(questionId, optionLabel);
-      if (autoAdvanceTimerRef.current !== null) {
-        window.clearTimeout(autoAdvanceTimerRef.current);
-      }
-      autoAdvanceTimerRef.current = window.setTimeout(() => {
-        autoAdvanceTimerRef.current = null;
-        onAdvance();
-      }, 200);
-    },
-    [onSelectOption, onAdvance],
-  );
-
-  // Keyboard shortcut: number keys 1-9 select corresponding option and auto-advance.
-  // Works even when the Lexical composer (contenteditable) has focus — the composer
-  // doubles as a custom-answer field during user input, and when it's empty the digit
-  // keys should pick options instead of typing into the editor.
-  useEffect(() => {
-    if (!activeQuestion || isResponding) return;
-    const handler = (event: globalThis.KeyboardEvent) => {
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
-      const target = event.target;
-      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
-        return;
-      }
-      // If the user has started typing a custom answer in the contenteditable
-      // composer, let digit keys pass through so they can type numbers.
-      if (target instanceof HTMLElement && target.isContentEditable) {
-        const hasCustomText = progress.customAnswer.length > 0;
-        if (hasCustomText) return;
-      }
-      const digit = Number.parseInt(event.key, 10);
-      if (Number.isNaN(digit) || digit < 1 || digit > 9) return;
-      const optionIndex = digit - 1;
-      if (optionIndex >= activeQuestion.options.length) return;
-      const option = activeQuestion.options[optionIndex];
-      if (!option) return;
-      event.preventDefault();
-      selectOptionAndAutoAdvance(activeQuestion.id, option.label);
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [activeQuestion, isResponding, selectOptionAndAutoAdvance, progress.customAnswer.length]);
 
   if (!activeQuestion) {
     return null;
   }
 
   return (
-    <div className="px-4 py-3 sm:px-5">
-      <div className="flex items-center gap-3">
-        <div className="flex items-center gap-2">
-          {prompt.questions.length > 1 ? (
-            <span className="flex h-5 items-center rounded-md bg-muted/60 px-1.5 text-[10px] font-medium tabular-nums text-muted-foreground/60">
-              {questionIndex + 1}/{prompt.questions.length}
-            </span>
-          ) : null}
-          <span className="text-[11px] font-semibold tracking-widest text-muted-foreground/50 uppercase">
-            {activeQuestion.header}
-          </span>
-        </div>
+    <div className="px-4 py-4 sm:px-5">
+      <div className="flex gap-2">
+        <span className="uppercase text-sm tracking-[0.2em]">
+          {questionIndex + 1}/{prompt.questions.length} {activeQuestion.header}
+        </span>
+        <div className="text-sm font-medium">{activeQuestion.question}</div>
       </div>
-      <p className="mt-1.5 text-sm text-foreground/90">{activeQuestion.question}</p>
-      <div className="mt-3 space-y-1">
-        {activeQuestion.options.map((option, index) => {
+      <div className="mt-3 flex flex-wrap gap-2">
+        {activeQuestion.options.map((option) => {
           const isSelected = progress.selectedOptionLabel === option.label;
-          const shortcutKey = index < 9 ? index + 1 : null;
           return (
-            <button
+            <Button
               key={`${activeQuestion.id}:${option.label}`}
-              type="button"
+              size="sm"
+              variant={isSelected ? "default" : "outline"}
               disabled={isResponding}
-              onClick={() => selectOptionAndAutoAdvance(activeQuestion.id, option.label)}
-              className={cn(
-                "group flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left transition-all duration-150",
-                isSelected
-                  ? "border-blue-500/40 bg-blue-500/8 text-foreground"
-                  : "border-transparent bg-muted/20 text-foreground/80 hover:bg-muted/40 hover:border-border/40",
-                isResponding && "opacity-50 cursor-not-allowed",
-              )}
+              data-pending-user-input-option={option.label}
+              aria-pressed={isSelected}
+              onMouseDown={(event) => {
+                event.preventDefault();
+              }}
+              onClick={(event) => {
+                onSelectOption(activeQuestion.id, option.label);
+                const targetButton = event.currentTarget;
+                window.requestAnimationFrame(() => {
+                  targetButton.focus({ preventScroll: true });
+                });
+              }}
+              title={option.description}
             >
-              {shortcutKey !== null ? (
-                <kbd
-                  className={cn(
-                    "flex size-5 shrink-0 items-center justify-center rounded text-[11px] font-medium tabular-nums transition-colors duration-150",
-                    isSelected
-                      ? "bg-blue-500/20 text-blue-400"
-                      : "bg-muted/40 text-muted-foreground/50 group-hover:bg-muted/60 group-hover:text-muted-foreground/70",
-                  )}
-                >
-                  {shortcutKey}
-                </kbd>
-              ) : null}
-              <div className="min-w-0 flex-1">
-                <span className="text-sm font-medium">{option.label}</span>
-                {option.description && option.description !== option.label ? (
-                  <span className="ml-2 text-xs text-muted-foreground/50">
-                    {option.description}
-                  </span>
-                ) : null}
-              </div>
-              {isSelected ? <CheckIcon className="size-3.5 shrink-0 text-blue-400" /> : null}
-            </button>
+              {option.label}
+            </Button>
           );
         })}
       </div>
@@ -4977,12 +5639,36 @@ const ComposerPlanFollowUpBanner = memo(function ComposerPlanFollowUpBanner({
 
 const MessageCopyButton = memo(function MessageCopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleCopy = useCallback(() => {
-    void navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    void copyTextToClipboard(text)
+      .then(() => {
+        if (copiedTimerRef.current != null) {
+          clearTimeout(copiedTimerRef.current);
+        }
+        setCopied(true);
+        copiedTimerRef.current = setTimeout(() => {
+          setCopied(false);
+          copiedTimerRef.current = null;
+        }, 2000);
+      })
+      .catch(() => {
+        toastManager.add({
+          type: "warning",
+          title: "Failed to copy message",
+          description: "Clipboard access was blocked or unavailable.",
+        });
+      });
   }, [text]);
+
+  useEffect(() => {
+    return () => {
+      if (copiedTimerRef.current != null) {
+        clearTimeout(copiedTimerRef.current);
+      }
+    };
+  }, []);
 
   return (
     <Button type="button" size="xs" variant="outline" onClick={handleCopy} title="Copy message">
@@ -5012,134 +5698,6 @@ const DiffStatLabel = memo(function DiffStatLabel(props: {
   );
 });
 
-function collectDirectoryPaths(nodes: ReadonlyArray<TurnDiffTreeNode>): string[] {
-  const paths: string[] = [];
-  for (const node of nodes) {
-    if (node.kind !== "directory") continue;
-    paths.push(node.path);
-    paths.push(...collectDirectoryPaths(node.children));
-  }
-  return paths;
-}
-
-function buildDirectoryExpansionState(
-  directoryPaths: ReadonlyArray<string>,
-  expanded: boolean,
-): Record<string, boolean> {
-  const expandedState: Record<string, boolean> = {};
-  for (const directoryPath of directoryPaths) {
-    expandedState[directoryPath] = expanded;
-  }
-  return expandedState;
-}
-
-const ChangedFilesTree = memo(function ChangedFilesTree(props: {
-  turnId: TurnId;
-  files: ReadonlyArray<TurnDiffFileChange>;
-  allDirectoriesExpanded: boolean;
-  resolvedTheme: "light" | "dark";
-  onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
-}) {
-  const { files, allDirectoriesExpanded, onOpenTurnDiff, resolvedTheme, turnId } = props;
-  const treeNodes = useMemo(() => buildTurnDiffTree(files), [files]);
-  const directoryPathsKey = useMemo(
-    () => collectDirectoryPaths(treeNodes).join("\u0000"),
-    [treeNodes],
-  );
-  const allDirectoryExpansionState = useMemo(
-    () =>
-      buildDirectoryExpansionState(
-        directoryPathsKey ? directoryPathsKey.split("\u0000") : [],
-        allDirectoriesExpanded,
-      ),
-    [allDirectoriesExpanded, directoryPathsKey],
-  );
-  const [expandedDirectories, setExpandedDirectories] = useState<Record<string, boolean>>(() =>
-    buildDirectoryExpansionState(directoryPathsKey ? directoryPathsKey.split("\u0000") : [], true),
-  );
-  useEffect(() => {
-    setExpandedDirectories(allDirectoryExpansionState);
-  }, [allDirectoryExpansionState]);
-
-  const toggleDirectory = useCallback((pathValue: string, fallbackExpanded: boolean) => {
-    setExpandedDirectories((current) => ({
-      ...current,
-      [pathValue]: !(current[pathValue] ?? fallbackExpanded),
-    }));
-  }, []);
-
-  const renderTreeNode = (node: TurnDiffTreeNode, depth: number) => {
-    const leftPadding = 8 + depth * 14;
-    if (node.kind === "directory") {
-      const isExpanded = expandedDirectories[node.path] ?? depth === 0;
-      return (
-        <div key={`dir:${node.path}`}>
-          <button
-            type="button"
-            className="group flex w-full items-center gap-1.5 rounded-md py-1 pr-2 text-left hover:bg-background/80"
-            style={{ paddingLeft: `${leftPadding}px` }}
-            onClick={() => toggleDirectory(node.path, depth === 0)}
-          >
-            <ChevronRightIcon
-              aria-hidden="true"
-              className={cn(
-                "size-3.5 shrink-0 text-muted-foreground/70 transition-transform group-hover:text-foreground/80",
-                isExpanded && "rotate-90",
-              )}
-            />
-            {isExpanded ? (
-              <FolderIcon className="size-3.5 shrink-0 text-muted-foreground/75" />
-            ) : (
-              <FolderClosedIcon className="size-3.5 shrink-0 text-muted-foreground/75" />
-            )}
-            <span className="truncate font-mono text-[11px] text-muted-foreground/90 group-hover:text-foreground/90">
-              {node.name}
-            </span>
-            {hasNonZeroStat(node.stat) && (
-              <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums">
-                <DiffStatLabel additions={node.stat.additions} deletions={node.stat.deletions} />
-              </span>
-            )}
-          </button>
-          {isExpanded && (
-            <div className="space-y-0.5">
-              {node.children.map((childNode) => renderTreeNode(childNode, depth + 1))}
-            </div>
-          )}
-        </div>
-      );
-    }
-
-    return (
-      <button
-        key={`file:${node.path}`}
-        type="button"
-        className="group flex w-full items-center gap-1.5 rounded-md py-1 pr-2 text-left hover:bg-background/80"
-        style={{ paddingLeft: `${leftPadding}px` }}
-        onClick={() => onOpenTurnDiff(turnId, node.path)}
-      >
-        <span aria-hidden="true" className="size-3.5 shrink-0" />
-        <VscodeEntryIcon
-          pathValue={node.path}
-          kind="file"
-          theme={resolvedTheme}
-          className="size-3.5 text-muted-foreground/70"
-        />
-        <span className="truncate font-mono text-[11px] text-muted-foreground/80 group-hover:text-foreground/90">
-          {node.name}
-        </span>
-        {node.stat && (
-          <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums">
-            <DiffStatLabel additions={node.stat.additions} deletions={node.stat.deletions} />
-          </span>
-        )}
-      </button>
-    );
-  };
-
-  return <div className="space-y-0.5">{treeNodes.map((node) => renderTreeNode(node, 0))}</div>;
-});
-
 const ProposedPlanCard = memo(function ProposedPlanCard({
   planMarkdown,
   cwd,
@@ -5161,7 +5719,7 @@ const ProposedPlanCard = memo(function ProposedPlanCard({
   const saveContents = normalizePlanMarkdownForExport(planMarkdown);
 
   const handleDownload = () => {
-    downloadPlanAsTextFile(downloadFilename, saveContents);
+    downloadTextFile(downloadFilename, saveContents);
   };
 
   const openSaveDialog = () => {
@@ -5253,12 +5811,7 @@ const ProposedPlanCard = memo(function ProposedPlanCard({
         </div>
         {canCollapse ? (
           <div className="mt-4 flex justify-center">
-            <Button
-              size="sm"
-              variant="outline"
-              data-scroll-anchor-ignore
-              onClick={() => setExpanded((value) => !value)}
-            >
+            <Button size="sm" variant="outline" onClick={() => setExpanded((value) => !value)}>
               {expanded ? "Collapse plan" : "Expand plan"}
             </Button>
           </div>
@@ -5321,11 +5874,21 @@ interface MessagesTimelineProps {
   isWorking: boolean;
   activeTurnInProgress: boolean;
   activeTurnStartedAt: string | null;
+  activeAssistantLabel: string;
+  activeWorkSummary: { title: string; detail: string | null };
+  liveWorkEntries: ReadonlyArray<WorkLogEntry>;
+  optimisticRunPhase: "sending-turn" | "preparing-worktree" | null;
   scrollContainer: HTMLDivElement | null;
   shouldSuppressScrollAdjustment: () => boolean;
+  /** Scroll container's top padding in px so the flagger rail can extend into it. */
+  scrollContainerPaddingTopPx: number;
   timelineEntries: ReturnType<typeof deriveTimelineEntries>;
+  jumpToMessageId: MessageId | null;
+  jumpToMessageRequestKey: number;
   completionDividerBeforeEntryId: string | null;
   completionSummary: string | null;
+  animatedAssistantMessageId: MessageId | null;
+  onAnimatedAssistantMessageComplete: () => void;
   turnDiffSummaryByAssistantMessageId: Map<MessageId, TurnDiffSummary>;
   nowIso: string;
   expandedWorkGroups: Record<string, boolean>;
@@ -5336,7 +5899,6 @@ interface MessagesTimelineProps {
   isRevertingCheckpoint: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   markdownCwd: string | undefined;
-  resolvedTheme: "light" | "dark";
   workspaceRoot: string | undefined;
 }
 
@@ -5348,8 +5910,8 @@ type TimelineRow =
   | {
       kind: "work";
       id: string;
-      createdAt: string;
-      groupedEntries: TimelineWorkEntry[];
+      createdAt: string | null;
+      groupedEntries: ReadonlyArray<TimelineWorkEntry>;
     }
   | {
       kind: "message";
@@ -5357,6 +5919,7 @@ type TimelineRow =
       createdAt: string;
       message: TimelineMessage;
       showCompletionDivider: boolean;
+      changedFilesSummary: TurnDiffSummary | null;
     }
   | {
       kind: "proposed-plan";
@@ -5366,21 +5929,431 @@ type TimelineRow =
     }
   | { kind: "working"; id: string; createdAt: string | null };
 
+interface TimelineFlaggerMarkerLayout {
+  kind: "sent" | "final";
+  messageId: MessageId;
+  topPx: number;
+  heightPx: number;
+}
+
+const AnimatedActivityText = memo(function AnimatedActivityText(props: {
+  text: string;
+  className?: string;
+}) {
+  const { text, className } = props;
+  const [visibleLength, setVisibleLength] = useState(text.length > 0 ? 1 : 0);
+
+  useEffect(() => {
+    setVisibleLength(text.length > 0 ? 1 : 0);
+  }, [text]);
+
+  useEffect(() => {
+    if (visibleLength >= text.length) {
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      setVisibleLength((current) =>
+        Math.min(text.length, current + Math.max(1, Math.ceil(text.length / 24))),
+      );
+    }, 22);
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [text.length, visibleLength]);
+
+  return <span className={className}>{text.slice(0, visibleLength)}</span>;
+});
+
+const CompactActivityStrip = memo(function CompactActivityStrip(props: {
+  assistantLabel: string;
+  title: string;
+  detail: string | null;
+  statusLabel: string;
+  elapsed: string | null;
+  entries: ReadonlyArray<TimelineWorkEntry>;
+  expanded: boolean;
+  onToggleExpanded: () => void;
+}) {
+  const {
+    assistantLabel,
+    title,
+    detail,
+    statusLabel,
+    elapsed,
+    entries,
+    expanded,
+    onToggleExpanded,
+  } = props;
+  const eventCount = entries.length;
+  const canExpand =
+    eventCount > 1 || Boolean(detail) || entries.some((entry) => entry.command || entry.detail);
+  const visibleEntries = expanded ? entries : entries.slice(-3);
+
+  return (
+    <div className="rounded-2xl border border-border/80 bg-card/45 px-4 py-3 shadow-sm">
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 inline-flex size-7 shrink-0 items-center justify-center rounded-full border border-border/70 bg-background/80 text-muted-foreground/75">
+          <BotIcon className="size-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <p className="text-sm font-medium text-foreground/92">{assistantLabel} is working</p>
+            <span className="shrink-0 rounded-full border border-border/70 bg-background/70 px-2 py-0.5 text-[10px] text-muted-foreground/72">
+              {statusLabel}
+            </span>
+            {elapsed ? (
+              <span className="shrink-0 text-[11px] text-muted-foreground/58">{elapsed}</span>
+            ) : null}
+          </div>
+          <div className="mt-1 flex min-w-0 items-center gap-2">
+            <span
+              className="inline-flex items-center gap-[4px] text-muted-foreground/55"
+              aria-hidden="true"
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse" />
+              <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse [animation-delay:180ms]" />
+              <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse [animation-delay:360ms]" />
+            </span>
+            <AnimatedActivityText
+              text={detail ? `${title} — ${detail}` : title}
+              className="min-w-0 truncate text-sm leading-relaxed text-foreground/84"
+            />
+          </div>
+          {canExpand ? (
+            <div className="mt-2">
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 text-[11px] text-muted-foreground/60 transition-colors hover:text-muted-foreground/85"
+                onClick={onToggleExpanded}
+              >
+                <ChevronDownIcon
+                  className={cn(
+                    "size-3 transition-transform duration-150",
+                    expanded ? "rotate-180" : "",
+                  )}
+                />
+                {expanded
+                  ? "Hide activity"
+                  : `${eventCount} live event${eventCount === 1 ? "" : "s"}`}
+              </button>
+            </div>
+          ) : null}
+          {expanded ? (
+            <div className="mt-2 space-y-1.5 border-t border-border/65 pt-2">
+              {visibleEntries.map((entry) => (
+                <div key={entry.id} className="flex items-start gap-2 text-[11px] leading-relaxed">
+                  <span className="mt-[6px] h-1 w-1 shrink-0 rounded-full bg-muted-foreground/35" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-muted-foreground/86">{entry.label}</p>
+                    {entry.command ? (
+                      <p
+                        className="truncate font-mono text-muted-foreground/66"
+                        title={entry.command}
+                      >
+                        {entry.command}
+                      </p>
+                    ) : entry.detail ? (
+                      <p className="truncate text-muted-foreground/62" title={entry.detail}>
+                        {entry.detail}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+});
+
+const CompactChangedFilesSummary = memo(function CompactChangedFilesSummary(props: {
+  turnSummary: TurnDiffSummary;
+  expanded: boolean;
+  onToggleExpanded: () => void;
+  onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+}) {
+  const { turnSummary, expanded, onToggleExpanded, onOpenTurnDiff } = props;
+  const summaryStat = summarizeTurnDiffStats(turnSummary.files);
+  const visibleFiles = expanded ? turnSummary.files : turnSummary.files.slice(0, 3);
+
+  return (
+    <div className="mt-3 overflow-hidden rounded-xl border border-border/75 bg-card/40">
+      <div className="flex items-center justify-between gap-3 px-3 py-2 text-[11px]">
+        <button
+          type="button"
+          className="inline-flex min-w-0 items-center gap-2 text-left text-foreground/82 transition-colors hover:text-foreground"
+          onClick={onToggleExpanded}
+        >
+          <span>
+            {turnSummary.files.length} file{turnSummary.files.length === 1 ? "" : "s"} changed
+          </span>
+          {hasNonZeroStat(summaryStat) ? (
+            <span className="font-mono tabular-nums">
+              <DiffStatLabel additions={summaryStat.additions} deletions={summaryStat.deletions} />
+            </span>
+          ) : null}
+          <ChevronDownIcon
+            className={cn(
+              "size-3 shrink-0 transition-transform duration-150",
+              expanded ? "rotate-180" : "",
+            )}
+          />
+        </button>
+        <Button
+          type="button"
+          size="xs"
+          variant="ghost"
+          onClick={() => onOpenTurnDiff(turnSummary.turnId, turnSummary.files[0]?.path)}
+        >
+          View diff
+        </Button>
+      </div>
+      <div className="divide-y divide-border/60 border-t border-border/60">
+        {visibleFiles.map((file) =>
+          (() => {
+            const additions = file.additions ?? 0;
+            const deletions = file.deletions ?? 0;
+            return (
+              <button
+                key={`${turnSummary.turnId}:${file.path}`}
+                type="button"
+                className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-background/40"
+                onClick={() => onOpenTurnDiff(turnSummary.turnId, file.path)}
+              >
+                <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-foreground/84">
+                  {file.path}
+                </span>
+                {hasNonZeroStat({ additions, deletions }) ? (
+                  <span className="shrink-0 font-mono text-[11px] tabular-nums">
+                    <DiffStatLabel additions={additions} deletions={deletions} />
+                  </span>
+                ) : null}
+              </button>
+            );
+          })(),
+        )}
+        {!expanded && turnSummary.files.length > visibleFiles.length ? (
+          <button
+            type="button"
+            className="w-full px-3 py-2 text-left text-[11px] text-muted-foreground/62 transition-colors hover:bg-background/40 hover:text-muted-foreground/85"
+            onClick={onToggleExpanded}
+          >
+            Show {turnSummary.files.length - visibleFiles.length} more files
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+});
+
+const AnimatedAssistantMessage = memo(function AnimatedAssistantMessage({
+  message,
+  cwd,
+  animate,
+  onComplete,
+}: {
+  message: TimelineMessage;
+  cwd: string | undefined;
+  animate: boolean;
+  onComplete: () => void;
+}) {
+  const targetText = message.text || "(empty response)";
+  const [visibleLength, setVisibleLength] = useState(
+    animate
+      ? Math.min(Math.max(10, Math.ceil(targetText.length * 0.08)), targetText.length)
+      : targetText.length,
+  );
+
+  useEffect(() => {
+    if (!animate) {
+      setVisibleLength(targetText.length);
+      return;
+    }
+    const initialLength = Math.min(
+      Math.max(10, Math.ceil(targetText.length * 0.08)),
+      targetText.length,
+    );
+    setVisibleLength(initialLength);
+  }, [animate, targetText.length]);
+
+  useEffect(() => {
+    if (!animate) return;
+    if (visibleLength >= targetText.length) {
+      onComplete();
+      return;
+    }
+    const step = Math.max(8, Math.ceil(targetText.length / 28));
+    const timeout = window.setTimeout(() => {
+      setVisibleLength((current) => Math.min(targetText.length, current + step));
+    }, 20);
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [animate, onComplete, targetText.length, visibleLength]);
+
+  return (
+    <ChatMarkdown
+      text={animate ? targetText.slice(0, visibleLength) : targetText}
+      cwd={cwd}
+      isStreaming={Boolean(message.streaming) || (animate && visibleLength < targetText.length)}
+    />
+  );
+});
+
 function estimateTimelineProposedPlanHeight(proposedPlan: TimelineProposedPlan): number {
   const estimatedLines = Math.max(1, Math.ceil(proposedPlan.planMarkdown.length / 72));
   return 120 + Math.min(estimatedLines * 22, 880);
 }
+
+const TimelineFlaggerRail = memo(function TimelineFlaggerRail(props: {
+  viewportHeightPx: number;
+  scrollTop: number;
+  clientHeight: number;
+  scrollHeight: number;
+  markers: ReadonlyArray<TimelineFlaggerMarkerLayout>;
+  onJumpToMessage: (messageId: MessageId) => void;
+  onScrollToRatio: (ratio: number) => void;
+}) {
+  const {
+    viewportHeightPx,
+    scrollTop,
+    clientHeight,
+    scrollHeight,
+    markers,
+    onJumpToMessage,
+    onScrollToRatio,
+  } = props;
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const activePointerIdRef = useRef<number | null>(null);
+  const trackHeightPx = Math.max(1, viewportHeightPx);
+  const maxScrollTop = Math.max(scrollHeight - clientHeight, 0);
+  const thumbHeightPx =
+    maxScrollTop > 0
+      ? clamp((clientHeight / Math.max(scrollHeight, 1)) * trackHeightPx, {
+          minimum: 44,
+          maximum: trackHeightPx,
+        })
+      : trackHeightPx;
+  const thumbTravelPx = Math.max(trackHeightPx - thumbHeightPx, 0);
+  const thumbTopPx = maxScrollTop > 0 ? (scrollTop / maxScrollTop) * thumbTravelPx : 0;
+
+  const scrollToPointer = useCallback(
+    (clientY: number) => {
+      const track = trackRef.current;
+      if (!track) return;
+      const rect = track.getBoundingClientRect();
+      if (rect.height <= 0) return;
+      const ratio = clamp((clientY - rect.top) / rect.height, {
+        minimum: 0,
+        maximum: 1,
+      });
+      onScrollToRatio(ratio);
+    },
+    [onScrollToRatio],
+  );
+
+  if (viewportHeightPx <= 0) {
+    return null;
+  }
+
+  return (
+    <div
+      className="sticky top-0 z-10 flex shrink-0 self-start"
+      style={{ height: `${viewportHeightPx}px` }}
+    >
+      <div
+        ref={trackRef}
+        data-thread-flagger-rail="true"
+        className="relative h-full w-[14px] cursor-pointer border-l border-border/40 bg-background/50 transition-colors hover:bg-accent/30"
+        onPointerDown={(event) => {
+          if (event.button !== 0) return;
+          activePointerIdRef.current = event.pointerId;
+          event.currentTarget.setPointerCapture(event.pointerId);
+          scrollToPointer(event.clientY);
+        }}
+        onPointerMove={(event) => {
+          if (activePointerIdRef.current !== event.pointerId) return;
+          scrollToPointer(event.clientY);
+        }}
+        onPointerUp={(event) => {
+          if (activePointerIdRef.current !== event.pointerId) return;
+          activePointerIdRef.current = null;
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+          }
+        }}
+        onPointerCancel={(event) => {
+          if (activePointerIdRef.current !== event.pointerId) return;
+          activePointerIdRef.current = null;
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+          }
+        }}
+      >
+        {/* Viewport thumb — subtle rectangular overlay like VS Code's overview ruler */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 bg-foreground/8 transition-colors"
+          style={{
+            top: `${thumbTopPx}px`,
+            height: `${thumbHeightPx}px`,
+          }}
+        />
+        {/* Markers — thin horizontal dashes */}
+        {markers.map((marker) => (
+          <button
+            key={`${marker.kind}:${marker.messageId}`}
+            type="button"
+            data-thread-flagger-kind={marker.kind}
+            data-thread-flagger-message-id={marker.messageId}
+            className={cn(
+              "absolute right-[1px] left-[3px] transition-opacity duration-100",
+              "hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none",
+              marker.kind === "sent"
+                ? "bg-sky-400/90 hover:bg-sky-400 hover:shadow-[0_0_4px_rgba(56,189,248,0.45)]"
+                : "bg-emerald-400/90 hover:bg-emerald-400 hover:shadow-[0_0_4px_rgba(52,211,153,0.45)]",
+            )}
+            style={{
+              top: `${marker.topPx}px`,
+              height: `${Math.max(marker.heightPx, 2)}px`,
+              minHeight: "2px",
+              maxHeight: "4px",
+              borderRadius: "0.5px",
+            }}
+            aria-label={marker.kind === "sent" ? "Jump to sent message" : "Jump to final response"}
+            title={marker.kind === "sent" ? "Jump to sent message" : "Jump to final response"}
+            onClick={(event) => {
+              event.stopPropagation();
+              onJumpToMessage(marker.messageId);
+            }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+});
 
 const MessagesTimeline = memo(function MessagesTimeline({
   hasMessages,
   isWorking,
   activeTurnInProgress,
   activeTurnStartedAt,
+  activeAssistantLabel,
+  activeWorkSummary,
+  liveWorkEntries,
+  optimisticRunPhase,
   scrollContainer,
   shouldSuppressScrollAdjustment,
+  scrollContainerPaddingTopPx,
   timelineEntries,
+  jumpToMessageId,
+  jumpToMessageRequestKey,
   completionDividerBeforeEntryId,
   completionSummary,
+  animatedAssistantMessageId,
+  onAnimatedAssistantMessageComplete,
   turnDiffSummaryByAssistantMessageId,
   nowIso,
   expandedWorkGroups,
@@ -5391,11 +6364,15 @@ const MessagesTimeline = memo(function MessagesTimeline({
   isRevertingCheckpoint,
   onImageExpand,
   markdownCwd,
-  resolvedTheme,
   workspaceRoot,
 }: MessagesTimelineProps) {
   const timelineRootRef = useRef<HTMLDivElement | null>(null);
   const [timelineWidthPx, setTimelineWidthPx] = useState<number | null>(null);
+  const [scrollMetrics, setScrollMetrics] = useState({
+    scrollTop: 0,
+    clientHeight: 0,
+    scrollHeight: 1,
+  });
 
   useLayoutEffect(() => {
     const timelineRoot = timelineRootRef.current;
@@ -5432,21 +6409,6 @@ const MessagesTimeline = memo(function MessagesTimeline({
       }
 
       if (timelineEntry.kind === "work") {
-        const groupedEntries = [timelineEntry.entry];
-        let cursor = index + 1;
-        while (cursor < timelineEntries.length) {
-          const nextEntry = timelineEntries[cursor];
-          if (!nextEntry || nextEntry.kind !== "work") break;
-          groupedEntries.push(nextEntry.entry);
-          cursor += 1;
-        }
-        nextRows.push({
-          kind: "work",
-          id: timelineEntry.id,
-          createdAt: timelineEntry.createdAt,
-          groupedEntries,
-        });
-        index = cursor - 1;
         continue;
       }
 
@@ -5468,19 +6430,74 @@ const MessagesTimeline = memo(function MessagesTimeline({
         showCompletionDivider:
           timelineEntry.message.role === "assistant" &&
           completionDividerBeforeEntryId === timelineEntry.id,
+        changedFilesSummary:
+          timelineEntry.message.role === "assistant"
+            ? (turnDiffSummaryByAssistantMessageId.get(timelineEntry.message.id) ?? null)
+            : null,
       });
     }
 
-    if (isWorking) {
-      nextRows.push({
-        kind: "working",
-        id: "working-indicator-row",
-        createdAt: activeTurnStartedAt,
-      });
+    if (activeTurnInProgress) {
+      if (liveWorkEntries.length > 0) {
+        nextRows.push({
+          kind: "work",
+          // Anchor the active work group to the first streamed event for the turn so
+          // appending new events does not reset expansion state or row measurements.
+          id: `live-work:${liveWorkEntries[0]?.id ?? activeTurnStartedAt ?? "current"}`,
+          createdAt: liveWorkEntries[0]?.createdAt ?? activeTurnStartedAt ?? null,
+          groupedEntries: liveWorkEntries,
+        });
+      } else if (isWorking) {
+        nextRows.push({
+          kind: "working",
+          id: "working-indicator-row",
+          createdAt: activeTurnStartedAt,
+        });
+      }
     }
 
     return nextRows;
-  }, [timelineEntries, completionDividerBeforeEntryId, isWorking, activeTurnStartedAt]);
+  }, [
+    timelineEntries,
+    completionDividerBeforeEntryId,
+    activeTurnInProgress,
+    isWorking,
+    activeTurnStartedAt,
+    liveWorkEntries,
+    turnDiffSummaryByAssistantMessageId,
+  ]);
+  const messageRowIndexById = useMemo(() => {
+    const nextMap = new Map<MessageId, number>();
+    for (let index = 0; index < rows.length; index += 1) {
+      const row = rows[index];
+      if (!row || row.kind !== "message") {
+        continue;
+      }
+      nextMap.set(row.message.id, index);
+    }
+    return nextMap;
+  }, [rows]);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<MessageId | null>(null);
+  const highlightedMessageTimeoutRef = useRef<number | null>(null);
+  const lastHandledJumpRequestKeyRef = useRef(0);
+
+  const findMessageElement = useCallback(
+    (messageId: MessageId): HTMLElement | null =>
+      Array.from(
+        timelineRootRef.current?.querySelectorAll<HTMLElement>("[data-message-id]") ?? [],
+      ).find((element) => element.dataset.messageId === messageId) ?? null,
+    [],
+  );
+  const highlightMessage = useCallback((messageId: MessageId) => {
+    if (highlightedMessageTimeoutRef.current !== null) {
+      window.clearTimeout(highlightedMessageTimeoutRef.current);
+    }
+    setHighlightedMessageId(messageId);
+    highlightedMessageTimeoutRef.current = window.setTimeout(() => {
+      highlightedMessageTimeoutRef.current = null;
+      setHighlightedMessageId((current) => (current === messageId ? null : current));
+    }, 1800);
+  }, []);
 
   const firstUnvirtualizedRowIndex = useMemo(() => {
     const firstTailRowIndex = Math.max(rows.length - ALWAYS_UNVIRTUALIZED_TAIL_ROWS, 0);
@@ -5524,6 +6541,15 @@ const MessagesTimeline = memo(function MessagesTimeline({
     minimum: 0,
     maximum: rows.length,
   });
+  const estimateRowSize = useCallback(
+    (row: TimelineRow): number => {
+      if (row.kind === "work") return 112;
+      if (row.kind === "proposed-plan") return estimateTimelineProposedPlanHeight(row.proposedPlan);
+      if (row.kind === "working") return 132;
+      return estimateTimelineMessageHeight(row.message, { timelineWidthPx });
+    },
+    [timelineWidthPx],
+  );
 
   const rowVirtualizer = useVirtualizer({
     count: virtualizedRowCount,
@@ -5532,11 +6558,7 @@ const MessagesTimeline = memo(function MessagesTimeline({
     getItemKey: (index: number) => rows[index]?.id ?? index,
     estimateSize: (index: number) => {
       const row = rows[index];
-      if (!row) return 96;
-      if (row.kind === "work") return 112;
-      if (row.kind === "proposed-plan") return estimateTimelineProposedPlanHeight(row.proposedPlan);
-      if (row.kind === "working") return 40;
-      return estimateTimelineMessageHeight(row.message, { timelineWidthPx });
+      return row ? estimateRowSize(row) : 96;
     },
     measureElement: measureVirtualElement,
     useAnimationFrameWithResizeObserver: true,
@@ -5546,6 +6568,13 @@ const MessagesTimeline = memo(function MessagesTimeline({
     if (timelineWidthPx === null) return;
     rowVirtualizer.measure();
   }, [rowVirtualizer, timelineWidthPx]);
+  useEffect(() => {
+    return () => {
+      if (highlightedMessageTimeoutRef.current !== null) {
+        window.clearTimeout(highlightedMessageTimeoutRef.current);
+      }
+    };
+  }, []);
   useEffect(() => {
     rowVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = (_item, _delta, instance) => {
       if (shouldSuppressScrollAdjustment()) {
@@ -5561,37 +6590,231 @@ const MessagesTimeline = memo(function MessagesTimeline({
     };
   }, [rowVirtualizer, shouldSuppressScrollAdjustment]);
   const pendingMeasureFrameRef = useRef<number | null>(null);
+  const pendingJumpFrameRef = useRef<number | null>(null);
+  const syncScrollMetrics = useCallback(() => {
+    if (!scrollContainer) {
+      setScrollMetrics({
+        scrollTop: 0,
+        clientHeight: 0,
+        scrollHeight: 1,
+      });
+      return;
+    }
+    setScrollMetrics((current) => {
+      const next = {
+        scrollTop: scrollContainer.scrollTop,
+        clientHeight: scrollContainer.clientHeight,
+        scrollHeight: Math.max(scrollContainer.scrollHeight, 1),
+      };
+      if (
+        current.scrollTop === next.scrollTop &&
+        current.clientHeight === next.clientHeight &&
+        current.scrollHeight === next.scrollHeight
+      ) {
+        return current;
+      }
+      return next;
+    });
+  }, [scrollContainer]);
   const onTimelineImageLoad = useCallback(() => {
     if (pendingMeasureFrameRef.current !== null) return;
     pendingMeasureFrameRef.current = window.requestAnimationFrame(() => {
       pendingMeasureFrameRef.current = null;
       rowVirtualizer.measure();
+      syncScrollMetrics();
     });
-  }, [rowVirtualizer]);
+  }, [rowVirtualizer, syncScrollMetrics]);
   useEffect(() => {
     return () => {
       const frame = pendingMeasureFrameRef.current;
       if (frame !== null) {
         window.cancelAnimationFrame(frame);
       }
+      if (pendingJumpFrameRef.current !== null) {
+        window.cancelAnimationFrame(pendingJumpFrameRef.current);
+      }
     };
   }, []);
+  useLayoutEffect(() => {
+    syncScrollMetrics();
+  }, [rows, scrollContainer, syncScrollMetrics, timelineWidthPx, virtualizedRowCount]);
+  useEffect(() => {
+    if (!scrollContainer) return;
+    syncScrollMetrics();
+    const handleScroll = () => {
+      syncScrollMetrics();
+    };
+    scrollContainer.addEventListener("scroll", handleScroll, { passive: true });
+    if (typeof ResizeObserver === "undefined") {
+      return () => {
+        scrollContainer.removeEventListener("scroll", handleScroll);
+      };
+    }
+    const observer = new ResizeObserver(() => {
+      syncScrollMetrics();
+    });
+    observer.observe(scrollContainer);
+    return () => {
+      observer.disconnect();
+      scrollContainer.removeEventListener("scroll", handleScroll);
+    };
+  }, [scrollContainer, syncScrollMetrics]);
+  const scrollToMessage = useCallback(
+    (messageId: MessageId) => {
+      const rowIndex = messageRowIndexById.get(messageId);
+      if (typeof rowIndex !== "number") {
+        return;
+      }
+
+      if (pendingJumpFrameRef.current !== null) {
+        window.cancelAnimationFrame(pendingJumpFrameRef.current);
+        pendingJumpFrameRef.current = null;
+      }
+
+      const scrollTargetIntoView = (): boolean => {
+        const element = findMessageElement(messageId);
+        if (!element) {
+          return false;
+        }
+        element.scrollIntoView({ behavior: "smooth", block: "center" });
+        highlightMessage(messageId);
+        syncScrollMetrics();
+        return true;
+      };
+
+      if (scrollTargetIntoView()) {
+        return;
+      }
+
+      rowVirtualizer.scrollToIndex(rowIndex, { align: "start" });
+
+      if (rowIndex === 0) {
+        scrollContainer?.scrollTo({ top: 0 });
+      }
+      syncScrollMetrics();
+
+      let attemptsRemaining = 12;
+      const settleScroll = () => {
+        if (scrollTargetIntoView()) {
+          pendingJumpFrameRef.current = null;
+          return;
+        }
+        if (attemptsRemaining <= 0) {
+          pendingJumpFrameRef.current = null;
+          return;
+        }
+        attemptsRemaining -= 1;
+        pendingJumpFrameRef.current = window.requestAnimationFrame(settleScroll);
+      };
+      pendingJumpFrameRef.current = window.requestAnimationFrame(settleScroll);
+    },
+    [
+      findMessageElement,
+      highlightMessage,
+      messageRowIndexById,
+      rowVirtualizer,
+      scrollContainer,
+      syncScrollMetrics,
+    ],
+  );
+  useEffect(() => {
+    if (!jumpToMessageId || jumpToMessageRequestKey < 1) {
+      return;
+    }
+    if (lastHandledJumpRequestKeyRef.current === jumpToMessageRequestKey) {
+      return;
+    }
+    const rowIndex = messageRowIndexById.get(jumpToMessageId);
+    if (typeof rowIndex !== "number") {
+      return;
+    }
+    lastHandledJumpRequestKeyRef.current = jumpToMessageRequestKey;
+    scrollToMessage(jumpToMessageId);
+  }, [jumpToMessageId, jumpToMessageRequestKey, messageRowIndexById, scrollToMessage]);
 
   const virtualRows = rowVirtualizer.getVirtualItems();
   const nonVirtualizedRows = rows.slice(virtualizedRowCount);
-  const [allDirectoriesExpandedByTurnId, setAllDirectoriesExpandedByTurnId] = useState<
-    Record<string, boolean>
-  >({});
-  const onToggleAllDirectories = useCallback((turnId: TurnId) => {
-    setAllDirectoriesExpandedByTurnId((current) => ({
-      ...current,
-      [turnId]: !(current[turnId] ?? true),
-    }));
-  }, []);
+  const scrollbarMarkers = useMemo(
+    () =>
+      deriveTimelineScrollbarMarkers(
+        rows.map((row) =>
+          row.kind === "message"
+            ? {
+                kind: row.kind,
+                message: row.message,
+              }
+            : { kind: row.kind },
+        ),
+      ),
+    [rows],
+  );
+  const estimatedRowLayouts = useMemo(() => {
+    const layouts: Array<{ start: number; size: number }> = [];
+    let currentOffsetPx = 0;
+    for (const row of rows) {
+      const size = estimateRowSize(row);
+      layouts.push({ start: currentOffsetPx, size });
+      currentOffsetPx += size;
+    }
+    return {
+      layouts,
+      totalHeightPx: Math.max(currentOffsetPx, 1),
+    };
+  }, [estimateRowSize, rows]);
+  const flaggerMarkerLayouts = useMemo<TimelineFlaggerMarkerLayout[]>(() => {
+    const trackHeightPx = Math.max(scrollMetrics.clientHeight, 1);
+    return scrollbarMarkers.flatMap((marker) => {
+      const rowLayout = estimatedRowLayouts.layouts[marker.rowIndex];
+      if (!rowLayout) {
+        return [];
+      }
+      const topRatio = rowLayout.start / estimatedRowLayouts.totalHeightPx;
+      const heightRatio = rowLayout.size / estimatedRowLayouts.totalHeightPx;
+      // Thin consistent markers (2–3px) like VS Code's overview ruler
+      const heightPx = clamp(heightRatio * trackHeightPx, {
+        minimum: 2,
+        maximum: 4,
+      });
+      const topPx = clamp(topRatio * trackHeightPx, {
+        minimum: 0,
+        maximum: Math.max(trackHeightPx - heightPx, 0),
+      });
+      return [
+        {
+          kind: marker.kind,
+          messageId: marker.messageId as MessageId,
+          topPx,
+          heightPx,
+        },
+      ];
+    });
+  }, [
+    estimatedRowLayouts.layouts,
+    estimatedRowLayouts.totalHeightPx,
+    scrollMetrics.clientHeight,
+    scrollbarMarkers,
+  ]);
+  const scrollToRatio = useCallback(
+    (ratio: number) => {
+      if (!scrollContainer) {
+        return;
+      }
+      const maxScrollTop = Math.max(scrollContainer.scrollHeight - scrollContainer.clientHeight, 0);
+      const nextScrollTop = ratio * maxScrollTop;
+      scrollContainer.scrollTo({ top: nextScrollTop });
+      syncScrollMetrics();
+    },
+    [scrollContainer, syncScrollMetrics],
+  );
 
   const renderRowContent = (row: TimelineRow) => (
     <div
-      className="pb-4"
+      className={cn(
+        "pb-4 transition-colors duration-500",
+        row.kind === "message" &&
+          highlightedMessageId === row.message.id &&
+          "rounded-2xl bg-accent/25 ring-1 ring-border/80",
+      )}
       data-timeline-row-kind={row.kind}
       data-message-id={row.kind === "message" ? row.message.id : undefined}
       data-message-role={row.kind === "message" ? row.message.role : undefined}
@@ -5601,82 +6824,26 @@ const MessagesTimeline = memo(function MessagesTimeline({
           const groupId = row.id;
           const groupedEntries = row.groupedEntries;
           const isExpanded = expandedWorkGroups[groupId] ?? false;
-          const hasOverflow = groupedEntries.length > MAX_VISIBLE_WORK_LOG_ENTRIES;
-          const visibleEntries =
-            hasOverflow && !isExpanded
-              ? groupedEntries.slice(-MAX_VISIBLE_WORK_LOG_ENTRIES)
-              : groupedEntries;
-          const hiddenCount = groupedEntries.length - visibleEntries.length;
-          const onlyToolEntries = groupedEntries.every((entry) => entry.tone === "tool");
-          const groupLabel = onlyToolEntries
-            ? groupedEntries.length === 1
-              ? "Tool call"
-              : `Tool calls (${groupedEntries.length})`
-            : groupedEntries.length === 1
-              ? "Work event"
-              : `Work log (${groupedEntries.length})`;
+          const latestEntry = groupedEntries.at(-1) ?? null;
+          const status = latestEntry?.tone === "error" ? "Attention" : "Live";
+          const elapsed = row.createdAt !== null ? formatWorkingTimer(row.createdAt, nowIso) : null;
 
           return (
-            <div className="rounded-lg border border-border/80 bg-card/45 px-3 py-2">
-              <div className="mb-1.5 flex items-center justify-between gap-3">
-                <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/65">
-                  {groupLabel}
-                </p>
-                {hasOverflow && (
-                  <button
-                    type="button"
-                    className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/55 transition-colors duration-150 hover:text-muted-foreground/80"
-                    onClick={() => onToggleWorkGroup(groupId)}
-                  >
-                    {isExpanded ? "Show less" : `Show ${hiddenCount} more`}
-                  </button>
-                )}
-              </div>
-              <div className="space-y-1">
-                {visibleEntries.map((workEntry) => (
-                  <div key={`work-row:${workEntry.id}`} className="flex items-start gap-2 py-0.5">
-                    <span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/30" />
-                    <div className="min-w-0 flex-1 py-[2px]">
-                      <p className={`text-[11px] leading-relaxed ${workToneClass(workEntry.tone)}`}>
-                        {workEntry.label}
-                      </p>
-                      {workEntry.command && (
-                        <pre className="mt-1 overflow-x-auto rounded-md border border-border/70 bg-background/80 px-2 py-1 font-mono text-[11px] leading-relaxed text-foreground/80">
-                          {workEntry.command}
-                        </pre>
-                      )}
-                      {workEntry.changedFiles && workEntry.changedFiles.length > 0 && (
-                        <div className="mt-1 flex flex-wrap gap-1">
-                          {workEntry.changedFiles.slice(0, 6).map((filePath) => (
-                            <span
-                              key={`${workEntry.id}:${filePath}`}
-                              className="rounded-md border border-border/70 bg-background/65 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/85"
-                              title={filePath}
-                            >
-                              {filePath}
-                            </span>
-                          ))}
-                          {workEntry.changedFiles.length > 6 && (
-                            <span className="px-1 text-[10px] text-muted-foreground/65">
-                              +{workEntry.changedFiles.length - 6} more
-                            </span>
-                          )}
-                        </div>
-                      )}
-                      {workEntry.detail &&
-                        (!workEntry.command || workEntry.detail !== workEntry.command) && (
-                          <p
-                            className="mt-1 text-[11px] leading-relaxed text-muted-foreground/75"
-                            title={workEntry.detail}
-                          >
-                            {workEntry.detail}
-                          </p>
-                        )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <CompactActivityStrip
+              assistantLabel={activeAssistantLabel}
+              title={latestEntry?.label ?? activeWorkSummary.title}
+              detail={
+                latestEntry?.command ??
+                latestEntry?.detail ??
+                latestEntry?.changedFiles?.slice(0, 2).join(", ") ??
+                activeWorkSummary.detail
+              }
+              statusLabel={status}
+              elapsed={elapsed ? `Working for ${elapsed}` : null}
+              entries={groupedEntries}
+              expanded={isExpanded}
+              onToggleExpanded={() => onToggleWorkGroup(groupId)}
+            />
           );
         })()}
 
@@ -5758,80 +6925,106 @@ const MessagesTimeline = memo(function MessagesTimeline({
       {row.kind === "message" &&
         row.message.role === "assistant" &&
         (() => {
-          const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
+          const assistantImages = row.message.attachments ?? [];
+          const inlineAssistantImage =
+            assistantImages.length === 0 ? extractInlineAssistantImage(row.message.text) : null;
+          const renderableAssistantImages =
+            assistantImages.length > 0
+              ? assistantImages
+              : inlineAssistantImage
+                ? [
+                    {
+                      id: `${row.message.id}:inline-svg`,
+                      name: inlineAssistantImage.name,
+                      previewUrl: inlineAssistantImage.previewUrl,
+                    },
+                  ]
+                : [];
+          const messageText =
+            (inlineAssistantImage ? "" : row.message.text) ||
+            (row.message.streaming || renderableAssistantImages.length > 0
+              ? ""
+              : "(empty response)");
           return (
             <>
               {row.showCompletionDivider && (
                 <div className="my-3 flex items-center gap-3">
-                  <span className="h-px flex-1 bg-border" />
-                  <span className="rounded-full border border-border bg-background px-2.5 py-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/80">
+                  <span className="h-px flex-1 bg-success/25" />
+                  <span className="rounded-full border border-success/25 bg-success/8 px-2.5 py-1 text-[10px] uppercase tracking-[0.14em] text-success-foreground/65">
                     {completionSummary ? `Response • ${completionSummary}` : "Response"}
                   </span>
-                  <span className="h-px flex-1 bg-border" />
+                  <span className="h-px flex-1 bg-success/25" />
                 </div>
               )}
-              <div className="min-w-0 px-1 py-0.5">
-                <ChatMarkdown
-                  text={messageText}
-                  cwd={markdownCwd}
-                  isStreaming={Boolean(row.message.streaming)}
-                />
-                {(() => {
-                  const turnSummary = turnDiffSummaryByAssistantMessageId.get(row.message.id);
-                  if (!turnSummary) return null;
-                  const checkpointFiles = turnSummary.files;
-                  if (checkpointFiles.length === 0) return null;
-                  const summaryStat = summarizeTurnDiffStats(checkpointFiles);
-                  const changedFileCountLabel = String(checkpointFiles.length);
-                  const allDirectoriesExpanded =
-                    allDirectoriesExpandedByTurnId[turnSummary.turnId] ?? true;
-                  return (
-                    <div className="mt-2 rounded-lg border border-border/80 bg-card/45 p-2.5">
-                      <div className="mb-1.5 flex items-center justify-between gap-2">
-                        <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/65">
-                          <span>Changed files ({changedFileCountLabel})</span>
-                          {hasNonZeroStat(summaryStat) && (
-                            <>
-                              <span className="mx-1">•</span>
-                              <DiffStatLabel
-                                additions={summaryStat.additions}
-                                deletions={summaryStat.deletions}
-                              />
-                            </>
-                          )}
-                        </p>
-                        <div className="flex items-center gap-1.5">
-                          <Button
+              <div
+                className={cn(
+                  "min-w-0 px-1 py-0.5",
+                  row.showCompletionDivider &&
+                    "rounded-xl bg-success/[0.04] ring-1 ring-success/10 px-3 py-2",
+                )}
+              >
+                {renderableAssistantImages.length > 0 && (
+                  <div className="mb-3 grid max-w-[520px] grid-cols-2 gap-2">
+                    {renderableAssistantImages.map((image) => (
+                      <div
+                        key={image.id}
+                        className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
+                      >
+                        {image.previewUrl ? (
+                          <button
                             type="button"
-                            size="xs"
-                            variant="outline"
-                            onClick={() => onToggleAllDirectories(turnSummary.turnId)}
+                            className="h-full w-full cursor-zoom-in"
+                            aria-label={`Preview ${image.name}`}
+                            onClick={() => {
+                              const preview = buildExpandedImagePreview(
+                                renderableAssistantImages,
+                                image.id,
+                              );
+                              if (!preview) return;
+                              onImageExpand(preview);
+                            }}
                           >
-                            {allDirectoriesExpanded ? "Collapse all" : "Expand all"}
-                          </Button>
-                          <Button
-                            type="button"
-                            size="xs"
-                            variant="outline"
-                            onClick={() =>
-                              onOpenTurnDiff(turnSummary.turnId, checkpointFiles[0]?.path)
-                            }
-                          >
-                            View diff
-                          </Button>
-                        </div>
+                            <img
+                              src={image.previewUrl}
+                              alt={image.name}
+                              className="h-full max-h-[220px] w-full object-cover"
+                              onLoad={onTimelineImageLoad}
+                              onError={onTimelineImageLoad}
+                            />
+                          </button>
+                        ) : (
+                          <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
+                            {image.name}
+                          </div>
+                        )}
                       </div>
-                      <ChangedFilesTree
-                        key={`changed-files-tree:${turnSummary.turnId}`}
-                        turnId={turnSummary.turnId}
-                        files={checkpointFiles}
-                        allDirectoriesExpanded={allDirectoriesExpanded}
-                        resolvedTheme={resolvedTheme}
-                        onOpenTurnDiff={onOpenTurnDiff}
-                      />
-                    </div>
-                  );
-                })()}
+                    ))}
+                  </div>
+                )}
+                <AnimatedAssistantMessage
+                  message={{ ...row.message, text: messageText }}
+                  cwd={markdownCwd}
+                  animate={
+                    !row.message.streaming &&
+                    animatedAssistantMessageId === row.message.id &&
+                    messageText.length > 0
+                  }
+                  onComplete={onAnimatedAssistantMessageComplete}
+                />
+                {row.changedFilesSummary && row.changedFilesSummary.files.length > 0 ? (
+                  <CompactChangedFilesSummary
+                    turnSummary={row.changedFilesSummary}
+                    expanded={
+                      expandedWorkGroups[`changed:${row.changedFilesSummary.turnId}`] ?? false
+                    }
+                    onToggleExpanded={() =>
+                      onToggleWorkGroup(
+                        `changed:${row.changedFilesSummary?.turnId ?? row.message.id}`,
+                      )
+                    }
+                    onOpenTurnDiff={onOpenTurnDiff}
+                  />
+                ) : null}
                 <p className="mt-1.5 text-[10px] text-muted-foreground/30">
                   {formatMessageMeta(
                     row.message.createdAt,
@@ -5856,19 +7049,21 @@ const MessagesTimeline = memo(function MessagesTimeline({
       )}
 
       {row.kind === "working" && (
-        <div className="py-0.5 pl-1.5">
-          <div className="flex items-center gap-2 pt-1 text-[11px] text-muted-foreground/70">
-            <span className="inline-flex items-center gap-[3px]">
-              <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse" />
-              <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:200ms]" />
-              <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:400ms]" />
-            </span>
-            <span>
-              {row.createdAt
+        <div className="min-w-0 px-1 py-0.5">
+          <CompactActivityStrip
+            assistantLabel={activeAssistantLabel}
+            title={activeWorkSummary.title}
+            detail={activeWorkSummary.detail ?? "Thinking"}
+            statusLabel={optimisticRunPhase === "preparing-worktree" ? "Preparing" : "Thinking"}
+            elapsed={
+              row.createdAt
                 ? `Working for ${formatWorkingTimer(row.createdAt, nowIso) ?? "0s"}`
-                : "Working..."}
-            </span>
-          </div>
+                : null
+            }
+            entries={[]}
+            expanded={false}
+            onToggleExpanded={() => {}}
+          />
         </div>
       )}
     </div>
@@ -5886,34 +7081,58 @@ const MessagesTimeline = memo(function MessagesTimeline({
 
   return (
     <div
-      ref={timelineRootRef}
-      data-timeline-root="true"
-      className="mx-auto w-full min-w-0 max-w-3xl overflow-x-hidden"
+      className="relative -mb-3 sm:-mb-4"
+      style={{ marginTop: `-${scrollContainerPaddingTopPx}px` }}
     >
-      {virtualizedRowCount > 0 && (
-        <div className="relative" style={{ height: `${rowVirtualizer.getTotalSize()}px` }}>
-          {virtualRows.map((virtualRow: VirtualItem) => {
-            const row = rows[virtualRow.index];
-            if (!row) return null;
+      {/* Inner wrapper restores the padding so message content stays in place */}
+      <div className="pb-3 sm:pb-4" style={{ paddingTop: `${scrollContainerPaddingTopPx}px` }}>
+        <div
+          ref={timelineRootRef}
+          data-timeline-root="true"
+          className="relative mx-auto w-full min-w-0 max-w-3xl overflow-x-hidden"
+        >
+          <div className="min-w-0">
+            {virtualizedRowCount > 0 && (
+              <div className="relative" style={{ height: `${rowVirtualizer.getTotalSize()}px` }}>
+                {virtualRows.map((virtualRow: VirtualItem) => {
+                  const row = rows[virtualRow.index];
+                  if (!row) return null;
 
-            return (
-              <div
-                key={`virtual-row:${row.id}`}
-                data-index={virtualRow.index}
-                ref={rowVirtualizer.measureElement}
-                className="absolute left-0 top-0 w-full"
-                style={{ transform: `translateY(${virtualRow.start}px)` }}
-              >
-                {renderRowContent(row)}
+                  return (
+                    <div
+                      key={`virtual-row:${row.id}`}
+                      data-index={virtualRow.index}
+                      ref={rowVirtualizer.measureElement}
+                      className="absolute left-0 top-0 w-full"
+                      style={{ transform: `translateY(${virtualRow.start}px)` }}
+                    >
+                      {renderRowContent(row)}
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })}
-        </div>
-      )}
+            )}
 
-      {nonVirtualizedRows.map((row) => (
-        <div key={`non-virtual-row:${row.id}`}>{renderRowContent(row)}</div>
-      ))}
+            {nonVirtualizedRows.map((row) => (
+              <div key={`non-virtual-row:${row.id}`}>{renderRowContent(row)}</div>
+            ))}
+          </div>
+        </div>
+      </div>
+      {/* Overview ruler — positioned at the right edge of the scroll container, next to the scrollbar */}
+      <div className="pointer-events-none absolute inset-y-0 right-0 z-10 flex items-stretch justify-end">
+        <div className="pointer-events-auto">
+          <TimelineFlaggerRail
+            viewportHeightPx={scrollMetrics.clientHeight}
+            scrollTop={scrollMetrics.scrollTop}
+            clientHeight={scrollMetrics.clientHeight}
+            scrollHeight={scrollMetrics.scrollHeight}
+            markers={flaggerMarkerLayouts}
+            onJumpToMessage={scrollToMessage}
+            onScrollToRatio={scrollToRatio}
+          />
+        </div>
+      </div>
     </div>
   );
 });
@@ -5923,26 +7142,30 @@ function isAvailableProviderOption(option: (typeof PROVIDER_OPTIONS)[number]): o
   label: string;
   available: true;
 } {
-  return option.available && option.value !== "claudeCode";
+  return option.available;
 }
 
 const AVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter(isAvailableProviderOption);
 const UNAVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter((option) => !option.available);
 const COMING_SOON_PROVIDER_OPTIONS = [
   { id: "opencode", label: "OpenCode", icon: OpenCodeIcon },
-  { id: "gemini", label: "Gemini", icon: Gemini },
 ] as const;
 
 function getCustomModelOptionsByProvider(settings: {
   customCodexModels: readonly string[];
+  customClaudeModels: readonly string[];
+  customGeminiModels: readonly string[];
 }): Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>> {
   return {
+    claudeCode: getAppModelOptions("claudeCode", settings.customClaudeModels),
     codex: getAppModelOptions("codex", settings.customCodexModels),
+    gemini: getAppModelOptions("gemini", settings.customGeminiModels),
   };
 }
 
 const PROVIDER_ICON_BY_PROVIDER: Record<ProviderPickerKind, Icon> = {
   codex: OpenAI,
+  gemini: Gemini,
   claudeCode: ClaudeAI,
   cursor: CursorIcon,
 };
@@ -6073,13 +7296,7 @@ const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           const OptionIcon = PROVIDER_ICON_BY_PROVIDER[option.value];
           return (
             <MenuItem key={option.value} disabled>
-              <OptionIcon
-                aria-hidden="true"
-                className={cn(
-                  "size-4 shrink-0 opacity-80",
-                  option.value === "claudeCode" ? "" : "text-muted-foreground/85",
-                )}
-              />
+              <OptionIcon aria-hidden="true" className="size-4 shrink-0 opacity-80" />
               <span>{option.label}</span>
               <span className="ms-auto text-[11px] text-muted-foreground/80 uppercase tracking-[0.08em]">
                 Coming soon
@@ -6181,132 +7398,5 @@ const CodexTraitsPicker = memo(function CodexTraitsPicker(props: {
         </MenuGroup>
       </MenuPopup>
     </Menu>
-  );
-});
-
-const OpenInPicker = memo(function OpenInPicker({
-  keybindings,
-  availableEditors,
-  openInCwd,
-}: {
-  keybindings: ResolvedKeybindingsConfig;
-  availableEditors: ReadonlyArray<EditorId>;
-  openInCwd: string | null;
-}) {
-  const [lastEditor, setLastEditor] = useState<EditorId>(() =>
-    preferredTerminalEditor(availableEditors),
-  );
-
-  const allOptions = useMemo<Array<{ label: string; Icon: Icon; value: EditorId }>>(
-    () => [
-      {
-        label: "Cursor",
-        Icon: CursorIcon,
-        value: "cursor",
-      },
-      {
-        label: "VS Code",
-        Icon: VisualStudioCode,
-        value: "vscode",
-      },
-      {
-        label: "Zed",
-        Icon: Zed,
-        value: "zed",
-      },
-      {
-        label: isMacPlatform(navigator.platform)
-          ? "Finder"
-          : isWindowsPlatform(navigator.platform)
-            ? "Explorer"
-            : "Files",
-        Icon: FolderClosedIcon,
-        value: "file-manager",
-      },
-    ],
-    [],
-  );
-  const options = useMemo(
-    () => allOptions.filter((option) => availableEditors.includes(option.value)),
-    [allOptions, availableEditors],
-  );
-
-  const effectiveEditor = options.some((option) => option.value === lastEditor)
-    ? lastEditor
-    : (options[0]?.value ?? null);
-  const primaryOption = options.find(({ value }) => value === effectiveEditor) ?? null;
-
-  useEffect(() => {
-    if (!effectiveEditor) return;
-    if (lastEditor !== effectiveEditor) {
-      setLastEditor(effectiveEditor);
-    }
-    writePreferredTerminalEditor(effectiveEditor);
-  }, [effectiveEditor, lastEditor]);
-
-  const openInEditor = useCallback(
-    (editorId: EditorId | null) => {
-      const api = readNativeApi();
-      if (!api || !openInCwd) return;
-      const editor = editorId ?? effectiveEditor;
-      if (!editor) return;
-      void api.shell.openInEditor(openInCwd, editor);
-      writePreferredTerminalEditor(editor);
-      setLastEditor(editor);
-    },
-    [effectiveEditor, openInCwd, setLastEditor],
-  );
-
-  const openFavoriteEditorShortcutLabel = useMemo(
-    () => shortcutLabelForCommand(keybindings, "editor.openFavorite"),
-    [keybindings],
-  );
-
-  useEffect(() => {
-    const handler = (e: globalThis.KeyboardEvent) => {
-      const api = readNativeApi();
-      if (!isOpenFavoriteEditorShortcut(e, keybindings)) return;
-      if (!api || !openInCwd) return;
-      if (!effectiveEditor) return;
-
-      e.preventDefault();
-      void api.shell.openInEditor(openInCwd, effectiveEditor);
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [effectiveEditor, keybindings, openInCwd]);
-
-  return (
-    <Group aria-label="Subscription actions">
-      <Button
-        size="xs"
-        variant="outline"
-        disabled={!effectiveEditor || !openInCwd}
-        onClick={() => openInEditor(effectiveEditor)}
-      >
-        {primaryOption?.Icon && <primaryOption.Icon aria-hidden="true" className="size-3.5" />}
-        <span className="sr-only @sm/header-actions:not-sr-only @sm/header-actions:ml-0.5">
-          Open
-        </span>
-      </Button>
-      <GroupSeparator className="hidden @sm/header-actions:block" />
-      <Menu>
-        <MenuTrigger render={<Button aria-label="Copy options" size="icon-xs" variant="outline" />}>
-          <ChevronDownIcon aria-hidden="true" className="size-4" />
-        </MenuTrigger>
-        <MenuPopup align="end">
-          {options.length === 0 && <MenuItem disabled>No installed editors found</MenuItem>}
-          {options.map(({ label, Icon, value }) => (
-            <MenuItem key={value} onClick={() => openInEditor(value)}>
-              <Icon aria-hidden="true" className="text-muted-foreground" />
-              {label}
-              {value === effectiveEditor && openFavoriteEditorShortcutLabel && (
-                <MenuShortcut>{openFavoriteEditorShortcutLabel}</MenuShortcut>
-              )}
-            </MenuItem>
-          ))}
-        </MenuPopup>
-      </Menu>
-    </Group>
   );
 });

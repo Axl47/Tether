@@ -5,6 +5,11 @@ import { defineConfig } from "vite";
 import packageJson from "./package.json" with { type: "json" };
 
 const port = Number(process.env.PORT ?? 5733);
+const bindHost = process.env.TETHER_HOST ?? process.env.T3CODE_HOST ?? "localhost";
+const publicHost =
+  process.env.TETHER_PUBLIC_HOST ??
+  process.env.T3CODE_PUBLIC_HOST ??
+  (bindHost === "0.0.0.0" || bindHost === "::" || bindHost === "[::]" ? "localhost" : bindHost);
 const sourcemapEnv = (process.env.TETHER_WEB_SOURCEMAP ?? process.env.T3CODE_WEB_SOURCEMAP)
   ?.trim()
   .toLowerCase();
@@ -38,6 +43,7 @@ export default defineConfig({
     tsconfigPaths: true,
   },
   server: {
+    host: bindHost,
     port,
     strictPort: true,
     hmr: {
@@ -45,7 +51,7 @@ export default defineConfig({
       // inside Electron's BrowserWindow. Vite 8 uses console.debug for
       // connection logs — enable "Verbose" in DevTools to see them.
       protocol: "ws",
-      host: "localhost",
+      host: publicHost,
     },
   },
   build: {

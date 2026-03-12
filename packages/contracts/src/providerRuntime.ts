@@ -10,7 +10,7 @@ import {
   TrimmedNonEmptyString,
   TurnId,
 } from "./baseSchemas";
-import { ProviderKind } from "./orchestration";
+import { ChatAttachment, ProviderKind } from "./orchestration";
 
 const TrimmedNonEmptyStringSchema = TrimmedNonEmptyString;
 const UnknownRecordSchema = Schema.Record(Schema.String, Schema.Unknown);
@@ -19,6 +19,8 @@ const RuntimeEventRawSource = Schema.Literals([
   "codex.app-server.notification",
   "codex.app-server.request",
   "codex.eventmsg",
+  "claude.sdk.message",
+  "claude.sdk.permission",
   "codex.sdk.thread-event",
 ]);
 export type RuntimeEventRawSource = typeof RuntimeEventRawSource.Type;
@@ -72,6 +74,7 @@ export type RuntimeItemStatus = typeof RuntimeItemStatus.Type;
 
 const RuntimeContentStreamKind = Schema.Literals([
   "assistant_text",
+  "assistant_image",
   "reasoning_text",
   "reasoning_summary_text",
   "plan_text",
@@ -370,6 +373,7 @@ export type ItemLifecyclePayload = typeof ItemLifecyclePayload.Type;
 const ContentDeltaPayload = Schema.Struct({
   streamKind: RuntimeContentStreamKind,
   delta: Schema.String,
+  attachments: Schema.optional(Schema.Array(ChatAttachment)),
   contentIndex: Schema.optional(Schema.Int),
   summaryIndex: Schema.optional(Schema.Int),
 });

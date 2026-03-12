@@ -166,9 +166,13 @@ export function createWsNativeApi(): NativeApi {
       getSnapshot: () => transport.request(ORCHESTRATION_WS_METHODS.getSnapshot),
       dispatchCommand: (command) =>
         transport.request(ORCHESTRATION_WS_METHODS.dispatchCommand, { command }),
+      forceDeleteThread: (input) =>
+        transport.request(ORCHESTRATION_WS_METHODS.forceDeleteThread, input),
       getTurnDiff: (input) => transport.request(ORCHESTRATION_WS_METHODS.getTurnDiff, input),
       getFullThreadDiff: (input) =>
         transport.request(ORCHESTRATION_WS_METHODS.getFullThreadDiff, input),
+      autorenameProjectThreads: (input) =>
+        transport.request(ORCHESTRATION_WS_METHODS.autorenameProjectThreads, input),
       replayEvents: (fromSequenceExclusive) =>
         transport.request(ORCHESTRATION_WS_METHODS.replayEvents, { fromSequenceExclusive }),
       onDomainEvent: (callback) =>

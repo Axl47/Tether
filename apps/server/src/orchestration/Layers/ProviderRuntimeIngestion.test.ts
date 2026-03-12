@@ -45,7 +45,7 @@ const asTurnId = (value: string): TurnId => TurnId.makeUnsafe(value);
 type LegacyProviderRuntimeEvent = {
   readonly type: string;
   readonly eventId: EventId;
-  readonly provider: "codex";
+  readonly provider: ProviderRuntimeEvent["provider"];
   readonly createdAt: string;
   readonly threadId: ThreadId;
   readonly turnId?: string | undefined;
@@ -402,6 +402,65 @@ describe("ProviderRuntimeIngestion", () => {
     );
   });
 
+  it("preserves running status when provider emits session ready during an active turn", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-ready-heartbeat"),
+      provider: "gemini",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-ready-heartbeat"),
+    });
+
+    await waitForThread(
+      harness.engine,
+      (thread) =>
+        thread.session?.status === "running" &&
+        thread.session?.activeTurnId === "turn-ready-heartbeat",
+    );
+
+    harness.emit({
+      type: "session.state.changed",
+      eventId: asEventId("evt-session-ready-midturn"),
+      provider: "gemini",
+      createdAt: new Date().toISOString(),
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-ready-heartbeat"),
+      payload: {
+        state: "ready",
+        reason: "runtime warm",
+      },
+    });
+
+    await Effect.runPromise(Effect.sleep("40 millis"));
+    const midReadModel = await Effect.runPromise(harness.engine.getReadModel());
+    const midThread = midReadModel.threads.find(
+      (entry) => entry.id === ThreadId.makeUnsafe("thread-1"),
+    );
+    expect(midThread?.session?.status).toBe("running");
+    expect(midThread?.session?.activeTurnId).toBe("turn-ready-heartbeat");
+
+    harness.emit({
+      type: "turn.completed",
+      eventId: asEventId("evt-turn-completed-ready-heartbeat"),
+      provider: "gemini",
+      createdAt: new Date().toISOString(),
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-ready-heartbeat"),
+      payload: {
+        state: "completed",
+      },
+    });
+
+    await waitForThread(
+      harness.engine,
+      (thread) => thread.session?.status === "ready" && thread.session?.activeTurnId === null,
+    );
+  });
+
   it("ignores auxiliary turn completions from a different provider thread", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();
@@ -596,6 +655,272 @@ describe("ProviderRuntimeIngestion", () => {
     );
     expect(message?.text).toBe("assistant-only final text");
     expect(message?.streaming).toBe(false);
+  });
+
+  it("does not merge distinct assistant messages in the same turn when itemId is missing", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-missing-itemid"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-missing-itemid"),
+    });
+
+    await waitForThread(
+      harness.engine,
+      (thread) =>
+        thread.session?.status === "running" &&
+        thread.session?.activeTurnId === "turn-missing-itemid",
+    );
+
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-message-delta-missing-itemid-1"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-missing-itemid"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: "Let me make the changes:",
+      },
+    });
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-message-completed-missing-itemid-1"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-missing-itemid"),
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+      },
+    });
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-message-delta-missing-itemid-2"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-missing-itemid"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: "Now let's update the container.",
+      },
+    });
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-message-completed-missing-itemid-2"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-missing-itemid"),
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+      },
+    });
+
+    const thread = await waitForThread(harness.engine, (entry) => {
+      const assistantMessages = entry.messages.filter(
+        (message: ProviderRuntimeTestMessage) =>
+          message.role === "assistant" &&
+          message.turnId === "turn-missing-itemid" &&
+          !message.streaming,
+      );
+      return assistantMessages.length === 2;
+    });
+
+    const assistantMessages = thread.messages
+      .filter(
+        (message: ProviderRuntimeTestMessage) =>
+          message.role === "assistant" &&
+          message.turnId === "turn-missing-itemid" &&
+          !message.streaming,
+      )
+      .toSorted((left, right) => left.id.localeCompare(right.id));
+
+    expect(assistantMessages.map((message: ProviderRuntimeTestMessage) => message.text)).toEqual([
+      "Let me make the changes:",
+      "Now let's update the container.",
+    ]);
+    expect(
+      new Set(assistantMessages.map((message: ProviderRuntimeTestMessage) => message.id)).size,
+    ).toBe(2);
+  });
+
+  it("projects thread token usage into normalized thread context-window state", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "thread.token-usage.updated",
+      eventId: asEventId("evt-context-window"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      payload: {
+        usage: {
+          threadId: "provider-thread-1",
+          turnId: "provider-turn-1",
+          tokenUsage: {
+            total: {
+              inputTokens: 124862,
+              cachedInputTokens: 92672,
+              outputTokens: 1654,
+              reasoningOutputTokens: 277,
+              totalTokens: 126516,
+            },
+            last: {
+              inputTokens: 124862,
+              cachedInputTokens: 92672,
+              outputTokens: 1654,
+              reasoningOutputTokens: 277,
+              totalTokens: 126516,
+            },
+            modelContextWindow: 258400,
+          },
+        },
+      },
+    });
+
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) =>
+        entry.contextWindow?.usedTokens === 126516 && entry.contextWindow?.usedPercent === 49,
+    );
+    expect(thread.contextWindow).toMatchObject({
+      provider: "codex",
+      usedTokens: 126516,
+      maxTokens: 258400,
+      remainingTokens: 131884,
+      usedPercent: 49,
+    });
+  });
+
+  it("projects root-level token_usage totals into normalized thread context-window state", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "thread.token-usage.updated",
+      eventId: asEventId("evt-context-window-root-token-usage"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      payload: {
+        usage: {
+          token_usage: {
+            total_tokens: 100,
+            input_tokens: 80,
+            cached_input_tokens: 20,
+            output_tokens: 15,
+            reasoning_output_tokens: 5,
+            model_context_window: 258400,
+          },
+        },
+      },
+    });
+
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) => entry.contextWindow?.usedTokens === 100 && entry.contextWindow?.usedPercent === 0,
+    );
+    expect(thread.contextWindow).toMatchObject({
+      provider: "codex",
+      usedTokens: 100,
+      maxTokens: 258400,
+      remainingTokens: 258300,
+      usedPercent: 0,
+      inputTokens: 80,
+      cachedInputTokens: 20,
+      outputTokens: 15,
+      reasoningOutputTokens: 5,
+    });
+  });
+
+  it("ignores malformed thread token usage payloads", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "thread.token-usage.updated",
+      eventId: asEventId("evt-context-window-invalid"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      payload: {
+        usage: {
+          info: {
+            total_token_usage: {
+              input_tokens: 124862,
+            },
+          },
+        },
+      },
+    });
+
+    await Effect.runPromise(Effect.sleep("40 millis"));
+    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
+    expect(thread?.contextWindow).toBeNull();
+  });
+
+  it("projects Claude turn usage into normalized thread context-window state", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "turn.completed",
+      eventId: asEventId("evt-claude-context-window"),
+      provider: "claudeCode",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: TurnId.makeUnsafe("turn-claude-1"),
+      payload: {
+        state: "completed",
+        usage: {
+          input_tokens: 80_000,
+          cache_creation_input_tokens: 5_000,
+          cache_read_input_tokens: 20_000,
+          output_tokens: 4_000,
+        },
+        modelUsage: {
+          "claude-sonnet-5-0": {
+            inputTokens: 85_000,
+            outputTokens: 4_000,
+            cacheReadInputTokens: 20_000,
+            cacheCreationInputTokens: 5_000,
+            webSearchRequests: 0,
+            costUSD: 1.23,
+            contextWindow: 200_000,
+            maxOutputTokens: 8_192,
+          },
+        },
+      },
+    });
+
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) =>
+        entry.contextWindow?.provider === "claudeCode" &&
+        entry.contextWindow.usedTokens === 109_000,
+    );
+    expect(thread.contextWindow).toMatchObject({
+      provider: "claudeCode",
+      usedTokens: 109_000,
+      maxTokens: 200_000,
+      remainingTokens: 91_000,
+      usedPercent: 55,
+      inputTokens: 85_000,
+      cachedInputTokens: 20_000,
+      outputTokens: 4_000,
+    });
   });
 
   it("projects completed plan items into first-class proposed plans", async () => {
@@ -916,6 +1241,74 @@ describe("ProviderRuntimeIngestion", () => {
     expect(message?.text.length).toBe(oversizedText.length);
     expect(message?.text).toBe(oversizedText);
     expect(message?.streaming).toBe(false);
+  });
+
+  it("finalizes assistant image attachments from assistant_image deltas", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-image-output"),
+      provider: "gemini",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-image-output"),
+    });
+    await waitForThread(
+      harness.engine,
+      (thread) =>
+        thread.session?.status === "running" &&
+        thread.session?.activeTurnId === "turn-image-output",
+    );
+
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-message-image-output"),
+      provider: "gemini",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-image-output"),
+      payload: {
+        streamKind: "assistant_image",
+        delta: "",
+        attachments: [
+          {
+            type: "image",
+            id: "thread-1-123e4567-e89b-12d3-a456-426614174001",
+            name: "generated.png",
+            mimeType: "image/png",
+            sizeBytes: 512,
+          },
+        ],
+      },
+    });
+    harness.emit({
+      type: "turn.completed",
+      eventId: asEventId("evt-turn-completed-image-output"),
+      provider: "gemini",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-image-output"),
+      payload: {
+        state: "completed",
+      },
+    });
+
+    const thread = await waitForThread(harness.engine, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.turnId === "turn-image-output" &&
+          !message.streaming &&
+          (message.attachments?.length ?? 0) === 1,
+      ),
+    );
+    const message = thread.messages.find(
+      (entry: ProviderRuntimeTestMessage) => entry.turnId === "turn-image-output",
+    );
+    expect(message?.text).toBe("");
+    expect(message?.streaming).toBe(false);
+    expect(message?.attachments?.[0]?.name).toBe("generated.png");
   });
 
   it("does not duplicate assistant completion when item.completed is followed by turn.completed", async () => {
