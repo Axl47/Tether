@@ -44,8 +44,7 @@ const MODEL_PROVIDER_SETTINGS: Array<{
   {
     provider: "codex",
     title: "Codex",
-    description:
-      "Save additional Codex model slugs for the picker and `/model` command.",
+    description: "Save additional Codex model slugs for the picker and `/model` command.",
     placeholder: "your-codex-model-slug",
     example: "gpt-6.7-codex-ultra-preview",
   },
@@ -86,9 +85,7 @@ function SettingsRouteView() {
   const { settings, defaults, updateSettings } = useAppSettings();
   const serverConfigQuery = useQuery(serverConfigQueryOptions());
   const [isOpeningKeybindings, setIsOpeningKeybindings] = useState(false);
-  const [openKeybindingsError, setOpenKeybindingsError] = useState<
-    string | null
-  >(null);
+  const [openKeybindingsError, setOpenKeybindingsError] = useState<string | null>(null);
   const [customModelInputByProvider, setCustomModelInputByProvider] = useState<
     Record<ProviderKind, string>
   >({
@@ -111,9 +108,7 @@ function SettingsRouteView() {
       .openInEditor(keybindingsConfigPath, preferredTerminalEditor())
       .catch((error) => {
         setOpenKeybindingsError(
-          error instanceof Error
-            ? error.message
-            : "Unable to open keybindings file.",
+          error instanceof Error ? error.message : "Unable to open keybindings file.",
         );
       })
       .finally(() => {
@@ -199,9 +194,7 @@ function SettingsRouteView() {
         <div className="flex-1 overflow-y-auto p-6">
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
             <header className="space-y-1">
-              <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-                Settings
-              </h1>
+              <h1 className="text-2xl font-semibold tracking-tight text-foreground">Settings</h1>
               <p className="text-sm text-muted-foreground">
                 Configure app-level preferences for this device.
               </p>
@@ -209,19 +202,13 @@ function SettingsRouteView() {
 
             <section className="rounded-2xl border border-border bg-card p-5">
               <div className="mb-4">
-                <h2 className="text-sm font-medium text-foreground">
-                  Appearance
-                </h2>
+                <h2 className="text-sm font-medium text-foreground">Appearance</h2>
                 <p className="mt-1 text-xs text-muted-foreground">
                   Choose how Tether handles light and dark mode.
                 </p>
               </div>
 
-              <div
-                className="space-y-2"
-                role="radiogroup"
-                aria-label="Theme preference"
-              >
+              <div className="space-y-2" role="radiogroup" aria-label="Theme preference">
                 {THEME_OPTIONS.map((option) => {
                   const selected = theme === option.value;
                   return (
@@ -238,9 +225,7 @@ function SettingsRouteView() {
                       onClick={() => setTheme(option.value)}
                     >
                       <span className="flex flex-col">
-                        <span className="text-sm font-medium">
-                          {option.label}
-                        </span>
+                        <span className="text-sm font-medium">{option.label}</span>
                         <span className="text-xs">{option.description}</span>
                       </span>
                       {selected ? (
@@ -254,35 +239,25 @@ function SettingsRouteView() {
               </div>
 
               <p className="mt-4 text-xs text-muted-foreground">
-                Active theme:{" "}
-                <span className="font-medium text-foreground">
-                  {resolvedTheme}
-                </span>
+                Active theme: <span className="font-medium text-foreground">{resolvedTheme}</span>
               </p>
             </section>
 
             <section className="rounded-2xl border border-border bg-card p-5">
               <div className="mb-4">
-                <h2 className="text-sm font-medium text-foreground">
-                  Codex App Server
-                </h2>
+                <h2 className="text-sm font-medium text-foreground">Codex App Server</h2>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  These overrides apply to new sessions and let you use a
-                  non-default Codex install.
+                  These overrides apply to new sessions and let you use a non-default Codex install.
                 </p>
               </div>
 
               <div className="space-y-4">
                 <label htmlFor="codex-binary-path" className="block space-y-1">
-                  <span className="text-xs font-medium text-foreground">
-                    Codex binary path
-                  </span>
+                  <span className="text-xs font-medium text-foreground">Codex binary path</span>
                   <Input
                     id="codex-binary-path"
                     value={codexBinaryPath}
-                    onChange={(event) =>
-                      updateSettings({ codexBinaryPath: event.target.value })
-                    }
+                    onChange={(event) => updateSettings({ codexBinaryPath: event.target.value })}
                     placeholder="codex"
                     spellCheck={false}
                   />
@@ -292,15 +267,11 @@ function SettingsRouteView() {
                 </label>
 
                 <label htmlFor="codex-home-path" className="block space-y-1">
-                  <span className="text-xs font-medium text-foreground">
-                    CODEX_HOME path
-                  </span>
+                  <span className="text-xs font-medium text-foreground">CODEX_HOME path</span>
                   <Input
                     id="codex-home-path"
                     value={codexHomePath}
-                    onChange={(event) =>
-                      updateSettings({ codexHomePath: event.target.value })
-                    }
+                    onChange={(event) => updateSettings({ codexHomePath: event.target.value })}
                     placeholder="/Users/you/.codex"
                     spellCheck={false}
                   />
@@ -337,21 +308,17 @@ function SettingsRouteView() {
               <div className="mb-4">
                 <h2 className="text-sm font-medium text-foreground">Models</h2>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Save additional provider model slugs so they appear in the
-                  chat model picker and `/model` command suggestions.
+                  Save additional provider model slugs so they appear in the chat model picker and
+                  `/model` command suggestions.
                 </p>
               </div>
 
               <div className="space-y-5">
                 {MODEL_PROVIDER_SETTINGS.map((providerSettings) => {
                   const provider = providerSettings.provider;
-                  const customModels = getCustomModelsForProvider(
-                    settings,
-                    provider,
-                  );
+                  const customModels = getCustomModelsForProvider(settings, provider);
                   const customModelInput = customModelInputByProvider[provider];
-                  const customModelError =
-                    customModelErrorByProvider[provider] ?? null;
+                  const customModelError = customModelErrorByProvider[provider] ?? null;
                   return (
                     <div
                       key={provider}
@@ -414,9 +381,7 @@ function SettingsRouteView() {
                         </div>
 
                         {customModelError ? (
-                          <p className="text-xs text-destructive">
-                            {customModelError}
-                          </p>
+                          <p className="text-xs text-destructive">{customModelError}</p>
                         ) : null}
 
                         <div className="space-y-2">
@@ -452,9 +417,7 @@ function SettingsRouteView() {
                                   <Button
                                     size="xs"
                                     variant="ghost"
-                                    onClick={() =>
-                                      removeCustomModel(provider, slug)
-                                    }
+                                    onClick={() => removeCustomModel(provider, slug)}
                                   >
                                     Remove
                                   </Button>
@@ -476,9 +439,7 @@ function SettingsRouteView() {
 
             <section className="rounded-2xl border border-border bg-card p-5">
               <div className="mb-4">
-                <h2 className="text-sm font-medium text-foreground">
-                  Responses
-                </h2>
+                <h2 className="text-sm font-medium text-foreground">Responses</h2>
                 <p className="mt-1 text-xs text-muted-foreground">
                   Control how assistant output is rendered during a turn.
                 </p>
@@ -486,9 +447,7 @@ function SettingsRouteView() {
 
               <div className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2">
                 <div>
-                  <p className="text-sm font-medium text-foreground">
-                    Stream assistant messages
-                  </p>
+                  <p className="text-sm font-medium text-foreground">Stream assistant messages</p>
                   <p className="text-xs text-muted-foreground">
                     Show token-by-token output while a response is in progress.
                   </p>
@@ -504,16 +463,14 @@ function SettingsRouteView() {
                 />
               </div>
 
-              {settings.enableAssistantStreaming !==
-              defaults.enableAssistantStreaming ? (
+              {settings.enableAssistantStreaming !== defaults.enableAssistantStreaming ? (
                 <div className="mt-3 flex justify-end">
                   <Button
                     size="xs"
                     variant="outline"
                     onClick={() =>
                       updateSettings({
-                        enableAssistantStreaming:
-                          defaults.enableAssistantStreaming,
+                        enableAssistantStreaming: defaults.enableAssistantStreaming,
                       })
                     }
                   >
@@ -525,21 +482,17 @@ function SettingsRouteView() {
 
             <section className="rounded-2xl border border-border bg-card p-5">
               <div className="mb-4">
-                <h2 className="text-sm font-medium text-foreground">
-                  Keybindings
-                </h2>
+                <h2 className="text-sm font-medium text-foreground">Keybindings</h2>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Open the persisted <code>keybindings.json</code> file to edit
-                  advanced bindings directly.
+                  Open the persisted <code>keybindings.json</code> file to edit advanced bindings
+                  directly.
                 </p>
               </div>
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background px-3 py-2">
                   <div className="min-w-0 flex-1">
-                    <p className="text-xs font-medium text-foreground">
-                      Config file path
-                    </p>
+                    <p className="text-xs font-medium text-foreground">Config file path</p>
                     <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground">
                       {keybindingsConfigPath ?? "Resolving keybindings path..."}
                     </p>
@@ -550,9 +503,7 @@ function SettingsRouteView() {
                     disabled={!keybindingsConfigPath || isOpeningKeybindings}
                     onClick={openKeybindingsFile}
                   >
-                    {isOpeningKeybindings
-                      ? "Opening..."
-                      : "Open keybindings.json"}
+                    {isOpeningKeybindings ? "Opening..." : "Open keybindings.json"}
                   </Button>
                 </div>
 
@@ -560,9 +511,7 @@ function SettingsRouteView() {
                   Opens in your preferred editor selection.
                 </p>
                 {openKeybindingsError ? (
-                  <p className="text-xs text-destructive">
-                    {openKeybindingsError}
-                  </p>
+                  <p className="text-xs text-destructive">{openKeybindingsError}</p>
                 ) : null}
               </div>
             </section>
@@ -577,12 +526,9 @@ function SettingsRouteView() {
 
               <div className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2">
                 <div>
-                  <p className="text-sm font-medium text-foreground">
-                    Confirm thread deletion
-                  </p>
+                  <p className="text-sm font-medium text-foreground">Confirm thread deletion</p>
                   <p className="text-xs text-muted-foreground">
-                    Ask for confirmation before deleting a thread and its chat
-                    history.
+                    Ask for confirmation before deleting a thread and its chat history.
                   </p>
                 </div>
                 <Switch

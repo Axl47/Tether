@@ -50,7 +50,7 @@ function RootRouteView() {
   }
 
   return (
-      <ToastProvider>
+    <ToastProvider>
       <AnchoredToastProvider>
         <EventRouter />
         <QueuedTurnDispatcher />

@@ -586,16 +586,16 @@ export default function GitActionsControl({
         return;
       }
       const target = resolvePathLinkTarget(filePath, gitCwd);
-      void api.shell.openInEditor(target, preferredTerminalEditor(availableEditors)).catch(
-        (error) => {
+      void api.shell
+        .openInEditor(target, preferredTerminalEditor(availableEditors))
+        .catch((error) => {
           toastManager.add({
             type: "error",
             title: "Unable to open file",
             description: error instanceof Error ? error.message : "An error occurred.",
             data: threadToastData,
           });
-        },
-      );
+        });
     },
     [availableEditors, gitCwd, threadToastData],
   );

@@ -1,15 +1,8 @@
 import { ProjectId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
-import {
-  DEFAULT_INTERACTION_MODE,
-  DEFAULT_RUNTIME_MODE,
-  type Thread,
-} from "./types";
-import {
-  formatWorktreePathForDisplay,
-  getOrphanedWorktreePathForThread,
-} from "./worktreeCleanup";
+import { DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE, type Thread } from "./types";
+import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "./worktreeCleanup";
 
 function makeThread(overrides: Partial<Thread> = {}): Thread {
   return {
@@ -37,30 +30,19 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
 
 describe("getOrphanedWorktreePathForThread", () => {
   it("returns null when the target thread does not exist", () => {
-    const result = getOrphanedWorktreePathForThread(
-      [],
-      ThreadId.makeUnsafe("missing-thread"),
-    );
+    const result = getOrphanedWorktreePathForThread([], ThreadId.makeUnsafe("missing-thread"));
     expect(result).toBeNull();
   });
 
   it("returns null when the target thread has no worktree", () => {
     const threads = [makeThread()];
-    const result = getOrphanedWorktreePathForThread(
-      threads,
-      ThreadId.makeUnsafe("thread-1"),
-    );
+    const result = getOrphanedWorktreePathForThread(threads, ThreadId.makeUnsafe("thread-1"));
     expect(result).toBeNull();
   });
 
   it("returns the path when no other thread links to that worktree", () => {
-    const threads = [
-      makeThread({ worktreePath: "/tmp/repo/worktrees/feature-a" }),
-    ];
-    const result = getOrphanedWorktreePathForThread(
-      threads,
-      ThreadId.makeUnsafe("thread-1"),
-    );
+    const threads = [makeThread({ worktreePath: "/tmp/repo/worktrees/feature-a" })];
+    const result = getOrphanedWorktreePathForThread(threads, ThreadId.makeUnsafe("thread-1"));
     expect(result).toBe("/tmp/repo/worktrees/feature-a");
   });
 
@@ -75,10 +57,7 @@ describe("getOrphanedWorktreePathForThread", () => {
         worktreePath: "/tmp/repo/worktrees/feature-a",
       }),
     ];
-    const result = getOrphanedWorktreePathForThread(
-      threads,
-      ThreadId.makeUnsafe("thread-1"),
-    );
+    const result = getOrphanedWorktreePathForThread(threads, ThreadId.makeUnsafe("thread-1"));
     expect(result).toBeNull();
   });
 
@@ -93,10 +72,7 @@ describe("getOrphanedWorktreePathForThread", () => {
         worktreePath: "/tmp/repo/worktrees/feature-b",
       }),
     ];
-    const result = getOrphanedWorktreePathForThread(
-      threads,
-      ThreadId.makeUnsafe("thread-1"),
-    );
+    const result = getOrphanedWorktreePathForThread(threads, ThreadId.makeUnsafe("thread-1"));
     expect(result).toBe("/tmp/repo/worktrees/feature-a");
   });
 });
@@ -117,16 +93,12 @@ describe("formatWorktreePathForDisplay", () => {
   });
 
   it("uses the final segment even when outside ~/.t3/worktrees", () => {
-    const result = formatWorktreePathForDisplay(
-      "/tmp/custom-worktrees/my-worktree",
-    );
+    const result = formatWorktreePathForDisplay("/tmp/custom-worktrees/my-worktree");
     expect(result).toBe("my-worktree");
   });
 
   it("ignores trailing slashes", () => {
-    const result = formatWorktreePathForDisplay(
-      "/tmp/custom-worktrees/my-worktree/",
-    );
+    const result = formatWorktreePathForDisplay("/tmp/custom-worktrees/my-worktree/");
     expect(result).toBe("my-worktree");
   });
 });

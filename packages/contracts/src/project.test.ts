@@ -1,11 +1,7 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import {
-  ProjectReadFileInput,
-  ProjectReadFileResult,
-  ProjectWriteFileInput,
-} from "./project";
+import { ProjectReadFileInput, ProjectReadFileResult, ProjectWriteFileInput } from "./project";
 
 function decodes<S extends Schema.Top>(schema: S, input: unknown): boolean {
   try {

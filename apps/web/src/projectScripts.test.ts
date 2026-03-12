@@ -217,8 +217,7 @@ describe("projectScripts helpers", () => {
         {
           step: {
             id: "android",
-            command:
-              "rtk proxy npm run android -- --active-arch-only --no-packager",
+            command: "rtk proxy npm run android -- --active-arch-only --no-packager",
           },
           terminalId: "terminal-1",
           createNewTerminal: true,

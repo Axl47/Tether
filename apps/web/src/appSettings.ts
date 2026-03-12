@@ -18,9 +18,7 @@ const AppSettingsSchema = Schema.Struct({
   codexHomePath: Schema.String.check(Schema.isMaxLength(4096)).pipe(
     Schema.withConstructorDefault(() => Option.some("")),
   ),
-  confirmThreadDelete: Schema.Boolean.pipe(
-    Schema.withConstructorDefault(() => Option.some(true)),
-  ),
+  confirmThreadDelete: Schema.Boolean.pipe(Schema.withConstructorDefault(() => Option.some(true))),
   enableAssistantStreaming: Schema.Boolean.pipe(
     Schema.withConstructorDefault(() => Option.some(false)),
   ),
@@ -72,10 +70,7 @@ export function normalizeCustomModelSlugs(
 function normalizeAppSettings(settings: AppSettings): AppSettings {
   return {
     ...settings,
-    customCodexModels: normalizeCustomModelSlugs(
-      settings.customCodexModels,
-      "codex",
-    ),
+    customCodexModels: normalizeCustomModelSlugs(settings.customCodexModels, "codex"),
   };
 }
 
@@ -84,13 +79,11 @@ export function getAppModelOptions(
   customModels: readonly string[],
   selectedModel?: string | null,
 ): AppModelOption[] {
-  const options: AppModelOption[] = getModelOptions(provider).map(
-    ({ slug, name }) => ({
-      slug,
-      name,
-      isCustom: false,
-    }),
-  );
+  const options: AppModelOption[] = getModelOptions(provider).map(({ slug, name }) => ({
+    slug,
+    name,
+    isCustom: false,
+  }));
   const seen = new Set(options.map((option) => option.slug));
 
   for (const slug of normalizeCustomModelSlugs(customModels, provider)) {
@@ -126,16 +119,13 @@ export function resolveAppModelSelection(
   const options = getAppModelOptions(provider, customModels, selectedModel);
   const trimmedSelectedModel = selectedModel?.trim();
   if (trimmedSelectedModel) {
-    const direct = options.find(
-      (option) => option.slug === trimmedSelectedModel,
-    );
+    const direct = options.find((option) => option.slug === trimmedSelectedModel);
     if (direct) {
       return direct.slug;
     }
 
     const byName = options.find(
-      (option) =>
-        option.name.toLowerCase() === trimmedSelectedModel.toLowerCase(),
+      (option) => option.name.toLowerCase() === trimmedSelectedModel.toLowerCase(),
     );
     if (byName) {
       return byName.slug;
@@ -168,10 +158,7 @@ export function getSlashModelOptions(
   return options.filter((option) => {
     const searchSlug = option.slug.toLowerCase();
     const searchName = option.name.toLowerCase();
-    return (
-      searchSlug.includes(normalizedQuery) ||
-      searchName.includes(normalizedQuery)
-    );
+    return searchSlug.includes(normalizedQuery) || searchName.includes(normalizedQuery);
   });
 }
 
@@ -187,9 +174,7 @@ function parsePersistedSettings(value: string | null): AppSettings {
   }
 
   try {
-    return normalizeAppSettings(
-      Schema.decodeSync(Schema.fromJsonString(AppSettingsSchema))(value),
-    );
+    return normalizeAppSettings(Schema.decodeSync(Schema.fromJsonString(AppSettingsSchema))(value));
   } catch {
     return DEFAULT_APP_SETTINGS;
   }

@@ -68,4 +68,3 @@ export function persistSidebarOpenState(args: {
     // Ignore storage write failures to avoid breaking chat UX.
   }
 }
-

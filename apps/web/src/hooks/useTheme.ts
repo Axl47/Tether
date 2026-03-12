@@ -64,11 +64,7 @@ function getSnapshot(): ThemeSnapshot {
   const theme = getStored();
   const systemDark = theme === "system" ? getSystemDark() : false;
 
-  if (
-    lastSnapshot &&
-    lastSnapshot.theme === theme &&
-    lastSnapshot.systemDark === systemDark
-  ) {
+  if (lastSnapshot && lastSnapshot.theme === theme && lastSnapshot.systemDark === systemDark) {
     return lastSnapshot;
   }
 

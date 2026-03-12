@@ -630,9 +630,9 @@ describe("composerDraftStore queued messages", () => {
       interactionMode: "plan",
       codexFastMode: true,
     });
-    expect(
-      useComposerDraftStore.getState().queuedMessagesByThreadId[threadId]?.[0]?.prompt,
-    ).toBe("composer draft");
+    expect(useComposerDraftStore.getState().queuedMessagesByThreadId[threadId]?.[0]?.prompt).toBe(
+      "composer draft",
+    );
   });
 
   it("cleans queued messages when a project draft thread mapping is cleared or remapped", () => {
@@ -670,7 +670,9 @@ describe("composerDraftStore queued messages", () => {
     });
     store.clearProjectDraftThreadId(projectId);
 
-    expect(useComposerDraftStore.getState().queuedMessagesByThreadId[otherThreadId]).toBeUndefined();
+    expect(
+      useComposerDraftStore.getState().queuedMessagesByThreadId[otherThreadId],
+    ).toBeUndefined();
   });
 
   it("persists queued messages to storage and rehydrates them", async () => {

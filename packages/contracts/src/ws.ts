@@ -34,11 +34,7 @@ import {
   TerminalWriteInput,
 } from "./terminal";
 import { KeybindingRule } from "./keybindings";
-import {
-  ProjectReadFileInput,
-  ProjectSearchEntriesInput,
-  ProjectWriteFileInput,
-} from "./project";
+import { ProjectReadFileInput, ProjectSearchEntriesInput, ProjectWriteFileInput } from "./project";
 import { OpenInEditorInput } from "./editor";
 import { ServerConfigUpdatedPayload } from "./server";
 

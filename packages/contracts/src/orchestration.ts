@@ -133,9 +133,7 @@ export const ProjectScript = Schema.Struct({
   icon: ProjectScriptIcon,
   runOnWorktreeCreate: Schema.Boolean,
   steps: Schema.optional(
-    Schema.Array(ProjectScriptStep)
-      .check(Schema.isMinLength(2))
-      .check(Schema.isMaxLength(4)),
+    Schema.Array(ProjectScriptStep).check(Schema.isMinLength(2)).check(Schema.isMaxLength(4)),
   ),
 });
 export type ProjectScript = typeof ProjectScript.Type;

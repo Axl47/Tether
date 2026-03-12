@@ -165,9 +165,7 @@ export default function ProjectScriptsControl({
   const [editingScriptId, setEditingScriptId] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [name, setName] = useState("");
-  const [steps, setSteps] = useState<ProjectScriptStep[]>([
-    { id: "step-1", command: "" },
-  ]);
+  const [steps, setSteps] = useState<ProjectScriptStep[]>([{ id: "step-1", command: "" }]);
   const [icon, setIcon] = useState<ProjectScriptIcon>("play");
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [runOnWorktreeCreate, setRunOnWorktreeCreate] = useState(false);
@@ -519,7 +517,10 @@ export default function ProjectScriptsControl({
                     const stepLabel =
                       index === 0 ? "Primary command" : "Additional terminal command";
                     return (
-                      <div key={step.id} className="space-y-1.5 rounded-md border border-border/70 p-3">
+                      <div
+                        key={step.id}
+                        className="space-y-1.5 rounded-md border border-border/70 p-3"
+                      >
                         <div className="flex items-center justify-between gap-2">
                           <Label htmlFor={`script-command-${step.id}`}>{stepLabel}</Label>
                           <div className="flex items-center gap-1">
@@ -559,9 +560,7 @@ export default function ProjectScriptsControl({
                           id={`script-command-${step.id}`}
                           placeholder={index === 0 ? "bun test" : "bun run api"}
                           value={step.command}
-                          onChange={(event) =>
-                            updateStepCommand(step.id, event.target.value)
-                          }
+                          onChange={(event) => updateStepCommand(step.id, event.target.value)}
                         />
                       </div>
                     );

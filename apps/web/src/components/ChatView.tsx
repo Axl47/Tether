@@ -47,18 +47,13 @@ import {
   type VirtualItem,
   useVirtualizer,
 } from "@tanstack/react-virtual";
-import {
-  gitBranchesQueryOptions,
-  gitCreateWorktreeMutationOptions,
-} from "~/lib/gitReactQuery";
+import { gitBranchesQueryOptions, gitCreateWorktreeMutationOptions } from "~/lib/gitReactQuery";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
-import {
-  serverConfigQueryOptions,
-  serverQueryKeys,
-} from "~/lib/serverReactQuery";
+import { serverConfigQueryOptions, serverQueryKeys } from "~/lib/serverReactQuery";
 
 import { isElectron } from "../env";
 import {
+  closeDiffSearchParams,
   parseDiffRouteSearch,
   stripDiffSearchParams,
 } from "../diffRouteSearch";
@@ -89,20 +84,14 @@ import {
   formatElapsed,
   formatTimestamp,
 } from "../session-logic";
-import {
-  AUTO_SCROLL_BOTTOM_THRESHOLD_PX,
-  isScrollContainerNearBottom,
-} from "../chat-scroll";
+import { AUTO_SCROLL_BOTTOM_THRESHOLD_PX, isScrollContainerNearBottom } from "../chat-scroll";
 import {
   buildPendingUserInputAnswers,
   derivePendingUserInputProgress,
   setPendingUserInputCustomAnswer,
   type PendingUserInputDraftAnswer,
 } from "../pendingUserInput";
-import {
-  preferredTerminalEditor,
-  writePreferredTerminalEditor,
-} from "../terminal-links";
+import { preferredTerminalEditor, writePreferredTerminalEditor } from "../terminal-links";
 import { useStore } from "../store";
 import {
   buildPlanImplementationThreadTitle,
@@ -207,9 +196,7 @@ import {
 } from "./ui/dialog";
 import { toastManager } from "./ui/toast";
 import { decodeProjectScriptKeybindingRule } from "~/lib/projectScriptKeybindings";
-import ProjectScriptsControl, {
-  type NewProjectScriptInput,
-} from "./ProjectScriptsControl";
+import ProjectScriptsControl, { type NewProjectScriptInput } from "./ProjectScriptsControl";
 import {
   commandForProjectScript,
   nextProjectScriptId,
@@ -217,19 +204,12 @@ import {
   projectScriptIdFromCommand,
   setupProjectScript,
 } from "~/projectScripts";
-import {
-  buildProjectScriptLaunchPlan,
-  serializeProjectScript,
-} from "~/lib/projectScriptExecution";
+import { buildProjectScriptLaunchPlan, serializeProjectScript } from "~/lib/projectScriptExecution";
 import { Toggle } from "./ui/toggle";
 import { SidebarTrigger } from "./ui/sidebar";
 import { newCommandId, newMessageId, newThreadId } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
-import {
-  getAppModelOptions,
-  resolveAppModelSelection,
-  useAppSettings,
-} from "../appSettings";
+import { getAppModelOptions, resolveAppModelSelection, useAppSettings } from "../appSettings";
 import {
   type ComposerImageAttachment,
   type DraftThreadEnvMode,
@@ -241,15 +221,9 @@ import {
 } from "../composerDraftStore";
 import { useQueuedTurnRuntimeStore } from "../queuedTurnRuntimeStore";
 import { queuedMessagePreview } from "../queuedTurns";
-import {
-  selectThreadTerminalState,
-  useTerminalStateStore,
-} from "../terminalStateStore";
+import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { clamp } from "effect/Number";
-import {
-  ComposerPromptEditor,
-  type ComposerPromptEditorHandle,
-} from "./ComposerPromptEditor";
+import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
 import { estimateTimelineMessageHeight } from "./timelineHeight";
 
 function formatMessageMeta(createdAt: string, duration: string | null): string {
@@ -264,10 +238,7 @@ function formatWorkingTimer(startIso: string, endIso: string): string | null {
     return null;
   }
 
-  const elapsedSeconds = Math.max(
-    0,
-    Math.floor((endedAtMs - startedAtMs) / 1000),
-  );
+  const elapsedSeconds = Math.max(0, Math.floor((endedAtMs - startedAtMs) / 1000));
   if (elapsedSeconds < 60) {
     return `${elapsedSeconds}s`;
   }
@@ -283,8 +254,7 @@ function formatWorkingTimer(startIso: string, endIso: string): string | null {
   return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
 }
 
-const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY =
-  "tether:last-invoked-script-by-project";
+const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY = "tether:last-invoked-script-by-project";
 const MAX_VISIBLE_WORK_LOG_ENTRIES = 6;
 const ALWAYS_UNVIRTUALIZED_TAIL_ROWS = 8;
 const ATTACHMENT_PREVIEW_HANDOFF_TTL_MS = 5000;
@@ -298,10 +268,7 @@ const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
 const EMPTY_AVAILABLE_EDITORS: EditorId[] = [];
 const EMPTY_PROVIDER_STATUSES: ServerProviderStatus[] = [];
 const EMPTY_QUEUED_MESSAGES: QueuedComposerMessageState[] = [];
-const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<
-  string,
-  PendingUserInputDraftAnswer
-> = {};
+const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
 Object.freeze(EMPTY_QUEUED_MESSAGES);
 const COMPOSER_PATH_QUERY_DEBOUNCE_MS = 120;
 const SCRIPT_TERMINAL_COLS = 120;
@@ -333,8 +300,6 @@ function workToneClass(tone: "thinking" | "tool" | "info" | "error"): string {
   return "text-muted-foreground/40";
 }
 
-
-
 interface ExpandedImageItem {
   src: string;
   name: string;
@@ -350,16 +315,12 @@ function buildExpandedImagePreview(
   selectedImageId: string,
 ): ExpandedImagePreview | null {
   const previewableImages = images.flatMap((image) =>
-    image.previewUrl
-      ? [{ id: image.id, src: image.previewUrl, name: image.name }]
-      : [],
+    image.previewUrl ? [{ id: image.id, src: image.previewUrl, name: image.name }] : [],
   );
   if (previewableImages.length === 0) {
     return null;
   }
-  const selectedIndex = previewableImages.findIndex(
-    (image) => image.id === selectedImageId,
-  );
+  const selectedIndex = previewableImages.findIndex((image) => image.id === selectedImageId);
   if (selectedIndex < 0) {
     return null;
   }
@@ -402,11 +363,7 @@ function buildLocalDraftThread(
 }
 
 function revokeBlobPreviewUrl(previewUrl: string | undefined): void {
-  if (
-    !previewUrl ||
-    typeof URL === "undefined" ||
-    !previewUrl.startsWith("blob:")
-  ) {
+  if (!previewUrl || typeof URL === "undefined" || !previewUrl.startsWith("blob:")) {
     return;
   }
   URL.revokeObjectURL(previewUrl);
@@ -431,8 +388,7 @@ function collectUserMessageBlobPreviewUrls(message: ChatMessage): string[] {
   const previewUrls: string[] = [];
   for (const attachment of message.attachments) {
     if (attachment.type !== "image") continue;
-    if (!attachment.previewUrl || !attachment.previewUrl.startsWith("blob:"))
-      continue;
+    if (!attachment.previewUrl || !attachment.previewUrl.startsWith("blob:")) continue;
     previewUrls.push(attachment.previewUrl);
   }
   return previewUrls;
@@ -488,9 +444,7 @@ function buildTemporaryWorktreeBranchName(): string {
   return `${WORKTREE_BRANCH_PREFIX}/${token}`;
 }
 
-function cloneComposerImageForRetry(
-  image: ComposerImageAttachment,
-): ComposerImageAttachment {
+function cloneComposerImageForRetry(image: ComposerImageAttachment): ComposerImageAttachment {
   if (typeof URL === "undefined" || !image.previewUrl.startsWith("blob:")) {
     return image;
   }
@@ -519,13 +473,9 @@ const VscodeEntryIcon = memo(function VscodeEntryIcon(props: {
 
   if (failed) {
     return props.kind === "directory" ? (
-      <FolderIcon
-        className={cn("size-4 text-muted-foreground/80", props.className)}
-      />
+      <FolderIcon className={cn("size-4 text-muted-foreground/80", props.className)} />
     ) : (
-      <FileIcon
-        className={cn("size-4 text-muted-foreground/80", props.className)}
-      />
+      <FileIcon className={cn("size-4 text-muted-foreground/80", props.className)} />
     );
   }
 
@@ -579,9 +529,7 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
       <span className="flex min-w-0 items-center gap-1.5 truncate">
         <span className="truncate">{props.item.label}</span>
       </span>
-      <span className="truncate text-muted-foreground/70 text-xs">
-        {props.item.description}
-      </span>
+      <span className="truncate text-muted-foreground/70 text-xs">{props.item.description}</span>
     </CommandItem>
   );
 });
@@ -649,74 +597,40 @@ export default function ChatView({ threadId }: ChatViewProps) {
   });
   const { resolvedTheme } = useTheme();
   const queryClient = useQueryClient();
-  const createWorktreeMutation = useMutation(
-    gitCreateWorktreeMutationOptions({ queryClient }),
-  );
+  const createWorktreeMutation = useMutation(gitCreateWorktreeMutationOptions({ queryClient }));
   const composerDraft = useComposerThreadDraft(threadId);
   const prompt = composerDraft.prompt;
   const composerImages = composerDraft.images;
   const nonPersistedComposerImageIds = composerDraft.nonPersistedImageIds;
   const persistedComposerAttachments = composerDraft.persistedAttachments;
-  const setComposerDraftPrompt = useComposerDraftStore(
-    (store) => store.setPrompt,
-  );
-  const setComposerDraftProvider = useComposerDraftStore(
-    (store) => store.setProvider,
-  );
-  const setComposerDraftModel = useComposerDraftStore(
-    (store) => store.setModel,
-  );
-  const setComposerDraftRuntimeMode = useComposerDraftStore(
-    (store) => store.setRuntimeMode,
-  );
+  const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
+  const setComposerDraftProvider = useComposerDraftStore((store) => store.setProvider);
+  const setComposerDraftModel = useComposerDraftStore((store) => store.setModel);
+  const setComposerDraftRuntimeMode = useComposerDraftStore((store) => store.setRuntimeMode);
   const setComposerDraftInteractionMode = useComposerDraftStore(
     (store) => store.setInteractionMode,
   );
-  const setComposerDraftEffort = useComposerDraftStore(
-    (store) => store.setEffort,
-  );
-  const setComposerDraftCodexFastMode = useComposerDraftStore(
-    (store) => store.setCodexFastMode,
-  );
-  const addComposerDraftImage = useComposerDraftStore(
-    (store) => store.addImage,
-  );
-  const addComposerDraftImages = useComposerDraftStore(
-    (store) => store.addImages,
-  );
-  const removeComposerDraftImage = useComposerDraftStore(
-    (store) => store.removeImage,
-  );
+  const setComposerDraftEffort = useComposerDraftStore((store) => store.setEffort);
+  const setComposerDraftCodexFastMode = useComposerDraftStore((store) => store.setCodexFastMode);
+  const addComposerDraftImage = useComposerDraftStore((store) => store.addImage);
+  const addComposerDraftImages = useComposerDraftStore((store) => store.addImages);
+  const removeComposerDraftImage = useComposerDraftStore((store) => store.removeImage);
   const clearComposerDraftPersistedAttachments = useComposerDraftStore(
     (store) => store.clearPersistedAttachments,
   );
   const syncComposerDraftPersistedAttachments = useComposerDraftStore(
     (store) => store.syncPersistedAttachments,
   );
-  const clearComposerDraftContent = useComposerDraftStore(
-    (store) => store.clearComposerContent,
-  );
-  const enqueueQueuedMessage = useComposerDraftStore(
-    (store) => store.enqueueQueuedMessage,
-  );
-  const removeQueuedMessage = useComposerDraftStore(
-    (store) => store.removeQueuedMessage,
-  );
-  const promoteQueuedMessage = useComposerDraftStore(
-    (store) => store.promoteQueuedMessage,
-  );
-  const moveQueuedMessage = useComposerDraftStore(
-    (store) => store.moveQueuedMessage,
-  );
+  const clearComposerDraftContent = useComposerDraftStore((store) => store.clearComposerContent);
+  const enqueueQueuedMessage = useComposerDraftStore((store) => store.enqueueQueuedMessage);
+  const removeQueuedMessage = useComposerDraftStore((store) => store.removeQueuedMessage);
+  const promoteQueuedMessage = useComposerDraftStore((store) => store.promoteQueuedMessage);
+  const moveQueuedMessage = useComposerDraftStore((store) => store.moveQueuedMessage);
   const loadQueuedMessageIntoComposer = useComposerDraftStore(
     (store) => store.loadQueuedMessageIntoComposer,
   );
-  const clearDraftThread = useComposerDraftStore(
-    (store) => store.clearDraftThread,
-  );
-  const setDraftThreadContext = useComposerDraftStore(
-    (store) => store.setDraftThreadContext,
-  );
+  const clearDraftThread = useComposerDraftStore((store) => store.clearDraftThread);
+  const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
   const draftThread = useComposerDraftStore(
     (store) => store.draftThreadsByThreadId[threadId] ?? null,
   );
@@ -729,20 +643,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const hasQueuedDispatchInFlight = dispatchingQueuedMessageId !== null;
   const promptRef = useRef(prompt);
   const [isDragOverComposer, setIsDragOverComposer] = useState(false);
-  const [expandedImage, setExpandedImage] =
-    useState<ExpandedImagePreview | null>(null);
-  const [optimisticUserMessages, setOptimisticUserMessages] = useState<
-    ChatMessage[]
-  >([]);
-  const [steeringQueuedMessageId, setSteeringQueuedMessageId] = useState<
-    string | null
-  >(null);
-  const [draggedQueuedMessageId, setDraggedQueuedMessageId] = useState<
-    string | null
-  >(null);
-  const [queuedDropTargetId, setQueuedDropTargetId] = useState<string | null>(
-    null,
-  );
+  const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
+  const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
+  const [steeringQueuedMessageId, setSteeringQueuedMessageId] = useState<string | null>(null);
+  const [draggedQueuedMessageId, setDraggedQueuedMessageId] = useState<string | null>(null);
+  const [queuedDropTargetId, setQueuedDropTargetId] = useState<string | null>(null);
   const optimisticUserMessagesRef = useRef(optimisticUserMessages);
   optimisticUserMessagesRef.current = optimisticUserMessages;
   const [localDraftErrorsByThreadId, setLocalDraftErrorsByThreadId] = useState<
@@ -752,22 +657,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const [sendStartedAt, setSendStartedAt] = useState<string | null>(null);
   const [isConnecting, _setIsConnecting] = useState(false);
   const [isRevertingCheckpoint, setIsRevertingCheckpoint] = useState(false);
-  const [respondingRequestIds, setRespondingRequestIds] = useState<
+  const [respondingRequestIds, setRespondingRequestIds] = useState<ApprovalRequestId[]>([]);
+  const [respondingUserInputRequestIds, setRespondingUserInputRequestIds] = useState<
     ApprovalRequestId[]
   >([]);
-  const [respondingUserInputRequestIds, setRespondingUserInputRequestIds] =
-    useState<ApprovalRequestId[]>([]);
-  const [
-    pendingUserInputAnswersByRequestId,
-    setPendingUserInputAnswersByRequestId,
-  ] = useState<Record<string, Record<string, PendingUserInputDraftAnswer>>>({});
-  const [
-    pendingUserInputQuestionIndexByRequestId,
-    setPendingUserInputQuestionIndexByRequestId,
-  ] = useState<Record<string, number>>({});
-  const [expandedWorkGroups, setExpandedWorkGroups] = useState<
-    Record<string, boolean>
+  const [pendingUserInputAnswersByRequestId, setPendingUserInputAnswersByRequestId] = useState<
+    Record<string, Record<string, PendingUserInputDraftAnswer>>
   >({});
+  const [pendingUserInputQuestionIndexByRequestId, setPendingUserInputQuestionIndexByRequestId] =
+    useState<Record<string, number>>({});
+  const [expandedWorkGroups, setExpandedWorkGroups] = useState<Record<string, boolean>>({});
   const [planSidebarOpen, setPlanSidebarOpen] = useState(false);
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
   const planSidebarDismissedForTurnRef = useRef<string | null>(null);
@@ -776,25 +675,19 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const planSidebarOpenOnNextThreadRef = useRef(false);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [terminalFocusRequestId, setTerminalFocusRequestId] = useState(0);
-  const [composerHighlightedItemId, setComposerHighlightedItemId] = useState<
-    string | null
-  >(null);
-  const [
-    attachmentPreviewHandoffByMessageId,
-    setAttachmentPreviewHandoffByMessageId,
-  ] = useState<Record<string, string[]>>({});
+  const [composerHighlightedItemId, setComposerHighlightedItemId] = useState<string | null>(null);
+  const [attachmentPreviewHandoffByMessageId, setAttachmentPreviewHandoffByMessageId] = useState<
+    Record<string, string[]>
+  >({});
   const [composerCursor, setComposerCursor] = useState(() => prompt.length);
-  const [composerTrigger, setComposerTrigger] =
-    useState<ComposerTrigger | null>(() =>
-      detectComposerTrigger(prompt, prompt.length),
-    );
-  const [lastInvokedScriptByProjectId, setLastInvokedScriptByProjectId] =
-    useState<Record<string, string>>(() =>
-      readLastInvokedScriptByProjectFromStorage(),
-    );
+  const [composerTrigger, setComposerTrigger] = useState<ComposerTrigger | null>(() =>
+    detectComposerTrigger(prompt, prompt.length),
+  );
+  const [lastInvokedScriptByProjectId, setLastInvokedScriptByProjectId] = useState<
+    Record<string, string>
+  >(() => readLastInvokedScriptByProjectFromStorage());
   const messagesScrollRef = useRef<HTMLDivElement>(null);
-  const [messagesScrollElement, setMessagesScrollElement] =
-    useState<HTMLDivElement | null>(null);
+  const [messagesScrollElement, setMessagesScrollElement] = useState<HTMLDivElement | null>(null);
   const shouldAutoScrollRef = useRef(true);
   const lastKnownScrollTopRef = useRef(0);
   const lastManualScrollAtRef = useRef(0);
@@ -815,35 +708,24 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const composerMenuOpenRef = useRef(false);
   const composerMenuItemsRef = useRef<ComposerCommandItem[]>([]);
   const activeComposerMenuItemRef = useRef<ComposerCommandItem | null>(null);
-  const attachmentPreviewHandoffByMessageIdRef = useRef<
-    Record<string, string[]>
-  >({});
-  const attachmentPreviewHandoffTimeoutByMessageIdRef = useRef<
-    Record<string, number>
-  >({});
+  const attachmentPreviewHandoffByMessageIdRef = useRef<Record<string, string[]>>({});
+  const attachmentPreviewHandoffTimeoutByMessageIdRef = useRef<Record<string, number>>({});
   const sendInFlightRef = useRef(false);
   const dragDepthRef = useRef(0);
   const terminalOpenByThreadRef = useRef<Record<string, boolean>>({});
-  const setMessagesScrollContainerRef = useCallback(
-    (element: HTMLDivElement | null) => {
-      messagesScrollRef.current = element;
-      setMessagesScrollElement(element);
-    },
-    [],
-  );
+  const setMessagesScrollContainerRef = useCallback((element: HTMLDivElement | null) => {
+    messagesScrollRef.current = element;
+    setMessagesScrollElement(element);
+  }, []);
 
   const terminalState = useTerminalStateStore((state) =>
     selectThreadTerminalState(state.terminalStateByThreadId, threadId),
   );
   const storeSetTerminalOpen = useTerminalStateStore((s) => s.setTerminalOpen);
-  const storeSetTerminalHeight = useTerminalStateStore(
-    (s) => s.setTerminalHeight,
-  );
+  const storeSetTerminalHeight = useTerminalStateStore((s) => s.setTerminalHeight);
   const storeSplitTerminal = useTerminalStateStore((s) => s.splitTerminal);
   const storeNewTerminal = useTerminalStateStore((s) => s.newTerminal);
-  const storeSetActiveTerminal = useTerminalStateStore(
-    (s) => s.setActiveTerminal,
-  );
+  const storeSetActiveTerminal = useTerminalStateStore((s) => s.setActiveTerminal);
   const storeCloseTerminal = useTerminalStateStore((s) => s.closeTerminal);
 
   const setPrompt = useCallback(
@@ -872,12 +754,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
 
   const serverThread = threads.find((t) => t.id === threadId);
-  const fallbackDraftProject = projects.find(
-    (project) => project.id === draftThread?.projectId,
-  );
-  const localDraftError = serverThread
-    ? null
-    : (localDraftErrorsByThreadId[threadId] ?? null);
+  const fallbackDraftProject = projects.find((project) => project.id === draftThread?.projectId);
+  const localDraftError = serverThread ? null : (localDraftErrorsByThreadId[threadId] ?? null);
   const localDraftThread = useMemo(
     () =>
       draftThread
@@ -892,22 +770,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
   const activeThread = serverThread ?? localDraftThread;
   const runtimeMode =
-    composerDraft.runtimeMode ??
-    activeThread?.runtimeMode ??
-    DEFAULT_RUNTIME_MODE;
+    composerDraft.runtimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
   const interactionMode =
-    composerDraft.interactionMode ??
-    activeThread?.interactionMode ??
-    DEFAULT_INTERACTION_MODE;
+    composerDraft.interactionMode ?? activeThread?.interactionMode ?? DEFAULT_INTERACTION_MODE;
   const isServerThread = serverThread !== undefined;
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
   const diffOpen = rawSearch.diff === "1";
   const activeThreadId = activeThread?.id ?? null;
   const activeLatestTurn = activeThread?.latestTurn ?? null;
-  const latestTurnSettled = isLatestTurnSettled(
-    activeLatestTurn,
-    activeThread?.session ?? null,
-  );
+  const latestTurnSettled = isLatestTurnSettled(activeLatestTurn, activeThread?.session ?? null);
   const activeProject = projects.find((p) => p.id === activeThread?.projectId);
 
   useEffect(() => {
@@ -916,11 +787,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
     if (!activeLatestTurn?.completedAt) return;
     const turnCompletedAt = Date.parse(activeLatestTurn.completedAt);
     if (Number.isNaN(turnCompletedAt)) return;
-    const lastVisitedAt = activeThread.lastVisitedAt
-      ? Date.parse(activeThread.lastVisitedAt)
-      : NaN;
-    if (!Number.isNaN(lastVisitedAt) && lastVisitedAt >= turnCompletedAt)
-      return;
+    const lastVisitedAt = activeThread.lastVisitedAt ? Date.parse(activeThread.lastVisitedAt) : NaN;
+    if (!Number.isNaN(lastVisitedAt) && lastVisitedAt >= turnCompletedAt) return;
 
     markThreadVisited(activeThread.id);
   }, [
@@ -942,13 +810,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const lockedProvider: ProviderKind | null = hasThreadStarted
     ? (sessionProvider ?? selectedProviderByThreadId ?? null)
     : null;
-  const selectedProvider: ProviderKind =
-    lockedProvider ?? selectedProviderByThreadId ?? "codex";
+  const selectedProvider: ProviderKind = lockedProvider ?? selectedProviderByThreadId ?? "codex";
   const baseThreadModel = resolveModelSlugForProvider(
     selectedProvider,
-    activeThread?.model ??
-      activeProject?.model ??
-      getDefaultModel(selectedProvider),
+    activeThread?.model ?? activeProject?.model ?? getDefaultModel(selectedProvider),
   );
   const customModelsForSelectedProvider = settings.customCodexModels;
   const selectedModel = useMemo(() => {
@@ -961,16 +826,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
       customModelsForSelectedProvider,
       draftModel,
     ) as ModelSlug;
-  }, [
-    baseThreadModel,
-    composerDraft.model,
-    customModelsForSelectedProvider,
-    selectedProvider,
-  ]);
+  }, [baseThreadModel, composerDraft.model, customModelsForSelectedProvider, selectedProvider]);
   const reasoningOptions = getReasoningEffortOptions(selectedProvider);
   const supportsReasoningEffort = reasoningOptions.length > 0;
-  const selectedEffort =
-    composerDraft.effort ?? getDefaultReasoningEffort(selectedProvider);
+  const selectedEffort = composerDraft.effort ?? getDefaultReasoningEffort(selectedProvider);
   const selectedCodexFastModeEnabled =
     selectedProvider === "codex" ? composerDraft.codexFastMode : false;
   const selectedModelOptionsForDispatch = useMemo(() => {
@@ -978,35 +837,23 @@ export default function ChatView({ threadId }: ChatViewProps) {
       return undefined;
     }
     const codexOptions = {
-      ...(supportsReasoningEffort && selectedEffort
-        ? { reasoningEffort: selectedEffort }
-        : {}),
+      ...(supportsReasoningEffort && selectedEffort ? { reasoningEffort: selectedEffort } : {}),
       ...(selectedCodexFastModeEnabled ? { fastMode: true } : {}),
     };
-    return Object.keys(codexOptions).length > 0
-      ? { codex: codexOptions }
-      : undefined;
-  }, [
-    selectedCodexFastModeEnabled,
-    selectedEffort,
-    selectedProvider,
-    supportsReasoningEffort,
-  ]);
+    return Object.keys(codexOptions).length > 0 ? { codex: codexOptions } : undefined;
+  }, [selectedCodexFastModeEnabled, selectedEffort, selectedProvider, supportsReasoningEffort]);
   const providerOptionsForDispatch = useMemo(() => {
     if (!settings.codexBinaryPath && !settings.codexHomePath) {
       return undefined;
     }
     return {
       codex: {
-        ...(settings.codexBinaryPath
-          ? { binaryPath: settings.codexBinaryPath }
-          : {}),
+        ...(settings.codexBinaryPath ? { binaryPath: settings.codexBinaryPath } : {}),
         ...(settings.codexHomePath ? { homePath: settings.codexHomePath } : {}),
       },
     };
   }, [settings.codexBinaryPath, settings.codexHomePath]);
-  const composerHasSendableContent =
-    prompt.trim().length > 0 || composerImages.length > 0;
+  const composerHasSendableContent = prompt.trim().length > 0 || composerImages.length > 0;
   const selectedModelForPicker = selectedModel;
   const modelOptionsByProvider = useMemo(
     () => getCustomModelOptionsByProvider(settings),
@@ -1014,12 +861,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
   const selectedModelForPickerWithCustomFallback = useMemo(() => {
     const currentOptions = modelOptionsByProvider[selectedProvider];
-    return currentOptions.some(
-      (option) => option.slug === selectedModelForPicker,
-    )
+    return currentOptions.some((option) => option.slug === selectedModelForPicker)
       ? selectedModelForPicker
-      : (normalizeModelSlug(selectedModelForPicker, selectedProvider) ??
-          selectedModelForPicker);
+      : (normalizeModelSlug(selectedModelForPicker, selectedProvider) ?? selectedModelForPicker);
   }, [modelOptionsByProvider, selectedModelForPicker, selectedProvider]);
   const searchableModelOptions = useMemo(
     () =>
@@ -1055,11 +899,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
   const workLogEntries = useMemo(
-    () =>
-      deriveWorkLogEntries(
-        threadActivities,
-        activeLatestTurn?.turnId ?? undefined,
-      ),
+    () => deriveWorkLogEntries(threadActivities, activeLatestTurn?.turnId ?? undefined),
     [activeLatestTurn?.turnId, threadActivities],
   );
   const latestTurnHasToolActivity = useMemo(
@@ -1078,16 +918,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const activePendingDraftAnswers = useMemo(
     () =>
       activePendingUserInput
-        ? (pendingUserInputAnswersByRequestId[
-            activePendingUserInput.requestId
-          ] ?? EMPTY_PENDING_USER_INPUT_ANSWERS)
+        ? (pendingUserInputAnswersByRequestId[activePendingUserInput.requestId] ??
+          EMPTY_PENDING_USER_INPUT_ANSWERS)
         : EMPTY_PENDING_USER_INPUT_ANSWERS,
     [activePendingUserInput, pendingUserInputAnswersByRequestId],
   );
   const activePendingQuestionIndex = activePendingUserInput
-    ? (pendingUserInputQuestionIndexByRequestId[
-        activePendingUserInput.requestId
-      ] ?? 0)
+    ? (pendingUserInputQuestionIndexByRequestId[activePendingUserInput.requestId] ?? 0)
     : 0;
   const activePendingProgress = useMemo(
     () =>
@@ -1098,19 +935,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
             activePendingQuestionIndex,
           )
         : null,
-    [
-      activePendingDraftAnswers,
-      activePendingQuestionIndex,
-      activePendingUserInput,
-    ],
+    [activePendingDraftAnswers, activePendingQuestionIndex, activePendingUserInput],
   );
   const activePendingResolvedAnswers = useMemo(
     () =>
       activePendingUserInput
-        ? buildPendingUserInputAnswers(
-            activePendingUserInput.questions,
-            activePendingDraftAnswers,
-          )
+        ? buildPendingUserInputAnswers(activePendingUserInput.questions, activePendingDraftAnswers)
         : null,
     [activePendingDraftAnswers, activePendingUserInput],
   );
@@ -1125,17 +955,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
       activeThread?.proposedPlans ?? [],
       activeLatestTurn?.turnId ?? null,
     );
-  }, [
-    activeLatestTurn?.turnId,
-    activeThread?.proposedPlans,
-    latestTurnSettled,
-  ]);
+  }, [activeLatestTurn?.turnId, activeThread?.proposedPlans, latestTurnSettled]);
   const activePlan = useMemo(
-    () =>
-      deriveActivePlanState(
-        threadActivities,
-        activeLatestTurn?.turnId ?? undefined,
-      ),
+    () => deriveActivePlanState(threadActivities, activeLatestTurn?.turnId ?? undefined),
     [activeLatestTurn?.turnId, threadActivities],
   );
   const showPlanFollowUpPrompt =
@@ -1169,19 +991,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
     setComposerHighlightedItemId(null);
   }, [activePendingProgress, activePendingUserInput?.requestId]);
   useEffect(() => {
-    attachmentPreviewHandoffByMessageIdRef.current =
-      attachmentPreviewHandoffByMessageId;
+    attachmentPreviewHandoffByMessageIdRef.current = attachmentPreviewHandoffByMessageId;
   }, [attachmentPreviewHandoffByMessageId]);
   const clearAttachmentPreviewHandoffs = useCallback(() => {
-    for (const timeoutId of Object.values(
-      attachmentPreviewHandoffTimeoutByMessageIdRef.current,
-    )) {
+    for (const timeoutId of Object.values(attachmentPreviewHandoffTimeoutByMessageIdRef.current)) {
       window.clearTimeout(timeoutId);
     }
     attachmentPreviewHandoffTimeoutByMessageIdRef.current = {};
-    for (const previewUrls of Object.values(
-      attachmentPreviewHandoffByMessageIdRef.current,
-    )) {
+    for (const previewUrls of Object.values(attachmentPreviewHandoffByMessageIdRef.current)) {
       for (const previewUrl of previewUrls) {
         revokeBlobPreviewUrl(previewUrl);
       }
@@ -1197,54 +1014,45 @@ export default function ChatView({ threadId }: ChatViewProps) {
       }
     };
   }, [clearAttachmentPreviewHandoffs]);
-  const handoffAttachmentPreviews = useCallback(
-    (messageId: MessageId, previewUrls: string[]) => {
-      if (previewUrls.length === 0) return;
+  const handoffAttachmentPreviews = useCallback((messageId: MessageId, previewUrls: string[]) => {
+    if (previewUrls.length === 0) return;
 
-      const previousPreviewUrls =
-        attachmentPreviewHandoffByMessageIdRef.current[messageId] ?? [];
-      for (const previewUrl of previousPreviewUrls) {
-        if (!previewUrls.includes(previewUrl)) {
+    const previousPreviewUrls = attachmentPreviewHandoffByMessageIdRef.current[messageId] ?? [];
+    for (const previewUrl of previousPreviewUrls) {
+      if (!previewUrls.includes(previewUrl)) {
+        revokeBlobPreviewUrl(previewUrl);
+      }
+    }
+    setAttachmentPreviewHandoffByMessageId((existing) => {
+      const next = {
+        ...existing,
+        [messageId]: previewUrls,
+      };
+      attachmentPreviewHandoffByMessageIdRef.current = next;
+      return next;
+    });
+
+    const existingTimeout = attachmentPreviewHandoffTimeoutByMessageIdRef.current[messageId];
+    if (typeof existingTimeout === "number") {
+      window.clearTimeout(existingTimeout);
+    }
+    attachmentPreviewHandoffTimeoutByMessageIdRef.current[messageId] = window.setTimeout(() => {
+      const currentPreviewUrls = attachmentPreviewHandoffByMessageIdRef.current[messageId];
+      if (currentPreviewUrls) {
+        for (const previewUrl of currentPreviewUrls) {
           revokeBlobPreviewUrl(previewUrl);
         }
       }
       setAttachmentPreviewHandoffByMessageId((existing) => {
-        const next = {
-          ...existing,
-          [messageId]: previewUrls,
-        };
+        if (!(messageId in existing)) return existing;
+        const next = { ...existing };
+        delete next[messageId];
         attachmentPreviewHandoffByMessageIdRef.current = next;
         return next;
       });
-
-      const existingTimeout =
-        attachmentPreviewHandoffTimeoutByMessageIdRef.current[messageId];
-      if (typeof existingTimeout === "number") {
-        window.clearTimeout(existingTimeout);
-      }
-      attachmentPreviewHandoffTimeoutByMessageIdRef.current[messageId] =
-        window.setTimeout(() => {
-          const currentPreviewUrls =
-            attachmentPreviewHandoffByMessageIdRef.current[messageId];
-          if (currentPreviewUrls) {
-            for (const previewUrl of currentPreviewUrls) {
-              revokeBlobPreviewUrl(previewUrl);
-            }
-          }
-          setAttachmentPreviewHandoffByMessageId((existing) => {
-            if (!(messageId in existing)) return existing;
-            const next = { ...existing };
-            delete next[messageId];
-            attachmentPreviewHandoffByMessageIdRef.current = next;
-            return next;
-          });
-          delete attachmentPreviewHandoffTimeoutByMessageIdRef.current[
-            messageId
-          ];
-        }, ATTACHMENT_PREVIEW_HANDOFF_TTL_MS);
-    },
-    [],
-  );
+      delete attachmentPreviewHandoffTimeoutByMessageIdRef.current[messageId];
+    }, ATTACHMENT_PREVIEW_HANDOFF_TTL_MS);
+  }, []);
   const serverMessages = activeThread?.messages;
   const timelineMessages = useMemo(() => {
     const messages = serverMessages ?? [];
@@ -1263,8 +1071,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             ) {
               return message;
             }
-            const handoffPreviewUrls =
-              attachmentPreviewHandoffByMessageId[message.id];
+            const handoffPreviewUrls = attachmentPreviewHandoffByMessageId[message.id];
             if (!handoffPreviewUrls || handoffPreviewUrls.length === 0) {
               return message;
             }
@@ -1277,10 +1084,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
               }
               const handoffPreviewUrl = handoffPreviewUrls[imageIndex];
               imageIndex += 1;
-              if (
-                !handoffPreviewUrl ||
-                attachment.previewUrl === handoffPreviewUrl
-              ) {
+              if (!handoffPreviewUrl || attachment.previewUrl === handoffPreviewUrl) {
                 return attachment;
               }
               changed = true;
@@ -1296,28 +1100,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
     if (optimisticUserMessages.length === 0) {
       return serverMessagesWithPreviewHandoff;
     }
-    const serverIds = new Set(
-      serverMessagesWithPreviewHandoff.map((message) => message.id),
-    );
-    const pendingMessages = optimisticUserMessages.filter(
-      (message) => !serverIds.has(message.id),
-    );
+    const serverIds = new Set(serverMessagesWithPreviewHandoff.map((message) => message.id));
+    const pendingMessages = optimisticUserMessages.filter((message) => !serverIds.has(message.id));
     if (pendingMessages.length === 0) {
       return serverMessagesWithPreviewHandoff;
     }
     return [...serverMessagesWithPreviewHandoff, ...pendingMessages];
-  }, [
-    serverMessages,
-    attachmentPreviewHandoffByMessageId,
-    optimisticUserMessages,
-  ]);
+  }, [serverMessages, attachmentPreviewHandoffByMessageId, optimisticUserMessages]);
   const timelineEntries = useMemo(
     () =>
-      deriveTimelineEntries(
-        timelineMessages,
-        activeThread?.proposedPlans ?? [],
-        workLogEntries,
-      ),
+      deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], workLogEntries),
     [activeThread?.proposedPlans, timelineMessages, workLogEntries],
   );
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
@@ -1338,11 +1130,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         continue;
       }
 
-      for (
-        let nextIndex = index + 1;
-        nextIndex < timelineEntries.length;
-        nextIndex += 1
-      ) {
+      for (let nextIndex = index + 1; nextIndex < timelineEntries.length; nextIndex += 1) {
         const nextEntry = timelineEntries[nextIndex];
         if (!nextEntry || nextEntry.kind !== "message") {
           continue;
@@ -1350,15 +1138,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
         if (nextEntry.message.role === "user") {
           break;
         }
-        const summary = turnDiffSummaryByAssistantMessageId.get(
-          nextEntry.message.id,
-        );
+        const summary = turnDiffSummaryByAssistantMessageId.get(nextEntry.message.id);
         if (!summary) {
           continue;
         }
         const turnCount =
-          summary.checkpointTurnCount ??
-          inferredCheckpointTurnCountByTurnId[summary.turnId];
+          summary.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[summary.turnId];
         if (typeof turnCount !== "number") {
           break;
         }
@@ -1368,11 +1153,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
 
     return byUserMessageId;
-  }, [
-    inferredCheckpointTurnCountByTurnId,
-    timelineEntries,
-    turnDiffSummaryByAssistantMessageId,
-  ]);
+  }, [inferredCheckpointTurnCountByTurnId, timelineEntries, turnDiffSummaryByAssistantMessageId]);
 
   const completionSummary = useMemo(() => {
     if (!latestTurnSettled) return null;
@@ -1380,10 +1161,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     if (!activeLatestTurn.completedAt) return null;
     if (!latestTurnHasToolActivity) return null;
 
-    const elapsed = formatElapsed(
-      activeLatestTurn.startedAt,
-      activeLatestTurn.completedAt,
-    );
+    const elapsed = formatElapsed(activeLatestTurn.startedAt, activeLatestTurn.completedAt);
     return elapsed ? `Worked for ${elapsed}` : null;
   }, [
     activeLatestTurn?.completedAt,
@@ -1424,16 +1202,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
   ]);
   const gitCwd = activeThread?.worktreePath ?? activeProject?.cwd ?? null;
   const composerTriggerKind = composerTrigger?.kind ?? null;
-  const pathTriggerQuery =
-    composerTrigger?.kind === "path" ? composerTrigger.query : "";
+  const pathTriggerQuery = composerTrigger?.kind === "path" ? composerTrigger.query : "";
   const isPathTrigger = composerTriggerKind === "path";
   const [debouncedPathQuery, composerPathQueryDebouncer] = useDebouncedValue(
     pathTriggerQuery,
     { wait: COMPOSER_PATH_QUERY_DEBOUNCE_MS },
     (debouncerState) => ({ isPending: debouncerState.isPending }),
   );
-  const effectivePathQuery =
-    pathTriggerQuery.length > 0 ? debouncedPathQuery : "";
+  const effectivePathQuery = pathTriggerQuery.length > 0 ? debouncedPathQuery : "";
   const branchesQuery = useQuery(gitBranchesQueryOptions(gitCwd));
   const serverConfigQuery = useQuery(serverConfigQueryOptions());
   const workspaceEntriesQuery = useQuery(
@@ -1444,8 +1220,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       limit: 80,
     }),
   );
-  const workspaceEntries =
-    workspaceEntriesQuery.data?.entries ?? EMPTY_PROJECT_ENTRIES;
+  const workspaceEntries = workspaceEntriesQuery.data?.entries ?? EMPTY_PROJECT_ENTRIES;
   const composerMenuItems = useMemo<ComposerCommandItem[]>(() => {
     if (!composerTrigger) return [];
     if (composerTrigger.kind === "path") {
@@ -1482,16 +1257,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
           label: "/default",
           description: "Switch this thread back to normal chat mode",
         },
-      ] satisfies ReadonlyArray<
-        Extract<ComposerCommandItem, { type: "slash-command" }>
-      >;
+      ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
       const query = composerTrigger.query.trim().toLowerCase();
       if (!query) {
         return [...slashCommandItems];
       }
       return slashCommandItems.filter(
-        (item) =>
-          item.command.includes(query) || item.label.slice(1).includes(query),
+        (item) => item.command.includes(query) || item.label.slice(1).includes(query),
       );
     }
 
@@ -1500,9 +1272,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         const query = composerTrigger.query.trim().toLowerCase();
         if (!query) return true;
         return (
-          searchSlug.includes(query) ||
-          searchName.includes(query) ||
-          searchProvider.includes(query)
+          searchSlug.includes(query) || searchName.includes(query) || searchProvider.includes(query)
         );
       })
       .map(({ provider, providerLabel, slug, name }) => ({
@@ -1540,15 +1310,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [queuedMessages],
   );
   const keybindings = serverConfigQuery.data?.keybindings ?? EMPTY_KEYBINDINGS;
-  const availableEditors =
-    serverConfigQuery.data?.availableEditors ?? EMPTY_AVAILABLE_EDITORS;
-  const providerStatuses =
-    serverConfigQuery.data?.providers ?? EMPTY_PROVIDER_STATUSES;
+  const availableEditors = serverConfigQuery.data?.availableEditors ?? EMPTY_AVAILABLE_EDITORS;
+  const providerStatuses = serverConfigQuery.data?.providers ?? EMPTY_PROVIDER_STATUSES;
   const activeProvider = activeThread?.session?.provider ?? "codex";
   const activeProviderStatus = useMemo(
-    () =>
-      providerStatuses.find((status) => status.provider === activeProvider) ??
-      null,
+    () => providerStatuses.find((status) => status.provider === activeProvider) ?? null,
     [activeProvider, providerStatuses],
   );
   const activeProjectCwd = activeProject?.cwd ?? null;
@@ -1586,8 +1352,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
       params: { threadId },
       replace: true,
       search: (previous) => {
+        if (diffOpen) {
+          return closeDiffSearchParams(previous);
+        }
         const rest = stripDiffSearchParams(previous);
-        return diffOpen ? rest : { ...rest, diff: "1" };
+        return { ...rest, diff: "1" };
       },
     });
   }, [diffOpen, navigate, threadId]);
@@ -1609,11 +1378,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const envLocked = Boolean(
     activeThread &&
     (activeThread.messages.length > 0 ||
-      (activeThread.session !== null &&
-        activeThread.session.status !== "closed")),
+      (activeThread.session !== null && activeThread.session.status !== "closed")),
   );
-  const hasReachedTerminalLimit =
-    terminalState.terminalIds.length >= MAX_THREAD_TERMINAL_COUNT;
+  const hasReachedTerminalLimit = terminalState.terminalIds.length >= MAX_THREAD_TERMINAL_COUNT;
   const setThreadError = useCallback(
     (targetThreadId: ThreadId | null, error: string | null) => {
       if (!targetThreadId) return;
@@ -1736,8 +1503,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         project: {
           cwd: activeProject.cwd,
         },
-        worktreePath:
-          options?.worktreePath ?? activeThread.worktreePath ?? null,
+        worktreePath: options?.worktreePath ?? activeThread.worktreePath ?? null,
         ...(options?.env ? { extraEnv: options.env } : {}),
       });
 
@@ -1747,8 +1513,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           cwd: targetCwd,
           terminalState: {
             terminalIds: terminalState.terminalIds,
-            activeTerminalId:
-              terminalState.activeTerminalId || DEFAULT_THREAD_TERMINAL_ID,
+            activeTerminalId: terminalState.activeTerminalId || DEFAULT_THREAD_TERMINAL_ID,
             runningTerminalIds: terminalState.runningTerminalIds,
           },
           maxTerminalCount: MAX_THREAD_TERMINAL_COUNT,
@@ -1802,9 +1567,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       } catch (error) {
         setThreadError(
           activeThreadId,
-          error instanceof Error
-            ? error.message
-            : `Failed to run script "${script.name}".`,
+          error instanceof Error ? error.message : `Failed to run script "${script.name}".`,
         );
       }
     },
@@ -1871,9 +1634,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       const nextScripts = input.runOnWorktreeCreate
         ? [
             ...activeProject.scripts.map((script) =>
-              script.runOnWorktreeCreate
-                ? { ...script, runOnWorktreeCreate: false }
-                : script,
+              script.runOnWorktreeCreate ? { ...script, runOnWorktreeCreate: false } : script,
             ),
             nextScript,
           ]
@@ -1893,9 +1654,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const updateProjectScript = useCallback(
     async (scriptId: string, input: NewProjectScriptInput) => {
       if (!activeProject) return;
-      const existingScript = activeProject.scripts.find(
-        (script) => script.id === scriptId,
-      );
+      const existingScript = activeProject.scripts.find((script) => script.id === scriptId);
       if (!existingScript) {
         throw new Error("Script not found.");
       }
@@ -1995,9 +1754,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     ],
   );
   const toggleInteractionMode = useCallback(() => {
-    handleInteractionModeChange(
-      interactionMode === "plan" ? "default" : "plan",
-    );
+    handleInteractionModeChange(interactionMode === "plan" ? "default" : "plan");
   }, [handleInteractionModeChange, interactionMode]);
 
   const persistThreadSettingsForNextTurn = useCallback(
@@ -2065,16 +1822,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
   // Auto-scroll on new messages
   const messageCount = timelineMessages.length;
-  const scrollMessagesToBottom = useCallback(
-    (behavior: ScrollBehavior = "auto") => {
-      const scrollContainer = messagesScrollRef.current;
-      if (!scrollContainer) return;
-      scrollContainer.scrollTo({ top: scrollContainer.scrollHeight, behavior });
-      lastKnownScrollTopRef.current = scrollContainer.scrollTop;
-      shouldAutoScrollRef.current = true;
-    },
-    [],
-  );
+  const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
+    const scrollContainer = messagesScrollRef.current;
+    if (!scrollContainer) return;
+    scrollContainer.scrollTo({ top: scrollContainer.scrollHeight, behavior });
+    lastKnownScrollTopRef.current = scrollContainer.scrollTop;
+    shouldAutoScrollRef.current = true;
+  }, []);
   const cancelPendingStickToBottom = useCallback(() => {
     const pendingFrame = pendingAutoScrollFrameRef.current;
     if (pendingFrame === null) return;
@@ -2111,27 +1865,21 @@ export default function ChatView({ threadId }: ChatViewProps) {
       };
 
       cancelPendingInteractionAnchorAdjustment();
-      pendingInteractionAnchorFrameRef.current = window.requestAnimationFrame(
-        () => {
-          pendingInteractionAnchorFrameRef.current = null;
-          const anchor = pendingInteractionAnchorRef.current;
-          pendingInteractionAnchorRef.current = null;
-          const activeScrollContainer = messagesScrollRef.current;
-          if (!anchor || !activeScrollContainer) return;
-          if (
-            !anchor.element.isConnected ||
-            !activeScrollContainer.contains(anchor.element)
-          )
-            return;
+      pendingInteractionAnchorFrameRef.current = window.requestAnimationFrame(() => {
+        pendingInteractionAnchorFrameRef.current = null;
+        const anchor = pendingInteractionAnchorRef.current;
+        pendingInteractionAnchorRef.current = null;
+        const activeScrollContainer = messagesScrollRef.current;
+        if (!anchor || !activeScrollContainer) return;
+        if (!anchor.element.isConnected || !activeScrollContainer.contains(anchor.element)) return;
 
-          const nextTop = anchor.element.getBoundingClientRect().top;
-          const delta = nextTop - anchor.top;
-          if (Math.abs(delta) < 0.5) return;
+        const nextTop = anchor.element.getBoundingClientRect().top;
+        const delta = nextTop - anchor.top;
+        if (Math.abs(delta) < 0.5) return;
 
-          activeScrollContainer.scrollTop += delta;
-          lastKnownScrollTopRef.current = activeScrollContainer.scrollTop;
-        },
-      );
+        activeScrollContainer.scrollTop += delta;
+        lastKnownScrollTopRef.current = activeScrollContainer.scrollTop;
+      });
     },
     [cancelPendingInteractionAnchorAdjustment],
   );
@@ -2139,24 +1887,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
     cancelPendingStickToBottom();
     scrollMessagesToBottom();
     scheduleStickToBottom();
-  }, [
-    cancelPendingStickToBottom,
-    scheduleStickToBottom,
-    scrollMessagesToBottom,
-  ]);
+  }, [cancelPendingStickToBottom, scheduleStickToBottom, scrollMessagesToBottom]);
   const noteManualScrollInteraction = useCallback(() => {
     lastManualScrollAtRef.current = Date.now();
     cancelPendingStickToBottom();
     cancelPendingInteractionAnchorAdjustment();
-  }, [
-    cancelPendingInteractionAnchorAdjustment,
-    cancelPendingStickToBottom,
-  ]);
+  }, [cancelPendingInteractionAnchorAdjustment, cancelPendingStickToBottom]);
   const shouldSuppressTimelineScrollAdjustment = useCallback(
     () =>
       isPointerScrollActiveRef.current ||
-      Date.now() - lastManualScrollAtRef.current <
-        MANUAL_SCROLL_SETTLE_WINDOW_MS,
+      Date.now() - lastManualScrollAtRef.current < MANUAL_SCROLL_SETTLE_WINDOW_MS,
     [],
   );
   const onMessagesScroll = useCallback(() => {
@@ -2167,24 +1907,17 @@ export default function ChatView({ threadId }: ChatViewProps) {
     const scrollDelta = currentScrollTop - lastKnownScrollTopRef.current;
     const didScroll = Math.abs(scrollDelta) > 1;
     const hasRecentManualScroll =
-      Date.now() - lastManualScrollAtRef.current <
-      MANUAL_SCROLL_SETTLE_WINDOW_MS;
+      Date.now() - lastManualScrollAtRef.current < MANUAL_SCROLL_SETTLE_WINDOW_MS;
 
     if (!shouldAutoScrollRef.current && isNearBottom) {
       shouldAutoScrollRef.current = true;
       pendingUserScrollUpIntentRef.current = false;
-    } else if (
-      shouldAutoScrollRef.current &&
-      pendingUserScrollUpIntentRef.current
-    ) {
+    } else if (shouldAutoScrollRef.current && pendingUserScrollUpIntentRef.current) {
       if (scrollDelta < -1) {
         shouldAutoScrollRef.current = false;
       }
       pendingUserScrollUpIntentRef.current = false;
-    } else if (
-      shouldAutoScrollRef.current &&
-      isPointerScrollActiveRef.current
-    ) {
+    } else if (shouldAutoScrollRef.current && isPointerScrollActiveRef.current) {
       if (didScroll && !isNearBottom) {
         noteManualScrollInteraction();
         shouldAutoScrollRef.current = false;
@@ -2216,32 +1949,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
     },
     [noteManualScrollInteraction],
   );
-  const onMessagesPointerDown = useCallback(
-    (_event: React.PointerEvent<HTMLDivElement>) => {
-      isPointerScrollActiveRef.current = true;
-    },
-    [],
-  );
-  const onMessagesPointerUp = useCallback(
-    (_event: React.PointerEvent<HTMLDivElement>) => {
-      isPointerScrollActiveRef.current = false;
-    },
-    [],
-  );
-  const onMessagesPointerCancel = useCallback(
-    (_event: React.PointerEvent<HTMLDivElement>) => {
-      isPointerScrollActiveRef.current = false;
-    },
-    [],
-  );
-  const onMessagesTouchStart = useCallback(
-    (event: React.TouchEvent<HTMLDivElement>) => {
-      const touch = event.touches[0];
-      if (!touch) return;
-      lastTouchClientYRef.current = touch.clientY;
-    },
-    [],
-  );
+  const onMessagesPointerDown = useCallback((_event: React.PointerEvent<HTMLDivElement>) => {
+    isPointerScrollActiveRef.current = true;
+  }, []);
+  const onMessagesPointerUp = useCallback((_event: React.PointerEvent<HTMLDivElement>) => {
+    isPointerScrollActiveRef.current = false;
+  }, []);
+  const onMessagesPointerCancel = useCallback((_event: React.PointerEvent<HTMLDivElement>) => {
+    isPointerScrollActiveRef.current = false;
+  }, []);
+  const onMessagesTouchStart = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
+    const touch = event.touches[0];
+    if (!touch) return;
+    lastTouchClientYRef.current = touch.clientY;
+  }, []);
   const onMessagesTouchMove = useCallback(
     (event: React.TouchEvent<HTMLDivElement>) => {
       const touch = event.touches[0];
@@ -2264,12 +1985,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
     },
     [noteManualScrollInteraction],
   );
-  const onMessagesTouchEnd = useCallback(
-    (_event: React.TouchEvent<HTMLDivElement>) => {
-      lastTouchClientYRef.current = null;
-    },
-    [],
-  );
+  const onMessagesTouchEnd = useCallback((_event: React.TouchEvent<HTMLDivElement>) => {
+    lastTouchClientYRef.current = null;
+  }, []);
   useEffect(() => {
     return () => {
       cancelPendingStickToBottom();
@@ -2305,8 +2023,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       const previousHeight = composerFormHeightRef.current;
       composerFormHeightRef.current = nextHeight;
 
-      if (previousHeight > 0 && Math.abs(nextHeight - previousHeight) < 0.5)
-        return;
+      if (previousHeight > 0 && Math.abs(nextHeight - previousHeight) < 0.5) return;
       if (!shouldAutoScrollRef.current) return;
       scheduleStickToBottom();
     });
@@ -2336,8 +2053,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
     planSidebarDismissedForTurnRef.current = null;
   }, [activeThread?.id]);
-
-
 
   useEffect(() => {
     if (!composerMenuOpen) {
@@ -2374,12 +2089,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
     if (activeThread.messages.length === 0) {
       return;
     }
-    const serverIds = new Set(
-      activeThread.messages.map((message) => message.id),
-    );
-    const removedMessages = optimisticUserMessages.filter((message) =>
-      serverIds.has(message.id),
-    );
+    const serverIds = new Set(activeThread.messages.map((message) => message.id));
+    const removedMessages = optimisticUserMessages.filter((message) => serverIds.has(message.id));
     if (removedMessages.length === 0) {
       return;
     }
@@ -2399,18 +2110,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
     return () => {
       window.clearTimeout(timer);
     };
-  }, [
-    activeThread?.id,
-    activeThread?.messages,
-    handoffAttachmentPreviews,
-    optimisticUserMessages,
-  ]);
+  }, [activeThread?.id, activeThread?.messages, handoffAttachmentPreviews, optimisticUserMessages]);
 
   useEffect(() => {
     promptRef.current = prompt;
-    setComposerCursor((existing) =>
-      Math.min(Math.max(0, existing), prompt.length),
-    );
+    setComposerCursor((existing) => Math.min(Math.max(0, existing), prompt.length));
   }, [prompt]);
 
   useEffect(() => {
@@ -2424,9 +2128,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     setSendStartedAt(null);
     setComposerHighlightedItemId(null);
     setComposerCursor(promptRef.current.length);
-    setComposerTrigger(
-      detectComposerTrigger(promptRef.current, promptRef.current.length),
-    );
+    setComposerTrigger(detectComposerTrigger(promptRef.current, promptRef.current.length));
     dragDepthRef.current = 0;
     setIsDragOverComposer(false);
     setExpandedImage(null);
@@ -2440,20 +2142,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
         return;
       }
       const getPersistedAttachmentsForThread = () =>
-        useComposerDraftStore.getState().draftsByThreadId[threadId]
-          ?.persistedAttachments ?? [];
+        useComposerDraftStore.getState().draftsByThreadId[threadId]?.persistedAttachments ?? [];
       try {
         const currentPersistedAttachments = getPersistedAttachmentsForThread();
         const existingPersistedById = new Map(
-          currentPersistedAttachments.map((attachment) => [
-            attachment.id,
-            attachment,
-          ]),
+          currentPersistedAttachments.map((attachment) => [attachment.id, attachment]),
         );
-        const stagedAttachmentById = new Map<
-          string,
-          PersistedComposerImageAttachment
-        >();
+        const stagedAttachmentById = new Map<string, PersistedComposerImageAttachment>();
         await Promise.all(
           composerImages.map(async (image) => {
             try {
@@ -2480,16 +2175,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
         // Stage attachments in persisted draft state first so persist middleware can write them.
         syncComposerDraftPersistedAttachments(threadId, serialized);
       } catch {
-        const currentImageIds = new Set(
-          composerImages.map((image) => image.id),
-        );
+        const currentImageIds = new Set(composerImages.map((image) => image.id));
         const fallbackPersistedAttachments = getPersistedAttachmentsForThread();
         const fallbackPersistedIds = fallbackPersistedAttachments
           .map((attachment) => attachment.id)
           .filter((id) => currentImageIds.has(id));
         const fallbackPersistedIdSet = new Set(fallbackPersistedIds);
-        const fallbackAttachments = fallbackPersistedAttachments.filter(
-          (attachment) => fallbackPersistedIdSet.has(attachment.id),
+        const fallbackAttachments = fallbackPersistedAttachments.filter((attachment) =>
+          fallbackPersistedIdSet.has(attachment.id),
         );
         if (cancelled) {
           return;
@@ -2516,8 +2209,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         return existing;
       }
       const nextIndex =
-        (existing.index + direction + existing.images.length) %
-        existing.images.length;
+        (existing.index + direction + existing.images.length) % existing.images.length;
       if (nextIndex === existing.index) {
         return existing;
       }
@@ -2573,13 +2265,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
     };
   }, [phase]);
 
-  const beginSendPhase = useCallback(
-    (nextPhase: Exclude<SendPhase, "idle">) => {
-      setSendStartedAt((current) => current ?? new Date().toISOString());
-      setSendPhase(nextPhase);
-    },
-    [],
-  );
+  const beginSendPhase = useCallback((nextPhase: Exclude<SendPhase, "idle">) => {
+    setSendStartedAt((current) => current ?? new Date().toISOString());
+    setSendPhase(nextPhase);
+  }, []);
 
   const resetSendPhase = useCallback(() => {
     setSendPhase("idle");
@@ -2621,12 +2310,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     ) {
       setSteeringQueuedMessageId(null);
     }
-  }, [
-    dispatchingQueuedMessageId,
-    phase,
-    queuedMessages,
-    steeringQueuedMessageId,
-  ]);
+  }, [dispatchingQueuedMessageId, phase, queuedMessages, steeringQueuedMessageId]);
 
   useEffect(() => {
     if (!activeThreadId) return;
@@ -2654,8 +2338,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     const isTerminalFocused = (): boolean => {
       const activeElement = document.activeElement;
       if (!(activeElement instanceof HTMLElement)) return false;
-      if (activeElement.classList.contains("xterm-helper-textarea"))
-        return true;
+      if (activeElement.classList.contains("xterm-helper-textarea")) return true;
       return activeElement.closest(".thread-terminal-drawer .xterm") !== null;
     };
 
@@ -2715,9 +2398,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
       const scriptId = projectScriptIdFromCommand(command);
       if (!scriptId || !activeProject) return;
-      const script = activeProject.scripts.find(
-        (entry) => entry.id === scriptId,
-      );
+      const script = activeProject.scripts.find((entry) => entry.id === scriptId);
       if (!script) return;
       event.preventDefault();
       event.stopPropagation();
@@ -2822,10 +2503,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
     event.preventDefault();
     const nextTarget = event.relatedTarget;
-    if (
-      nextTarget instanceof Node &&
-      event.currentTarget.contains(nextTarget)
-    ) {
+    if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
       return;
     }
     dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
@@ -2852,10 +2530,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       if (!api || !activeThread || isRevertingCheckpoint) return;
 
       if (phase === "running" || isSendBusy || isConnecting) {
-        setThreadError(
-          activeThread.id,
-          "Interrupt the current turn before reverting checkpoints.",
-        );
+        setThreadError(activeThread.id, "Interrupt the current turn before reverting checkpoints.");
         return;
       }
       const confirmed = await api.dialogs.confirm(
@@ -2887,14 +2562,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       }
       setIsRevertingCheckpoint(false);
     },
-    [
-      activeThread,
-      isConnecting,
-      isRevertingCheckpoint,
-      isSendBusy,
-      phase,
-      setThreadError,
-    ],
+    [activeThread, isConnecting, isRevertingCheckpoint, isSendBusy, phase, setThreadError],
   );
 
   const handleQueueEdit = useCallback(
@@ -2966,10 +2634,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
   const handleQueuedMessageDragOver = useCallback(
     (event: DragEvent<HTMLElement>, queuedMessageId: string) => {
-      if (
-        draggedQueuedMessageId === null ||
-        draggedQueuedMessageId === queuedMessageId
-      ) {
+      if (draggedQueuedMessageId === null || draggedQueuedMessageId === queuedMessageId) {
         return;
       }
       event.preventDefault();
@@ -2990,10 +2655,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       }
       const sourceQueuedMessageId =
         draggedQueuedMessageId ?? event.dataTransfer.getData("text/plain");
-      if (
-        sourceQueuedMessageId.length === 0 ||
-        sourceQueuedMessageId === targetQueuedMessageId
-      ) {
+      if (sourceQueuedMessageId.length === 0 || sourceQueuedMessageId === targetQueuedMessageId) {
         clearQueuedDragState();
         return;
       }
@@ -3008,35 +2670,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
       }
       clearQueuedDragState();
     },
-    [
-      activeThread,
-      clearQueuedDragState,
-      draggedQueuedMessageId,
-      moveQueuedMessage,
-      queuedMessages,
-    ],
+    [activeThread, clearQueuedDragState, draggedQueuedMessageId, moveQueuedMessage, queuedMessages],
   );
 
   const onSend = async (e?: { preventDefault: () => void }) => {
     e?.preventDefault();
     const api = readNativeApi();
-    if (
-      !api ||
-      !activeThread ||
-      isSendBusy ||
-      isConnecting ||
-      sendInFlightRef.current
-    )
-      return;
+    if (!api || !activeThread || isSendBusy || isConnecting || sendInFlightRef.current) return;
     if (activePendingProgress) {
       onAdvanceActivePendingUserInput();
       return;
     }
     const trimmed = prompt.trim();
     const standaloneSlashCommand =
-      composerImages.length === 0
-        ? parseStandaloneComposerSlashCommand(trimmed)
-        : null;
+      composerImages.length === 0 ? parseStandaloneComposerSlashCommand(trimmed) : null;
     if (standaloneSlashCommand) {
       await handleInteractionModeChange(standaloneSlashCommand);
       promptRef.current = "";
@@ -3054,8 +2701,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           })
         : null;
     const sendText = resolvedSubmission?.text ?? trimmed;
-    const sendInteractionMode =
-      resolvedSubmission?.interactionMode ?? interactionMode;
+    const sendInteractionMode = resolvedSubmission?.interactionMode ?? interactionMode;
     const trimmedSendText = sendText.trim();
     if (!trimmedSendText && composerImages.length === 0) return;
     if (phase === "running" && isServerThread) {
@@ -3100,8 +2746,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
     if (!activeProject) return;
     const threadIdForSend = activeThread.id;
-    const isFirstMessage =
-      !isServerThread || activeThread.messages.length === 0;
+    const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
     const baseBranchForWorktree =
       isFirstMessage && envMode === "worktree" && !activeThread.worktreePath
         ? activeThread.branch
@@ -3120,9 +2765,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
 
     sendInFlightRef.current = true;
-    beginSendPhase(
-      baseBranchForWorktree ? "preparing-worktree" : "sending-turn",
-    );
+    beginSendPhase(baseBranchForWorktree ? "preparing-worktree" : "sending-turn");
 
     const composerImagesSnapshot = [...composerImages];
     const messageIdForSend = newMessageId();
@@ -3150,9 +2793,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         id: messageIdForSend,
         role: "user",
         text: trimmedSendText,
-        ...(optimisticAttachments.length > 0
-          ? { attachments: optimisticAttachments }
-          : {}),
+        ...(optimisticAttachments.length > 0 ? { attachments: optimisticAttachments } : {}),
         createdAt: messageCreatedAt,
         streaming: false,
       },
@@ -3194,11 +2835,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           });
           // Keep local thread state in sync immediately so terminal drawer opens
           // with the worktree cwd/env instead of briefly using the project root.
-          setStoreThreadBranch(
-            threadIdForSend,
-            result.worktree.branch,
-            result.worktree.path,
-          );
+          setStoreThreadBranch(threadIdForSend, result.worktree.branch, result.worktree.path);
         }
       }
 
@@ -3219,9 +2856,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       }
       const title = truncateTitle(titleSeed);
       let threadCreateModel: ModelSlug =
-        selectedModel ||
-        (activeProject.model as ModelSlug) ||
-        DEFAULT_MODEL_BY_PROVIDER.codex;
+        selectedModel || (activeProject.model as ModelSlug) || DEFAULT_MODEL_BY_PROVIDER.codex;
 
       if (isLocalDraftThread) {
         await api.orchestration.dispatchCommand({
@@ -3302,13 +2937,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
         ...(selectedModelOptionsForDispatch
           ? { modelOptions: selectedModelOptionsForDispatch }
           : {}),
-        ...(providerOptionsForDispatch
-          ? { providerOptions: providerOptionsForDispatch }
-          : {}),
+        ...(providerOptionsForDispatch ? { providerOptions: providerOptionsForDispatch } : {}),
         provider: selectedProvider,
-        assistantDeliveryMode: settings.enableAssistantStreaming
-          ? "streaming"
-          : "buffered",
+        assistantDeliveryMode: settings.enableAssistantStreaming ? "streaming" : "buffered",
         runtimeMode,
         interactionMode,
         createdAt: messageCreatedAt,
@@ -3333,26 +2964,18 @@ export default function ChatView({ threadId }: ChatViewProps) {
         composerImagesRef.current.length === 0
       ) {
         setOptimisticUserMessages((existing) => {
-          const removed = existing.filter(
-            (message) => message.id === messageIdForSend,
-          );
+          const removed = existing.filter((message) => message.id === messageIdForSend);
           for (const message of removed) {
             revokeUserMessagePreviewUrls(message);
           }
-          const next = existing.filter(
-            (message) => message.id !== messageIdForSend,
-          );
+          const next = existing.filter((message) => message.id !== messageIdForSend);
           return next.length === existing.length ? existing : next;
         });
         promptRef.current = trimmedSendText;
         setPrompt(trimmedSendText);
         setComposerCursor(trimmedSendText.length);
-        addComposerImagesToDraft(
-          composerImagesSnapshot.map(cloneComposerImageForRetry),
-        );
-        setComposerTrigger(
-          detectComposerTrigger(trimmedSendText, trimmedSendText.length),
-        );
+        addComposerImagesToDraft(composerImagesSnapshot.map(cloneComposerImageForRetry));
+        setComposerTrigger(detectComposerTrigger(trimmedSendText, trimmedSendText.length));
       }
       setThreadError(
         threadIdForSend,
@@ -3377,10 +3000,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   };
 
   const onRespondToApproval = useCallback(
-    async (
-      requestId: ApprovalRequestId,
-      decision: ProviderApprovalDecision,
-    ) => {
+    async (requestId: ApprovalRequestId, decision: ProviderApprovalDecision) => {
       const api = readNativeApi();
       if (!api || !activeThreadId) return;
 
@@ -3399,14 +3019,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
         .catch((err: unknown) => {
           setStoreThreadError(
             activeThreadId,
-            err instanceof Error
-              ? err.message
-              : "Failed to submit approval decision.",
+            err instanceof Error ? err.message : "Failed to submit approval decision.",
           );
         });
-      setRespondingRequestIds((existing) =>
-        existing.filter((id) => id !== requestId),
-      );
+      setRespondingRequestIds((existing) => existing.filter((id) => id !== requestId));
     },
     [activeThreadId, setStoreThreadError],
   );
@@ -3434,9 +3050,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             err instanceof Error ? err.message : "Failed to submit user input.",
           );
         });
-      setRespondingUserInputRequestIds((existing) =>
-        existing.filter((id) => id !== requestId),
-      );
+      setRespondingUserInputRequestIds((existing) => existing.filter((id) => id !== requestId));
     },
     [activeThreadId, setStoreThreadError],
   );
@@ -3477,12 +3091,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
 
   const onChangeActivePendingUserInputCustomAnswer = useCallback(
-    (
-      questionId: string,
-      value: string,
-      nextCursor: number,
-      cursorAdjacentToMention: boolean,
-    ) => {
+    (questionId: string, value: string, nextCursor: number, cursorAdjacentToMention: boolean) => {
       if (!activePendingUserInput) {
         return;
       }
@@ -3501,10 +3110,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       setComposerTrigger(
         cursorAdjacentToMention
           ? null
-          : detectComposerTrigger(
-              value,
-              expandCollapsedComposerCursor(value, nextCursor),
-            ),
+          : detectComposerTrigger(value, expandCollapsedComposerCursor(value, nextCursor)),
       );
     },
     [activePendingUserInput],
@@ -3516,16 +3122,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
     if (activePendingProgress.isLastQuestion) {
       if (activePendingResolvedAnswers) {
-        void onRespondToUserInput(
-          activePendingUserInput.requestId,
-          activePendingResolvedAnswers,
-        );
+        void onRespondToUserInput(activePendingUserInput.requestId, activePendingResolvedAnswers);
       }
       return;
     }
-    setActivePendingUserInputQuestionIndex(
-      activePendingProgress.questionIndex + 1,
-    );
+    setActivePendingUserInputQuestionIndex(activePendingProgress.questionIndex + 1);
   }, [
     activePendingProgress,
     activePendingResolvedAnswers,
@@ -3538,9 +3139,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     if (!activePendingProgress) {
       return;
     }
-    setActivePendingUserInputQuestionIndex(
-      Math.max(activePendingProgress.questionIndex - 1, 0),
-    );
+    setActivePendingUserInputQuestionIndex(Math.max(activePendingProgress.questionIndex - 1, 0));
   }, [activePendingProgress, setActivePendingUserInputQuestionIndex]);
 
   const onSubmitPlanFollowUp = useCallback(
@@ -3616,9 +3215,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           ...(selectedModelOptionsForDispatch
             ? { modelOptions: selectedModelOptionsForDispatch }
             : {}),
-          ...(providerOptionsForDispatch
-            ? { providerOptions: providerOptionsForDispatch }
-            : {}),
+          ...(providerOptionsForDispatch ? { providerOptions: providerOptionsForDispatch } : {}),
           assistantDeliveryMode: settings.enableAssistantStreaming ? "streaming" : "buffered",
           runtimeMode,
           interactionMode: nextInteractionMode,
@@ -3683,9 +3280,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     const nextThreadId = newThreadId();
     const planMarkdown = activeProposedPlan.planMarkdown;
     const implementationPrompt = buildPlanImplementationPrompt(planMarkdown);
-    const nextThreadTitle = truncateTitle(
-      buildPlanImplementationThreadTitle(planMarkdown),
-    );
+    const nextThreadTitle = truncateTitle(buildPlanImplementationThreadTitle(planMarkdown));
     const nextThreadModel: ModelSlug =
       selectedModel ||
       (activeThread.model as ModelSlug) ||
@@ -3729,9 +3324,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           ...(selectedModelOptionsForDispatch
             ? { modelOptions: selectedModelOptionsForDispatch }
             : {}),
-          ...(providerOptionsForDispatch
-            ? { providerOptions: providerOptionsForDispatch }
-            : {}),
+          ...(providerOptionsForDispatch ? { providerOptions: providerOptionsForDispatch } : {}),
           assistantDeliveryMode: settings.enableAssistantStreaming ? "streaming" : "buffered",
           runtimeMode,
           interactionMode: "default",
@@ -3766,9 +3359,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           type: "error",
           title: "Could not start implementation thread",
           description:
-            err instanceof Error
-              ? err.message
-              : "An error occurred while creating the new thread.",
+            err instanceof Error ? err.message : "An error occurred while creating the new thread.",
         });
       })
       .then(finish, finish);
@@ -3835,12 +3426,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       }
       scheduleComposerFocus();
     },
-    [
-      isLocalDraftThread,
-      scheduleComposerFocus,
-      setDraftThreadContext,
-      threadId,
-    ],
+    [isLocalDraftThread, scheduleComposerFocus, setDraftThreadContext, threadId],
   );
 
   const applyPromptReplacement = useCallback(
@@ -3852,22 +3438,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
     ): boolean => {
       const currentText = promptRef.current;
       const safeStart = Math.max(0, Math.min(currentText.length, rangeStart));
-      const safeEnd = Math.max(
-        safeStart,
-        Math.min(currentText.length, rangeEnd),
-      );
+      const safeEnd = Math.max(safeStart, Math.min(currentText.length, rangeEnd));
       if (
         options?.expectedText !== undefined &&
         currentText.slice(safeStart, safeEnd) !== options.expectedText
       ) {
         return false;
       }
-      const next = replaceTextRange(
-        promptRef.current,
-        rangeStart,
-        rangeEnd,
-        replacement,
-      );
+      const next = replaceTextRange(promptRef.current, rangeStart, rangeEnd, replacement);
       promptRef.current = next.text;
       const activePendingQuestion = activePendingProgress?.activeQuestion;
       if (activePendingQuestion && activePendingUserInput) {
@@ -3876,9 +3454,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           [activePendingUserInput.requestId]: {
             ...existing[activePendingUserInput.requestId],
             [activePendingQuestion.id]: setPendingUserInputCustomAnswer(
-              existing[activePendingUserInput.requestId]?.[
-                activePendingQuestion.id
-              ],
+              existing[activePendingUserInput.requestId]?.[activePendingQuestion.id],
               next.text,
             ),
           },
@@ -3912,10 +3488,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     trigger: ComposerTrigger | null;
   } => {
     const snapshot = readComposerSnapshot();
-    const expandedCursor = expandCollapsedComposerCursor(
-      snapshot.value,
-      snapshot.cursor,
-    );
+    const expandedCursor = expandCollapsedComposerCursor(snapshot.value, snapshot.cursor);
     return {
       snapshot,
       trigger: detectComposerTrigger(snapshot.value, expandedCursor),
@@ -3931,10 +3504,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       });
       const { snapshot, trigger } = resolveActiveComposerTrigger();
       if (!trigger) return;
-      const expectedToken = snapshot.value.slice(
-        trigger.rangeStart,
-        trigger.rangeEnd,
-      );
+      const expectedToken = snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd);
       if (item.type === "path") {
         const applied = applyPromptReplacement(
           trigger.rangeStart,
@@ -3949,44 +3519,27 @@ export default function ChatView({ threadId }: ChatViewProps) {
       }
       if (item.type === "slash-command") {
         if (item.command === "model") {
-          const applied = applyPromptReplacement(
-            trigger.rangeStart,
-            trigger.rangeEnd,
-            "/model ",
-            {
-              expectedText: expectedToken,
-            },
-          );
+          const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "/model ", {
+            expectedText: expectedToken,
+          });
           if (applied) {
             setComposerHighlightedItemId(null);
           }
           return;
         }
-        void handleInteractionModeChange(
-          item.command === "plan" ? "plan" : "default",
-        );
-        const applied = applyPromptReplacement(
-          trigger.rangeStart,
-          trigger.rangeEnd,
-          "",
-          {
-            expectedText: expectedToken,
-          },
-        );
+        void handleInteractionModeChange(item.command === "plan" ? "plan" : "default");
+        const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
+          expectedText: expectedToken,
+        });
         if (applied) {
           setComposerHighlightedItemId(null);
         }
         return;
       }
       onProviderModelSelect(item.provider, item.model);
-      const applied = applyPromptReplacement(
-        trigger.rangeStart,
-        trigger.rangeEnd,
-        "",
-        {
-          expectedText: expectedToken,
-        },
-      );
+      const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
+        expectedText: expectedToken,
+      });
       if (applied) {
         setComposerHighlightedItemId(null);
       }
@@ -4013,8 +3566,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         highlightedIndex >= 0 ? highlightedIndex : key === "ArrowDown" ? -1 : 0;
       const offset = key === "ArrowDown" ? 1 : -1;
       const nextIndex =
-        (normalizedIndex + offset + composerMenuItems.length) %
-        composerMenuItems.length;
+        (normalizedIndex + offset + composerMenuItems.length) % composerMenuItems.length;
       const nextItem = composerMenuItems[nextIndex];
       setComposerHighlightedItemId(nextItem?.id ?? null);
     },
@@ -4022,17 +3574,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
   const isComposerMenuLoading =
     composerTriggerKind === "path" &&
-    ((pathTriggerQuery.length > 0 &&
-      composerPathQueryDebouncer.state.isPending) ||
+    ((pathTriggerQuery.length > 0 && composerPathQueryDebouncer.state.isPending) ||
       workspaceEntriesQuery.isLoading ||
       workspaceEntriesQuery.isFetching);
 
   const onPromptChange = useCallback(
-    (
-      nextPrompt: string,
-      nextCursor: number,
-      cursorAdjacentToMention: boolean,
-    ) => {
+    (nextPrompt: string, nextCursor: number, cursorAdjacentToMention: boolean) => {
       if (activePendingProgress?.activeQuestion && activePendingUserInput) {
         onChangeActivePendingUserInputCustomAnswer(
           activePendingProgress.activeQuestion.id,
@@ -4085,8 +3632,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         return true;
       }
       if (key === "Tab" || key === "Enter") {
-        const selectedItem =
-          activeComposerMenuItemRef.current ?? currentItems[0];
+        const selectedItem = activeComposerMenuItemRef.current ?? currentItems[0];
         if (selectedItem) {
           onSelectComposerItem(selectedItem);
           return true;
@@ -4109,9 +3655,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const onExpandTimelineImage = useCallback((preview: ExpandedImagePreview) => {
     setExpandedImage(preview);
   }, []);
-  const expandedImageItem = expandedImage
-    ? expandedImage.images[expandedImage.index]
-    : null;
+  const expandedImageItem = expandedImage ? expandedImage.images[expandedImage.index] : null;
   const onOpenTurnDiff = useCallback(
     (turnId: TurnId, filePath?: string) => {
       void navigate({
@@ -4143,24 +3687,18 @@ export default function ChatView({ threadId }: ChatViewProps) {
           <header className="border-b border-border px-3 py-2 md:hidden">
             <div className="flex items-center gap-2">
               <SidebarTrigger className="size-7 shrink-0" />
-              <span className="text-sm font-medium text-foreground">
-                Threads
-              </span>
+              <span className="text-sm font-medium text-foreground">Threads</span>
             </div>
           </header>
         )}
         {isElectron && (
           <div className="drag-region flex h-[52px] shrink-0 items-center border-b border-border px-5">
-            <span className="text-xs text-muted-foreground/50">
-              No active thread
-            </span>
+            <span className="text-xs text-muted-foreground/50">No active thread</span>
           </div>
         )}
         <div className="flex flex-1 items-center justify-center">
           <div className="text-center">
-            <p className="text-sm">
-              Select a thread or create a new one to get started.
-            </p>
+            <p className="text-sm">Select a thread or create a new one to get started.</p>
           </div>
         </div>
       </div>
@@ -4173,9 +3711,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       <header
         className={cn(
           "border-b border-border px-3 sm:px-5",
-          isElectron
-            ? "drag-region flex h-[52px] items-center"
-            : "py-2 sm:py-3",
+          isElectron ? "drag-region flex h-[52px] items-center" : "py-2 sm:py-3",
         )}
       >
         <ChatHeader
@@ -4186,9 +3722,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           openInCwd={activeThread.worktreePath ?? activeProject?.cwd ?? null}
           activeProjectScripts={activeProject?.scripts}
           preferredScriptId={
-            activeProject
-              ? (lastInvokedScriptByProjectId[activeProject.id] ?? null)
-              : null
+            activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
           }
           keybindings={keybindings}
           availableEditors={availableEditors}
@@ -4218,193 +3752,311 @@ export default function ChatView({ threadId }: ChatViewProps) {
       <div className="flex min-h-0 flex-1">
         {/* Chat column */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-
-      {/* Messages */}
-      <div
-        ref={setMessagesScrollContainerRef}
-        className="chat-messages-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain px-3 py-3 sm:px-5 sm:py-4"
-        onScroll={onMessagesScroll}
-        onClickCapture={onMessagesClickCapture}
-        onWheel={onMessagesWheel}
-        onPointerDown={onMessagesPointerDown}
-        onPointerUp={onMessagesPointerUp}
-        onPointerCancel={onMessagesPointerCancel}
-        onTouchStart={onMessagesTouchStart}
-        onTouchMove={onMessagesTouchMove}
-        onTouchEnd={onMessagesTouchEnd}
-        onTouchCancel={onMessagesTouchEnd}
-      >
-        <MessagesTimeline
-          key={activeThread.id}
-          hasMessages={timelineEntries.length > 0}
-          isWorking={isWorking}
-          activeTurnInProgress={isWorking || !latestTurnSettled}
-          activeTurnStartedAt={activeWorkStartedAt}
-          scrollContainer={messagesScrollElement}
-          shouldSuppressScrollAdjustment={
-            shouldSuppressTimelineScrollAdjustment
-          }
-          timelineEntries={timelineEntries}
-          completionDividerBeforeEntryId={completionDividerBeforeEntryId}
-          completionSummary={completionSummary}
-          turnDiffSummaryByAssistantMessageId={
-            turnDiffSummaryByAssistantMessageId
-          }
-          nowIso={nowIso}
-          expandedWorkGroups={expandedWorkGroups}
-          onToggleWorkGroup={onToggleWorkGroup}
-          onOpenTurnDiff={onOpenTurnDiff}
-          revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
-          onRevertUserMessage={onRevertUserMessage}
-          isRevertingCheckpoint={isRevertingCheckpoint}
-          onImageExpand={onExpandTimelineImage}
-          markdownCwd={gitCwd ?? undefined}
-          resolvedTheme={resolvedTheme}
-          workspaceRoot={activeProject?.cwd ?? undefined}
-        />
-      </div>
-
-      {/* Input bar */}
-      <div
-        className={cn(
-          "px-3 pt-1.5 sm:px-5 sm:pt-2",
-          isGitRepo ? "pb-1" : "pb-3 sm:pb-4",
-        )}
-      >
-        <form
-          ref={composerFormRef}
-          onSubmit={onSend}
-          className="mx-auto w-full min-w-0 max-w-3xl"
-          data-chat-composer-form="true"
-        >
+          {/* Messages */}
           <div
-            className={`group rounded-[20px] border bg-card transition-colors duration-200 focus-within:border-ring/45 ${
-              isDragOverComposer
-                ? "border-primary/70 bg-accent/30"
-                : "border-border"
-            }`}
-            onDragEnter={onComposerDragEnter}
-            onDragOver={onComposerDragOver}
-            onDragLeave={onComposerDragLeave}
-            onDrop={onComposerDrop}
+            ref={setMessagesScrollContainerRef}
+            className="chat-messages-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain px-3 py-3 sm:px-5 sm:py-4"
+            onScroll={onMessagesScroll}
+            onClickCapture={onMessagesClickCapture}
+            onWheel={onMessagesWheel}
+            onPointerDown={onMessagesPointerDown}
+            onPointerUp={onMessagesPointerUp}
+            onPointerCancel={onMessagesPointerCancel}
+            onTouchStart={onMessagesTouchStart}
+            onTouchMove={onMessagesTouchMove}
+            onTouchEnd={onMessagesTouchEnd}
+            onTouchCancel={onMessagesTouchEnd}
           >
-            {activePendingApproval ? (
-              <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
-                <ComposerPendingApprovalPanel
-                  approval={activePendingApproval}
-                  pendingCount={pendingApprovals.length}
-                />
-              </div>
-            ) : pendingUserInputs.length > 0 ? (
-              <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
-                <ComposerPendingUserInputPanel
-                  pendingUserInputs={pendingUserInputs}
-                  respondingRequestIds={respondingUserInputRequestIds}
-                  answers={activePendingDraftAnswers}
-                  questionIndex={activePendingQuestionIndex}
-                  onSelectOption={onSelectActivePendingUserInputOption}
-                  onAdvance={onAdvanceActivePendingUserInput}
-                />
-              </div>
-            ) : showPlanFollowUpPrompt && activeProposedPlan ? (
-              <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
-                <ComposerPlanFollowUpBanner
-                  key={activeProposedPlan.id}
-                  planTitle={
-                    proposedPlanTitle(activeProposedPlan.planMarkdown) ?? null
-                  }
-                />
-              </div>
-            ) : null}
+            <MessagesTimeline
+              key={activeThread.id}
+              hasMessages={timelineEntries.length > 0}
+              isWorking={isWorking}
+              activeTurnInProgress={isWorking || !latestTurnSettled}
+              activeTurnStartedAt={activeWorkStartedAt}
+              scrollContainer={messagesScrollElement}
+              shouldSuppressScrollAdjustment={shouldSuppressTimelineScrollAdjustment}
+              timelineEntries={timelineEntries}
+              completionDividerBeforeEntryId={completionDividerBeforeEntryId}
+              completionSummary={completionSummary}
+              turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
+              nowIso={nowIso}
+              expandedWorkGroups={expandedWorkGroups}
+              onToggleWorkGroup={onToggleWorkGroup}
+              onOpenTurnDiff={onOpenTurnDiff}
+              revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
+              onRevertUserMessage={onRevertUserMessage}
+              isRevertingCheckpoint={isRevertingCheckpoint}
+              onImageExpand={onExpandTimelineImage}
+              markdownCwd={gitCwd ?? undefined}
+              resolvedTheme={resolvedTheme}
+              workspaceRoot={activeProject?.cwd ?? undefined}
+            />
+          </div>
 
-            {/* Textarea area */}
-            <div
-              className={cn(
-                "relative px-3 pb-1.5 sm:px-4",
-                hasComposerHeader ? "pt-2 sm:pt-2.5" : "pt-2.5 sm:pt-3",
-              )}
+          {/* Input bar */}
+          <div className={cn("px-3 pt-1.5 sm:px-5 sm:pt-2", isGitRepo ? "pb-1" : "pb-3 sm:pb-4")}>
+            <form
+              ref={composerFormRef}
+              onSubmit={onSend}
+              className="mx-auto w-full min-w-0 max-w-3xl"
+              data-chat-composer-form="true"
             >
-              {composerMenuOpen && !isComposerApprovalState && (
-                <div className="absolute inset-x-0 bottom-full z-20 mb-2 px-1">
-                  <ComposerCommandMenu
-                    items={composerMenuItems}
-                    resolvedTheme={resolvedTheme}
-                    isLoading={isComposerMenuLoading}
-                    triggerKind={composerTriggerKind}
-                    activeItemId={activeComposerMenuItem?.id ?? null}
-                    onHighlightedItemChange={onComposerMenuItemHighlighted}
-                    onSelect={onSelectComposerItem}
-                  />
-                </div>
-              )}
+              <div
+                className={`group rounded-[20px] border bg-card transition-colors duration-200 focus-within:border-ring/45 ${
+                  isDragOverComposer ? "border-primary/70 bg-accent/30" : "border-border"
+                }`}
+                onDragEnter={onComposerDragEnter}
+                onDragOver={onComposerDragOver}
+                onDragLeave={onComposerDragLeave}
+                onDrop={onComposerDrop}
+              >
+                {activePendingApproval ? (
+                  <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
+                    <ComposerPendingApprovalPanel
+                      approval={activePendingApproval}
+                      pendingCount={pendingApprovals.length}
+                    />
+                  </div>
+                ) : pendingUserInputs.length > 0 ? (
+                  <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
+                    <ComposerPendingUserInputPanel
+                      pendingUserInputs={pendingUserInputs}
+                      respondingRequestIds={respondingUserInputRequestIds}
+                      answers={activePendingDraftAnswers}
+                      questionIndex={activePendingQuestionIndex}
+                      onSelectOption={onSelectActivePendingUserInputOption}
+                      onAdvance={onAdvanceActivePendingUserInput}
+                    />
+                  </div>
+                ) : showPlanFollowUpPrompt && activeProposedPlan ? (
+                  <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
+                    <ComposerPlanFollowUpBanner
+                      key={activeProposedPlan.id}
+                      planTitle={proposedPlanTitle(activeProposedPlan.planMarkdown) ?? null}
+                    />
+                  </div>
+                ) : null}
 
-              {queuedMessages.length > 0 && (
-                <div className="mb-3 space-y-2">
-                  {queuedMessages.map((queuedMessage, index) => {
-                    const isDispatching =
-                      dispatchingQueuedMessageId === queuedMessage.id;
-                    const isSteering = steeringQueuedMessageId === queuedMessage.id;
-                    const hasNonPersistedImages =
-                      (queuedNonPersistedImageIdSetByQueuedMessageId.get(
-                        queuedMessage.id,
-                      )?.size ?? 0) > 0;
-                    return (
-                      <div
-                        key={queuedMessage.id}
-                        data-testid={`queued-message-card-${queuedMessage.id}`}
-                        onDragOver={(event) =>
-                          handleQueuedMessageDragOver(event, queuedMessage.id)
-                        }
-                        onDrop={(event) =>
-                          handleQueuedMessageDrop(event, queuedMessage.id)
-                        }
-                        onDragLeave={() => {
-                          if (queuedDropTargetId === queuedMessage.id) {
-                            setQueuedDropTargetId(null);
-                          }
-                        }}
-                        className={cn(
-                          "flex items-start gap-2 rounded-2xl border border-border/75 bg-muted/18 px-3 py-2 transition-colors",
-                          queuedDropTargetId === queuedMessage.id &&
-                            draggedQueuedMessageId !== queuedMessage.id
-                            ? "border-foreground/35 bg-muted/30"
-                            : null,
-                        )}
-                      >
-                        <div
-                          data-testid={`queued-message-handle-${queuedMessage.id}`}
-                          draggable
-                          onDragStart={(event) =>
-                            handleQueuedMessageDragStart(event, queuedMessage.id)
-                          }
-                          onDragEnd={clearQueuedDragState}
-                          aria-label="Drag to reorder queued message"
-                          title="Drag to reorder queued message"
-                          className={cn(
-                            "mt-0.5 flex size-7 shrink-0 cursor-grab items-center justify-center rounded-full bg-background/80 text-muted-foreground active:cursor-grabbing",
-                            draggedQueuedMessageId === queuedMessage.id
-                              ? "bg-background text-foreground/80"
-                              : null,
-                          )}
-                        >
-                          <GripVerticalIcon
-                            className="size-3.5"
-                            aria-hidden="true"
-                          />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground/75 uppercase">
-                              {index === 0 ? "Queued next" : "Queued"}
-                            </span>
-                            {hasNonPersistedImages ? (
+                {/* Textarea area */}
+                <div
+                  className={cn(
+                    "relative px-3 pb-1.5 sm:px-4",
+                    hasComposerHeader ? "pt-2 sm:pt-2.5" : "pt-2.5 sm:pt-3",
+                  )}
+                >
+                  {composerMenuOpen && !isComposerApprovalState && (
+                    <div className="absolute inset-x-0 bottom-full z-20 mb-2 px-1">
+                      <ComposerCommandMenu
+                        items={composerMenuItems}
+                        resolvedTheme={resolvedTheme}
+                        isLoading={isComposerMenuLoading}
+                        triggerKind={composerTriggerKind}
+                        activeItemId={activeComposerMenuItem?.id ?? null}
+                        onHighlightedItemChange={onComposerMenuItemHighlighted}
+                        onSelect={onSelectComposerItem}
+                      />
+                    </div>
+                  )}
+
+                  {queuedMessages.length > 0 && (
+                    <div className="mb-3 space-y-2">
+                      {queuedMessages.map((queuedMessage, index) => {
+                        const isDispatching = dispatchingQueuedMessageId === queuedMessage.id;
+                        const isSteering = steeringQueuedMessageId === queuedMessage.id;
+                        const hasNonPersistedImages =
+                          (queuedNonPersistedImageIdSetByQueuedMessageId.get(queuedMessage.id)
+                            ?.size ?? 0) > 0;
+                        return (
+                          <div
+                            key={queuedMessage.id}
+                            data-testid={`queued-message-card-${queuedMessage.id}`}
+                            onDragOver={(event) =>
+                              handleQueuedMessageDragOver(event, queuedMessage.id)
+                            }
+                            onDrop={(event) => handleQueuedMessageDrop(event, queuedMessage.id)}
+                            onDragLeave={() => {
+                              if (queuedDropTargetId === queuedMessage.id) {
+                                setQueuedDropTargetId(null);
+                              }
+                            }}
+                            className={cn(
+                              "flex items-start gap-2 rounded-2xl border border-border/75 bg-muted/18 px-3 py-2 transition-colors",
+                              queuedDropTargetId === queuedMessage.id &&
+                                draggedQueuedMessageId !== queuedMessage.id
+                                ? "border-foreground/35 bg-muted/30"
+                                : null,
+                            )}
+                          >
+                            <div
+                              data-testid={`queued-message-handle-${queuedMessage.id}`}
+                              draggable
+                              onDragStart={(event) =>
+                                handleQueuedMessageDragStart(event, queuedMessage.id)
+                              }
+                              onDragEnd={clearQueuedDragState}
+                              aria-label="Drag to reorder queued message"
+                              title="Drag to reorder queued message"
+                              className={cn(
+                                "mt-0.5 flex size-7 shrink-0 cursor-grab items-center justify-center rounded-full bg-background/80 text-muted-foreground active:cursor-grabbing",
+                                draggedQueuedMessageId === queuedMessage.id
+                                  ? "bg-background text-foreground/80"
+                                  : null,
+                              )}
+                            >
+                              <GripVerticalIcon className="size-3.5" aria-hidden="true" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground/75 uppercase">
+                                  {index === 0 ? "Queued next" : "Queued"}
+                                </span>
+                                {hasNonPersistedImages ? (
+                                  <Tooltip>
+                                    <TooltipTrigger
+                                      render={
+                                        <span
+                                          role="img"
+                                          aria-label="Queued attachment may not persist"
+                                          className="inline-flex items-center justify-center rounded bg-background/85 p-0.5 text-amber-600"
+                                        >
+                                          <CircleAlertIcon className="size-3" />
+                                        </span>
+                                      }
+                                    />
+                                    <TooltipPopup
+                                      side="top"
+                                      className="max-w-64 whitespace-normal leading-tight"
+                                    >
+                                      Queued attachment could not be saved locally and may be lost
+                                      on reload.
+                                    </TooltipPopup>
+                                  </Tooltip>
+                                ) : null}
+                              </div>
+                              <p className="mt-0.5 truncate text-sm font-medium text-foreground/95">
+                                {queuedMessagePreview(queuedMessage)}
+                              </p>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-1">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="secondary"
+                                className="h-8 rounded-full px-3"
+                                disabled={isDispatching || isSteering}
+                                onClick={() => void handleSteerQueuedMessage(queuedMessage.id)}
+                              >
+                                {isSteering ? "Steering..." : "Steer"}
+                              </Button>
+                              <Button
+                                type="button"
+                                size="icon-xs"
+                                variant="ghost"
+                                className="rounded-full"
+                                disabled={isDispatching}
+                                onClick={() => handleQueueEdit(queuedMessage.id)}
+                                aria-label="Edit queued message"
+                                title="Edit queued message"
+                              >
+                                <svg
+                                  width="14"
+                                  height="14"
+                                  viewBox="0 0 14 14"
+                                  fill="none"
+                                  aria-hidden="true"
+                                >
+                                  <path
+                                    d="M9.916 2.334a1.65 1.65 0 1 1 2.333 2.333l-6.5 6.5-2.916.583.583-2.916 6.5-6.5Z"
+                                    stroke="currentColor"
+                                    strokeWidth="1.2"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  />
+                                  <path
+                                    d="M8.75 3.5 11.083 5.833"
+                                    stroke="currentColor"
+                                    strokeWidth="1.2"
+                                    strokeLinecap="round"
+                                  />
+                                </svg>
+                              </Button>
+                              <Button
+                                type="button"
+                                size="icon-xs"
+                                variant="ghost"
+                                className="rounded-full"
+                                disabled={isDispatching}
+                                onClick={() =>
+                                  removeQueuedMessage(activeThread.id, queuedMessage.id)
+                                }
+                                aria-label="Delete queued message"
+                                title="Delete queued message"
+                              >
+                                <svg
+                                  width="14"
+                                  height="14"
+                                  viewBox="0 0 14 14"
+                                  fill="none"
+                                  aria-hidden="true"
+                                >
+                                  <path
+                                    d="M2.917 3.5h8.166M5.25 3.5V2.333h3.5V3.5M4.083 3.5v7.584c0 .46.373.833.834.833h4.166a.833.833 0 0 0 .834-.833V3.5M5.833 5.25v4.667M8.167 5.25v4.667"
+                                    stroke="currentColor"
+                                    strokeWidth="1.2"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  />
+                                </svg>
+                              </Button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {!isComposerApprovalState &&
+                    pendingUserInputs.length === 0 &&
+                    composerImages.length > 0 && (
+                      <div className="mb-3 flex flex-wrap gap-2">
+                        {composerImages.map((image) => (
+                          <div
+                            key={image.id}
+                            className="relative h-16 w-16 overflow-hidden rounded-lg border border-border/80 bg-background"
+                          >
+                            {image.previewUrl ? (
+                              <button
+                                type="button"
+                                className="h-full w-full cursor-zoom-in"
+                                aria-label={`Preview ${image.name}`}
+                                onClick={() => {
+                                  const preview = buildExpandedImagePreview(
+                                    composerImages,
+                                    image.id,
+                                  );
+                                  if (!preview) return;
+                                  setExpandedImage(preview);
+                                }}
+                              >
+                                <img
+                                  src={image.previewUrl}
+                                  alt={image.name}
+                                  className="h-full w-full object-cover"
+                                />
+                              </button>
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center px-1 text-center text-[10px] text-muted-foreground/70">
+                                {image.name}
+                              </div>
+                            )}
+                            {nonPersistedComposerImageIdSet.has(image.id) && (
                               <Tooltip>
                                 <TooltipTrigger
                                   render={
                                     <span
                                       role="img"
-                                      aria-label="Queued attachment may not persist"
-                                      className="inline-flex items-center justify-center rounded bg-background/85 p-0.5 text-amber-600"
+                                      aria-label="Draft attachment may not persist"
+                                      className="absolute left-1 top-1 inline-flex items-center justify-center rounded bg-background/85 p-0.5 text-amber-600"
                                     >
                                       <CircleAlertIcon className="size-3" />
                                     </span>
@@ -4414,480 +4066,316 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                   side="top"
                                   className="max-w-64 whitespace-normal leading-tight"
                                 >
-                                  Queued attachment could not be saved locally and
-                                  may be lost on reload.
+                                  Draft attachment could not be saved locally and may be lost on
+                                  navigation.
                                 </TooltipPopup>
                               </Tooltip>
-                            ) : null}
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              className="absolute right-1 top-1 bg-background/80 hover:bg-background/90"
+                              onClick={() => removeComposerImage(image.id)}
+                              aria-label={`Remove ${image.name}`}
+                            >
+                              <XIcon />
+                            </Button>
                           </div>
-                          <p className="mt-0.5 truncate text-sm font-medium text-foreground/95">
-                            {queuedMessagePreview(queuedMessage)}
-                          </p>
-                        </div>
-                        <div className="flex shrink-0 items-center gap-1">
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="secondary"
-                            className="h-8 rounded-full px-3"
-                            disabled={isDispatching || isSteering}
-                            onClick={() =>
-                              void handleSteerQueuedMessage(queuedMessage.id)
-                            }
-                          >
-                            {isSteering ? "Steering..." : "Steer"}
-                          </Button>
-                          <Button
-                            type="button"
-                            size="icon-xs"
-                            variant="ghost"
-                            className="rounded-full"
-                            disabled={isDispatching}
-                            onClick={() =>
-                              handleQueueEdit(queuedMessage.id)
-                            }
-                            aria-label="Edit queued message"
-                            title="Edit queued message"
-                          >
-                            <svg
-                              width="14"
-                              height="14"
-                              viewBox="0 0 14 14"
-                              fill="none"
-                              aria-hidden="true"
-                            >
-                              <path
-                                d="M9.916 2.334a1.65 1.65 0 1 1 2.333 2.333l-6.5 6.5-2.916.583.583-2.916 6.5-6.5Z"
-                                stroke="currentColor"
-                                strokeWidth="1.2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
-                              <path
-                                d="M8.75 3.5 11.083 5.833"
-                                stroke="currentColor"
-                                strokeWidth="1.2"
-                                strokeLinecap="round"
-                              />
-                            </svg>
-                          </Button>
-                          <Button
-                            type="button"
-                            size="icon-xs"
-                            variant="ghost"
-                            className="rounded-full"
-                            disabled={isDispatching}
-                            onClick={() =>
-                              removeQueuedMessage(activeThread.id, queuedMessage.id)
-                            }
-                            aria-label="Delete queued message"
-                            title="Delete queued message"
-                          >
-                            <svg
-                              width="14"
-                              height="14"
-                              viewBox="0 0 14 14"
-                              fill="none"
-                              aria-hidden="true"
-                            >
-                              <path
-                                d="M2.917 3.5h8.166M5.25 3.5V2.333h3.5V3.5M4.083 3.5v7.584c0 .46.373.833.834.833h4.166a.833.833 0 0 0 .834-.833V3.5M5.833 5.25v4.667M8.167 5.25v4.667"
-                                stroke="currentColor"
-                                strokeWidth="1.2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
-                            </svg>
-                          </Button>
-                        </div>
+                        ))}
                       </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {!isComposerApprovalState &&
-                pendingUserInputs.length === 0 &&
-                composerImages.length > 0 && (
-                  <div className="mb-3 flex flex-wrap gap-2">
-                    {composerImages.map((image) => (
-                      <div
-                        key={image.id}
-                        className="relative h-16 w-16 overflow-hidden rounded-lg border border-border/80 bg-background"
-                      >
-                        {image.previewUrl ? (
-                          <button
-                            type="button"
-                            className="h-full w-full cursor-zoom-in"
-                            aria-label={`Preview ${image.name}`}
-                            onClick={() => {
-                              const preview = buildExpandedImagePreview(
-                                composerImages,
-                                image.id,
-                              );
-                              if (!preview) return;
-                              setExpandedImage(preview);
-                            }}
-                          >
-                            <img
-                              src={image.previewUrl}
-                              alt={image.name}
-                              className="h-full w-full object-cover"
-                            />
-                          </button>
-                        ) : (
-                          <div className="flex h-full w-full items-center justify-center px-1 text-center text-[10px] text-muted-foreground/70">
-                            {image.name}
-                          </div>
-                        )}
-                        {nonPersistedComposerImageIdSet.has(image.id) && (
-                          <Tooltip>
-                            <TooltipTrigger
-                              render={
-                                <span
-                                  role="img"
-                                  aria-label="Draft attachment may not persist"
-                                  className="absolute left-1 top-1 inline-flex items-center justify-center rounded bg-background/85 p-0.5 text-amber-600"
-                                >
-                                  <CircleAlertIcon className="size-3" />
-                                </span>
-                              }
-                            />
-                            <TooltipPopup
-                              side="top"
-                              className="max-w-64 whitespace-normal leading-tight"
-                            >
-                              Draft attachment could not be saved locally and
-                              may be lost on navigation.
-                            </TooltipPopup>
-                          </Tooltip>
-                        )}
-                        <Button
-                          variant="ghost"
-                          size="icon-xs"
-                          className="absolute right-1 top-1 bg-background/80 hover:bg-background/90"
-                          onClick={() => removeComposerImage(image.id)}
-                          aria-label={`Remove ${image.name}`}
-                        >
-                          <XIcon />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              <ComposerPromptEditor
-                ref={composerEditorRef}
-                value={
-                  isComposerApprovalState
-                    ? ""
-                    : activePendingProgress
-                      ? activePendingProgress.customAnswer
-                      : prompt
-                }
-                cursor={composerCursor}
-                onChange={onPromptChange}
-                onCommandKeyDown={onComposerCommandKey}
-                onPaste={onComposerPaste}
-                placeholder={
-                  isComposerApprovalState
-                    ? (activePendingApproval?.detail ??
-                      "Resolve this approval request to continue")
-                    : activePendingProgress
-                      ? "Type your own answer, or leave this blank to use the selected option"
-                      : phase === "running"
-                        ? "Ask for follow-up changes"
-                      : showPlanFollowUpPrompt && activeProposedPlan
-                        ? "Add feedback to refine the plan, or leave this blank to implement it"
-                        : phase === "disconnected"
-                          ? "Ask for follow-up changes or attach images"
-                          : "Ask anything, @tag files/folders, or use /model"
-                }
-                disabled={isConnecting || isComposerApprovalState}
-              />
-            </div>
-
-            {/* Bottom toolbar */}
-            {activePendingApproval ? (
-              <div className="flex items-center justify-end gap-2 px-2.5 pb-2 sm:px-3 sm:pb-2.5">
-                <ComposerPendingApprovalActions
-                  requestId={activePendingApproval.requestId}
-                  isResponding={respondingRequestIds.includes(
-                    activePendingApproval.requestId,
-                  )}
-                  onRespondToApproval={onRespondToApproval}
-                />
-              </div>
-            ) : (
-              <div className="flex flex-wrap items-center justify-between gap-2 px-2.5 pb-2 sm:flex-nowrap sm:gap-0 sm:px-3 sm:pb-2.5">
-                <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:min-w-max sm:overflow-visible">
-                  {/* Provider/model picker */}
-                  <ProviderModelPicker
-                    provider={selectedProvider}
-                    model={selectedModelForPickerWithCustomFallback}
-                    lockedProvider={lockedProvider}
-                    modelOptionsByProvider={modelOptionsByProvider}
-                    onProviderModelChange={onProviderModelSelect}
-                  />
-
-                  {selectedProvider === "codex" && selectedEffort != null ? (
-                    <>
-                      <Separator
-                        orientation="vertical"
-                        className="mx-0.5 hidden h-4 sm:block"
-                      />
-                      <CodexTraitsPicker
-                        effort={selectedEffort}
-                        fastModeEnabled={selectedCodexFastModeEnabled}
-                        options={reasoningOptions}
-                        onEffortChange={onEffortSelect}
-                        onFastModeChange={onCodexFastModeChange}
-                      />
-                    </>
-                  ) : null}
-
-                  {/* Divider */}
-                  <Separator
-                    orientation="vertical"
-                    className="mx-0.5 hidden h-4 sm:block"
-                  />
-
-                  {/* Interaction mode toggle */}
-                  <Button
-                    variant="ghost"
-                    className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
-                    size="sm"
-                    type="button"
-                    onClick={toggleInteractionMode}
-                    title={
-                      interactionMode === "plan"
-                        ? "Plan mode — click to return to normal chat mode"
-                        : "Default mode — click to enter plan mode"
-                    }
-                  >
-                    <BotIcon />
-                    <span className="sr-only sm:not-sr-only">
-                      {interactionMode === "plan" ? "Plan" : "Chat"}
-                    </span>
-                  </Button>
-
-                  {/* Divider */}
-                  <Separator
-                    orientation="vertical"
-                    className="mx-0.5 hidden h-4 sm:block"
-                  />
-
-                  {/* Runtime mode toggle */}
-                  <Button
-                    variant="ghost"
-                    className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
-                    size="sm"
-                    type="button"
-                    onClick={() =>
-                      void handleRuntimeModeChange(
-                        runtimeMode === "full-access"
-                          ? "approval-required"
-                          : "full-access",
-                      )
-                    }
-                    title={
-                      runtimeMode === "full-access"
-                        ? "Full access — click to require approvals"
-                        : "Approval required — click for full access"
-                    }
-                  >
-                    {runtimeMode === "full-access" ? (
-                      <LockOpenIcon />
-                    ) : (
-                      <LockIcon />
                     )}
-                    <span className="sr-only sm:not-sr-only">
-                      {runtimeMode === "full-access"
-                        ? "Full access"
-                        : "Supervised"}
-                    </span>
-                  </Button>
-
+                  <ComposerPromptEditor
+                    ref={composerEditorRef}
+                    value={
+                      isComposerApprovalState
+                        ? ""
+                        : activePendingProgress
+                          ? activePendingProgress.customAnswer
+                          : prompt
+                    }
+                    cursor={composerCursor}
+                    onChange={onPromptChange}
+                    onCommandKeyDown={onComposerCommandKey}
+                    onPaste={onComposerPaste}
+                    placeholder={
+                      isComposerApprovalState
+                        ? (activePendingApproval?.detail ??
+                          "Resolve this approval request to continue")
+                        : activePendingProgress
+                          ? "Type your own answer, or leave this blank to use the selected option"
+                          : phase === "running"
+                            ? "Ask for follow-up changes"
+                            : showPlanFollowUpPrompt && activeProposedPlan
+                              ? "Add feedback to refine the plan, or leave this blank to implement it"
+                              : phase === "disconnected"
+                                ? "Ask for follow-up changes or attach images"
+                                : "Ask anything, @tag files/folders, or use /model"
+                    }
+                    disabled={isConnecting || isComposerApprovalState}
+                  />
                 </div>
 
-                {/* Right side: send / stop button */}
-                <div className="flex shrink-0 items-center gap-2">
-                  {isPreparingWorktree ? (
-                    <span className="text-muted-foreground/70 text-xs">
-                      Preparing worktree...
-                    </span>
-                  ) : null}
-                  {activePendingProgress ? (
-                    <div className="flex items-center gap-2">
-                      {activePendingProgress.questionIndex > 0 ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="rounded-full"
-                          onClick={onPreviousActivePendingUserInputQuestion}
-                          disabled={activePendingIsResponding}
-                        >
-                          Previous
-                        </Button>
+                {/* Bottom toolbar */}
+                {activePendingApproval ? (
+                  <div className="flex items-center justify-end gap-2 px-2.5 pb-2 sm:px-3 sm:pb-2.5">
+                    <ComposerPendingApprovalActions
+                      requestId={activePendingApproval.requestId}
+                      isResponding={respondingRequestIds.includes(activePendingApproval.requestId)}
+                      onRespondToApproval={onRespondToApproval}
+                    />
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center justify-between gap-2 px-2.5 pb-2 sm:flex-nowrap sm:gap-0 sm:px-3 sm:pb-2.5">
+                    <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:min-w-max sm:overflow-visible">
+                      {/* Provider/model picker */}
+                      <ProviderModelPicker
+                        provider={selectedProvider}
+                        model={selectedModelForPickerWithCustomFallback}
+                        lockedProvider={lockedProvider}
+                        modelOptionsByProvider={modelOptionsByProvider}
+                        onProviderModelChange={onProviderModelSelect}
+                      />
+
+                      {selectedProvider === "codex" && selectedEffort != null ? (
+                        <>
+                          <Separator
+                            orientation="vertical"
+                            className="mx-0.5 hidden h-4 sm:block"
+                          />
+                          <CodexTraitsPicker
+                            effort={selectedEffort}
+                            fastModeEnabled={selectedCodexFastModeEnabled}
+                            options={reasoningOptions}
+                            onEffortChange={onEffortSelect}
+                            onFastModeChange={onCodexFastModeChange}
+                          />
+                        </>
                       ) : null}
+
+                      {/* Divider */}
+                      <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
+
+                      {/* Interaction mode toggle */}
                       <Button
-                        type="submit"
+                        variant="ghost"
+                        className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
                         size="sm"
-                        className="rounded-full px-4"
-                        disabled={
-                          activePendingIsResponding ||
-                          (activePendingProgress.isLastQuestion
-                            ? !activePendingResolvedAnswers
-                            : !activePendingProgress.canAdvance)
+                        type="button"
+                        onClick={toggleInteractionMode}
+                        title={
+                          interactionMode === "plan"
+                            ? "Plan mode — click to return to normal chat mode"
+                            : "Default mode — click to enter plan mode"
                         }
                       >
-                        {activePendingIsResponding
-                          ? "Submitting..."
-                          : activePendingProgress.isLastQuestion
-                            ? "Submit answers"
-                            : "Next question"}
+                        <BotIcon />
+                        <span className="sr-only sm:not-sr-only">
+                          {interactionMode === "plan" ? "Plan" : "Chat"}
+                        </span>
+                      </Button>
+
+                      {/* Divider */}
+                      <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
+
+                      {/* Runtime mode toggle */}
+                      <Button
+                        variant="ghost"
+                        className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
+                        size="sm"
+                        type="button"
+                        onClick={() =>
+                          void handleRuntimeModeChange(
+                            runtimeMode === "full-access" ? "approval-required" : "full-access",
+                          )
+                        }
+                        title={
+                          runtimeMode === "full-access"
+                            ? "Full access — click to require approvals"
+                            : "Approval required — click for full access"
+                        }
+                      >
+                        {runtimeMode === "full-access" ? <LockOpenIcon /> : <LockIcon />}
+                        <span className="sr-only sm:not-sr-only">
+                          {runtimeMode === "full-access" ? "Full access" : "Supervised"}
+                        </span>
                       </Button>
                     </div>
-                  ) : phase === "running" ? (
-                    <button
-                      type="button"
-                      className="flex size-8 items-center justify-center rounded-full bg-rose-500/90 text-white transition-all duration-150 hover:bg-rose-500 hover:scale-105 sm:h-8 sm:w-8"
-                      onClick={() => void onInterrupt()}
-                      aria-label="Stop generation"
-                    >
-                      <svg
-                        width="12"
-                        height="12"
-                        viewBox="0 0 12 12"
-                        fill="currentColor"
-                        aria-hidden="true"
-                      >
-                        <rect x="2" y="2" width="8" height="8" rx="1.5" />
-                      </svg>
-                    </button>
-                  ) : hasQueuedDispatchInFlight ? (
-                    <div
-                      className="flex size-8 items-center justify-center rounded-full bg-muted text-muted-foreground/75 sm:h-8 sm:w-8"
-                      aria-label="Queued message sending"
-                      title="Queued message sending"
-                    >
-                      <LoaderCircleIcon className="size-4 animate-spin" />
-                    </div>
-                  ) : pendingUserInputs.length === 0 ? (
-                    showPlanFollowUpPrompt ? (
-                      prompt.trim().length > 0 ? (
-                        <Button
-                          type="submit"
-                          size="sm"
-                          className="h-9 rounded-full px-4 sm:h-8"
-                          disabled={isSendBusy || isConnecting}
-                        >
-                          {isConnecting || isSendBusy ? "Sending..." : "Refine"}
-                        </Button>
-                      ) : (
-                        <div className="flex items-center">
+
+                    {/* Right side: send / stop button */}
+                    <div className="flex shrink-0 items-center gap-2">
+                      {isPreparingWorktree ? (
+                        <span className="text-muted-foreground/70 text-xs">
+                          Preparing worktree...
+                        </span>
+                      ) : null}
+                      {activePendingProgress ? (
+                        <div className="flex items-center gap-2">
+                          {activePendingProgress.questionIndex > 0 ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="rounded-full"
+                              onClick={onPreviousActivePendingUserInputQuestion}
+                              disabled={activePendingIsResponding}
+                            >
+                              Previous
+                            </Button>
+                          ) : null}
                           <Button
                             type="submit"
                             size="sm"
-                            className="h-9 rounded-l-full rounded-r-none px-4 sm:h-8"
-                            disabled={isSendBusy || isConnecting}
+                            className="rounded-full px-4"
+                            disabled={
+                              activePendingIsResponding ||
+                              (activePendingProgress.isLastQuestion
+                                ? !activePendingResolvedAnswers
+                                : !activePendingProgress.canAdvance)
+                            }
                           >
-                            {isConnecting || isSendBusy
-                              ? "Sending..."
-                              : "Implement"}
+                            {activePendingIsResponding
+                              ? "Submitting..."
+                              : activePendingProgress.isLastQuestion
+                                ? "Submit answers"
+                                : "Next question"}
                           </Button>
-                          <Menu>
-                            <MenuTrigger
-                              render={
-                                <Button
-                                  size="sm"
-                                  variant="default"
-                                  className="h-9 rounded-l-none rounded-r-full border-l-white/12 px-2 sm:h-8"
-                                  aria-label="Implementation actions"
-                                  disabled={isSendBusy || isConnecting}
-                                />
-                              }
-                            >
-                              <ChevronDownIcon className="size-3.5" />
-                            </MenuTrigger>
-                            <MenuPopup align="end" side="top">
-                              <MenuItem
-                                disabled={isSendBusy || isConnecting}
-                                onClick={() =>
-                                  void onImplementPlanInNewThread()
-                                }
-                              >
-                                Implement in new thread
-                              </MenuItem>
-                            </MenuPopup>
-                          </Menu>
                         </div>
-                      )
-                    ) : (
-                      <button
-                        type="submit"
-                        className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/90 text-primary-foreground transition-all duration-150 hover:bg-primary hover:scale-105 disabled:opacity-30 disabled:hover:scale-100 sm:h-8 sm:w-8"
-                        disabled={
-                          isSendBusy ||
-                          isConnecting ||
-                          (!prompt.trim() && composerImages.length === 0)
-                        }
-                        aria-label={
-                          isConnecting
-                            ? "Connecting"
-                            : isPreparingWorktree
-                              ? "Preparing worktree"
-                              : isSendBusy
-                                ? "Sending"
-                                : "Send message"
-                        }
-                      >
-                        {isConnecting || isSendBusy ? (
+                      ) : phase === "running" ? (
+                        <button
+                          type="button"
+                          className="flex size-8 items-center justify-center rounded-full bg-rose-500/90 text-white transition-all duration-150 hover:bg-rose-500 hover:scale-105 sm:h-8 sm:w-8"
+                          onClick={() => void onInterrupt()}
+                          aria-label="Stop generation"
+                        >
                           <svg
-                            width="14"
-                            height="14"
-                            viewBox="0 0 14 14"
-                            fill="none"
-                            className="animate-spin"
+                            width="12"
+                            height="12"
+                            viewBox="0 0 12 12"
+                            fill="currentColor"
                             aria-hidden="true"
                           >
-                            <circle
-                              cx="7"
-                              cy="7"
-                              r="5.5"
-                              stroke="currentColor"
-                              strokeWidth="1.5"
-                              strokeLinecap="round"
-                              strokeDasharray="20 12"
-                            />
+                            <rect x="2" y="2" width="8" height="8" rx="1.5" />
                           </svg>
+                        </button>
+                      ) : hasQueuedDispatchInFlight ? (
+                        <div
+                          className="flex size-8 items-center justify-center rounded-full bg-muted text-muted-foreground/75 sm:h-8 sm:w-8"
+                          aria-label="Queued message sending"
+                          title="Queued message sending"
+                        >
+                          <LoaderCircleIcon className="size-4 animate-spin" />
+                        </div>
+                      ) : pendingUserInputs.length === 0 ? (
+                        showPlanFollowUpPrompt ? (
+                          prompt.trim().length > 0 ? (
+                            <Button
+                              type="submit"
+                              size="sm"
+                              className="h-9 rounded-full px-4 sm:h-8"
+                              disabled={isSendBusy || isConnecting}
+                            >
+                              {isConnecting || isSendBusy ? "Sending..." : "Refine"}
+                            </Button>
+                          ) : (
+                            <div className="flex items-center">
+                              <Button
+                                type="submit"
+                                size="sm"
+                                className="h-9 rounded-l-full rounded-r-none px-4 sm:h-8"
+                                disabled={isSendBusy || isConnecting}
+                              >
+                                {isConnecting || isSendBusy ? "Sending..." : "Implement"}
+                              </Button>
+                              <Menu>
+                                <MenuTrigger
+                                  render={
+                                    <Button
+                                      size="sm"
+                                      variant="default"
+                                      className="h-9 rounded-l-none rounded-r-full border-l-white/12 px-2 sm:h-8"
+                                      aria-label="Implementation actions"
+                                      disabled={isSendBusy || isConnecting}
+                                    />
+                                  }
+                                >
+                                  <ChevronDownIcon className="size-3.5" />
+                                </MenuTrigger>
+                                <MenuPopup align="end" side="top">
+                                  <MenuItem
+                                    disabled={isSendBusy || isConnecting}
+                                    onClick={() => void onImplementPlanInNewThread()}
+                                  >
+                                    Implement in new thread
+                                  </MenuItem>
+                                </MenuPopup>
+                              </Menu>
+                            </div>
+                          )
                         ) : (
-                          <svg
-                            width="14"
-                            height="14"
-                            viewBox="0 0 14 14"
-                            fill="none"
-                            aria-hidden="true"
+                          <button
+                            type="submit"
+                            className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/90 text-primary-foreground transition-all duration-150 hover:bg-primary hover:scale-105 disabled:opacity-30 disabled:hover:scale-100 sm:h-8 sm:w-8"
+                            disabled={
+                              isSendBusy ||
+                              isConnecting ||
+                              (!prompt.trim() && composerImages.length === 0)
+                            }
+                            aria-label={
+                              isConnecting
+                                ? "Connecting"
+                                : isPreparingWorktree
+                                  ? "Preparing worktree"
+                                  : isSendBusy
+                                    ? "Sending"
+                                    : "Send message"
+                            }
                           >
-                            <path
-                              d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
-                              stroke="currentColor"
-                              strokeWidth="1.8"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            />
-                          </svg>
-                        )}
-                      </button>
-                    )
-                  ) : null}
-                </div>
+                            {isConnecting || isSendBusy ? (
+                              <svg
+                                width="14"
+                                height="14"
+                                viewBox="0 0 14 14"
+                                fill="none"
+                                className="animate-spin"
+                                aria-hidden="true"
+                              >
+                                <circle
+                                  cx="7"
+                                  cy="7"
+                                  r="5.5"
+                                  stroke="currentColor"
+                                  strokeWidth="1.5"
+                                  strokeLinecap="round"
+                                  strokeDasharray="20 12"
+                                />
+                              </svg>
+                            ) : (
+                              <svg
+                                width="14"
+                                height="14"
+                                viewBox="0 0 14 14"
+                                fill="none"
+                                aria-hidden="true"
+                              >
+                                <path
+                                  d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
+                                  stroke="currentColor"
+                                  strokeWidth="1.8"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                              </svg>
+                            )}
+                          </button>
+                        )
+                      ) : null}
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
+            </form>
           </div>
-        </form>
-      </div>
-
-        </div>{/* end chat column */}
+        </div>
+        {/* end chat column */}
 
         {/* Plan sidebar */}
         {planSidebarOpen ? (
@@ -4899,7 +4387,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
             onClose={() => onTogglePlanSidebar(false)}
           />
         ) : null}
-      </div>{/* end horizontal flex container */}
+      </div>
+      {/* end horizontal flex container */}
 
       {isGitRepo && (
         <BranchToolbar
@@ -5070,10 +4559,7 @@ const ChatHeader = memo(function ChatHeader({
           </Badge>
         )}
         {activeProjectName && !isGitRepo && (
-          <Badge
-            variant="outline"
-            className="shrink-0 text-[10px] text-amber-700"
-          >
+          <Badge variant="outline" className="shrink-0 text-[10px] text-amber-700">
             No Git
           </Badge>
         )}
@@ -5205,14 +4691,9 @@ const ProviderHealthBanner = memo(function ProviderHealthBanner({
       <Alert variant={status.status === "error" ? "error" : "warning"}>
         <CircleAlertIcon />
         <AlertTitle>
-          {status.provider === "codex"
-            ? "Codex provider status"
-            : `${status.provider} status`}
+          {status.provider === "codex" ? "Codex provider status" : `${status.provider} status`}
         </AlertTitle>
-        <AlertDescription
-          className="line-clamp-3"
-          title={status.message ?? defaultMessage}
-        >
+        <AlertDescription className="line-clamp-3" title={status.message ?? defaultMessage}>
           {status.message ?? defaultMessage}
         </AlertDescription>
       </Alert>
@@ -5225,35 +4706,29 @@ interface ComposerPendingApprovalPanelProps {
   pendingCount: number;
 }
 
-const ComposerPendingApprovalPanel = memo(
-  function ComposerPendingApprovalPanel({
-    approval,
-    pendingCount,
-  }: ComposerPendingApprovalPanelProps) {
-    const approvalSummary =
-      approval.requestKind === "command"
-        ? "Command approval requested"
-        : approval.requestKind === "file-read"
-          ? "File-read approval requested"
-          : "File-change approval requested";
+const ComposerPendingApprovalPanel = memo(function ComposerPendingApprovalPanel({
+  approval,
+  pendingCount,
+}: ComposerPendingApprovalPanelProps) {
+  const approvalSummary =
+    approval.requestKind === "command"
+      ? "Command approval requested"
+      : approval.requestKind === "file-read"
+        ? "File-read approval requested"
+        : "File-change approval requested";
 
-    return (
-      <div className="px-4 py-3.5 sm:px-5 sm:py-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="uppercase text-sm tracking-[0.2em]">
-            PENDING APPROVAL
-          </span>
-          <span className="text-sm font-medium">{approvalSummary}</span>
-          {pendingCount > 1 ? (
-            <span className="text-xs text-muted-foreground">
-              1/{pendingCount}
-            </span>
-          ) : null}
-        </div>
+  return (
+    <div className="px-4 py-3.5 sm:px-5 sm:py-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="uppercase text-sm tracking-[0.2em]">PENDING APPROVAL</span>
+        <span className="text-sm font-medium">{approvalSummary}</span>
+        {pendingCount > 1 ? (
+          <span className="text-xs text-muted-foreground">1/{pendingCount}</span>
+        ) : null}
       </div>
-    );
-  },
-);
+    </div>
+  );
+});
 
 interface ComposerPendingApprovalActionsProps {
   requestId: ApprovalRequestId;
@@ -5264,52 +4739,48 @@ interface ComposerPendingApprovalActionsProps {
   ) => Promise<void>;
 }
 
-const ComposerPendingApprovalActions = memo(
-  function ComposerPendingApprovalActions({
-    requestId,
-    isResponding,
-    onRespondToApproval,
-  }: ComposerPendingApprovalActionsProps) {
-    return (
-      <>
-        <Button
-          size="sm"
-          variant="ghost"
-          disabled={isResponding}
-          onClick={() => void onRespondToApproval(requestId, "cancel")}
-        >
-          Cancel turn
-        </Button>
-        <Button
-          size="sm"
-          variant="destructive-outline"
-          disabled={isResponding}
-          onClick={() => void onRespondToApproval(requestId, "decline")}
-        >
-          Decline
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={isResponding}
-          onClick={() =>
-            void onRespondToApproval(requestId, "acceptForSession")
-          }
-        >
-          Always allow this session
-        </Button>
-        <Button
-          size="sm"
-          variant="default"
-          disabled={isResponding}
-          onClick={() => void onRespondToApproval(requestId, "accept")}
-        >
-          Approve once
-        </Button>
-      </>
-    );
-  },
-);
+const ComposerPendingApprovalActions = memo(function ComposerPendingApprovalActions({
+  requestId,
+  isResponding,
+  onRespondToApproval,
+}: ComposerPendingApprovalActionsProps) {
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={isResponding}
+        onClick={() => void onRespondToApproval(requestId, "cancel")}
+      >
+        Cancel turn
+      </Button>
+      <Button
+        size="sm"
+        variant="destructive-outline"
+        disabled={isResponding}
+        onClick={() => void onRespondToApproval(requestId, "decline")}
+      >
+        Decline
+      </Button>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={isResponding}
+        onClick={() => void onRespondToApproval(requestId, "acceptForSession")}
+      >
+        Always allow this session
+      </Button>
+      <Button
+        size="sm"
+        variant="default"
+        disabled={isResponding}
+        onClick={() => void onRespondToApproval(requestId, "accept")}
+      >
+        Approve once
+      </Button>
+    </>
+  );
+});
 
 interface PendingUserInputPanelProps {
   pendingUserInputs: PendingUserInput[];
@@ -5396,10 +4867,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     const handler = (event: globalThis.KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target;
-      if (
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement
-      ) {
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
         return;
       }
       // If the user has started typing a custom answer in the contenteditable
@@ -5473,12 +4941,12 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
               <div className="min-w-0 flex-1">
                 <span className="text-sm font-medium">{option.label}</span>
                 {option.description && option.description !== option.label ? (
-                  <span className="ml-2 text-xs text-muted-foreground/50">{option.description}</span>
+                  <span className="ml-2 text-xs text-muted-foreground/50">
+                    {option.description}
+                  </span>
                 ) : null}
               </div>
-              {isSelected ? (
-                <CheckIcon className="size-3.5 shrink-0 text-blue-400" />
-              ) : null}
+              {isSelected ? <CheckIcon className="size-3.5 shrink-0 text-blue-400" /> : null}
             </button>
           );
         })}
@@ -5497,9 +4965,7 @@ const ComposerPlanFollowUpBanner = memo(function ComposerPlanFollowUpBanner({
       <div className="flex flex-wrap items-center gap-2">
         <span className="uppercase text-sm tracking-[0.2em]">Plan ready</span>
         {planTitle ? (
-          <span className="min-w-0 flex-1 truncate text-sm font-medium">
-            {planTitle}
-          </span>
+          <span className="min-w-0 flex-1 truncate text-sm font-medium">{planTitle}</span>
         ) : null}
       </div>
       {/* <div className="mt-2 text-xs text-muted-foreground">
@@ -5509,11 +4975,7 @@ const ComposerPlanFollowUpBanner = memo(function ComposerPlanFollowUpBanner({
   );
 });
 
-const MessageCopyButton = memo(function MessageCopyButton({
-  text,
-}: {
-  text: string;
-}) {
+const MessageCopyButton = memo(function MessageCopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(() => {
@@ -5523,26 +4985,13 @@ const MessageCopyButton = memo(function MessageCopyButton({
   }, [text]);
 
   return (
-    <Button
-      type="button"
-      size="xs"
-      variant="outline"
-      onClick={handleCopy}
-      title="Copy message"
-    >
-      {copied ? (
-        <CheckIcon className="size-3 text-success" />
-      ) : (
-        <CopyIcon className="size-3" />
-      )}
+    <Button type="button" size="xs" variant="outline" onClick={handleCopy} title="Copy message">
+      {copied ? <CheckIcon className="size-3 text-success" /> : <CopyIcon className="size-3" />}
     </Button>
   );
 });
 
-function hasNonZeroStat(stat: {
-  additions: number;
-  deletions: number;
-}): boolean {
+function hasNonZeroStat(stat: { additions: number; deletions: number }): boolean {
   return stat.additions > 0 || stat.deletions > 0;
 }
 
@@ -5563,9 +5012,7 @@ const DiffStatLabel = memo(function DiffStatLabel(props: {
   );
 });
 
-function collectDirectoryPaths(
-  nodes: ReadonlyArray<TurnDiffTreeNode>,
-): string[] {
+function collectDirectoryPaths(nodes: ReadonlyArray<TurnDiffTreeNode>): string[] {
   const paths: string[] = [];
   for (const node of nodes) {
     if (node.kind !== "directory") continue;
@@ -5593,13 +5040,7 @@ const ChangedFilesTree = memo(function ChangedFilesTree(props: {
   resolvedTheme: "light" | "dark";
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
 }) {
-  const {
-    files,
-    allDirectoriesExpanded,
-    onOpenTurnDiff,
-    resolvedTheme,
-    turnId,
-  } = props;
+  const { files, allDirectoriesExpanded, onOpenTurnDiff, resolvedTheme, turnId } = props;
   const treeNodes = useMemo(() => buildTurnDiffTree(files), [files]);
   const directoryPathsKey = useMemo(
     () => collectDirectoryPaths(treeNodes).join("\u0000"),
@@ -5613,27 +5054,19 @@ const ChangedFilesTree = memo(function ChangedFilesTree(props: {
       ),
     [allDirectoriesExpanded, directoryPathsKey],
   );
-  const [expandedDirectories, setExpandedDirectories] = useState<
-    Record<string, boolean>
-  >(() =>
-    buildDirectoryExpansionState(
-      directoryPathsKey ? directoryPathsKey.split("\u0000") : [],
-      true,
-    ),
+  const [expandedDirectories, setExpandedDirectories] = useState<Record<string, boolean>>(() =>
+    buildDirectoryExpansionState(directoryPathsKey ? directoryPathsKey.split("\u0000") : [], true),
   );
   useEffect(() => {
     setExpandedDirectories(allDirectoryExpansionState);
   }, [allDirectoryExpansionState]);
 
-  const toggleDirectory = useCallback(
-    (pathValue: string, fallbackExpanded: boolean) => {
-      setExpandedDirectories((current) => ({
-        ...current,
-        [pathValue]: !(current[pathValue] ?? fallbackExpanded),
-      }));
-    },
-    [],
-  );
+  const toggleDirectory = useCallback((pathValue: string, fallbackExpanded: boolean) => {
+    setExpandedDirectories((current) => ({
+      ...current,
+      [pathValue]: !(current[pathValue] ?? fallbackExpanded),
+    }));
+  }, []);
 
   const renderTreeNode = (node: TurnDiffTreeNode, depth: number) => {
     const leftPadding = 8 + depth * 14;
@@ -5664,18 +5097,13 @@ const ChangedFilesTree = memo(function ChangedFilesTree(props: {
             </span>
             {hasNonZeroStat(node.stat) && (
               <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums">
-                <DiffStatLabel
-                  additions={node.stat.additions}
-                  deletions={node.stat.deletions}
-                />
+                <DiffStatLabel additions={node.stat.additions} deletions={node.stat.deletions} />
               </span>
             )}
           </button>
           {isExpanded && (
             <div className="space-y-0.5">
-              {node.children.map((childNode) =>
-                renderTreeNode(childNode, depth + 1),
-              )}
+              {node.children.map((childNode) => renderTreeNode(childNode, depth + 1))}
             </div>
           )}
         </div>
@@ -5702,21 +5130,14 @@ const ChangedFilesTree = memo(function ChangedFilesTree(props: {
         </span>
         {node.stat && (
           <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums">
-            <DiffStatLabel
-              additions={node.stat.additions}
-              deletions={node.stat.deletions}
-            />
+            <DiffStatLabel additions={node.stat.additions} deletions={node.stat.deletions} />
           </span>
         )}
       </button>
     );
   };
 
-  return (
-    <div className="space-y-0.5">
-      {treeNodes.map((node) => renderTreeNode(node, 0))}
-    </div>
-  );
+  return <div className="space-y-0.5">{treeNodes.map((node) => renderTreeNode(node, 0))}</div>;
 });
 
 const ProposedPlanCard = memo(function ProposedPlanCard({
@@ -5752,9 +5173,7 @@ const ProposedPlanCard = memo(function ProposedPlanCard({
       });
       return;
     }
-    setSavePath((existing) =>
-      existing.length > 0 ? existing : downloadFilename,
-    );
+    setSavePath((existing) => (existing.length > 0 ? existing : downloadFilename));
     setIsSaveDialogOpen(true);
   };
 
@@ -5791,10 +5210,7 @@ const ProposedPlanCard = memo(function ProposedPlanCard({
         toastManager.add({
           type: "error",
           title: "Could not save plan",
-          description:
-            error instanceof Error
-              ? error.message
-              : "An error occurred while saving.",
+          description: error instanceof Error ? error.message : "An error occurred while saving.",
         });
       })
       .then(
@@ -5812,40 +5228,24 @@ const ProposedPlanCard = memo(function ProposedPlanCard({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <Badge variant="secondary">Plan</Badge>
-          <p className="truncate text-sm font-medium text-foreground">
-            {title}
-          </p>
+          <p className="truncate text-sm font-medium text-foreground">{title}</p>
         </div>
         <Menu>
           <MenuTrigger
-            render={
-              <Button
-                aria-label="Plan actions"
-                size="icon-xs"
-                variant="outline"
-              />
-            }
+            render={<Button aria-label="Plan actions" size="icon-xs" variant="outline" />}
           >
             <EllipsisIcon aria-hidden="true" className="size-4" />
           </MenuTrigger>
           <MenuPopup align="end">
             <MenuItem onClick={handleDownload}>Download as markdown</MenuItem>
-            <MenuItem
-              onClick={openSaveDialog}
-              disabled={!workspaceRoot || isSavingToWorkspace}
-            >
+            <MenuItem onClick={openSaveDialog} disabled={!workspaceRoot || isSavingToWorkspace}>
               Save to workspace
             </MenuItem>
           </MenuPopup>
         </Menu>
       </div>
       <div className="mt-4">
-        <div
-          className={cn(
-            "relative",
-            canCollapse && !expanded && "max-h-104 overflow-hidden",
-          )}
-        >
+        <div className={cn("relative", canCollapse && !expanded && "max-h-104 overflow-hidden")}>
           <ChatMarkdown text={planMarkdown} cwd={cwd} isStreaming={false} />
           {canCollapse && !expanded ? (
             <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-linear-to-t from-card/95 via-card/80 to-transparent" />
@@ -5877,15 +5277,12 @@ const ProposedPlanCard = memo(function ProposedPlanCard({
           <DialogHeader>
             <DialogTitle>Save plan to workspace</DialogTitle>
             <DialogDescription>
-              Enter a path relative to{" "}
-              <code>{workspaceRoot ?? "the workspace"}</code>.
+              Enter a path relative to <code>{workspaceRoot ?? "the workspace"}</code>.
             </DialogDescription>
           </DialogHeader>
           <DialogPanel className="space-y-3">
             <label htmlFor={savePathInputId} className="grid gap-1.5">
-              <span className="text-xs font-medium text-foreground">
-                Workspace path
-              </span>
+              <span className="text-xs font-medium text-foreground">Workspace path</span>
               <Input
                 id={savePathInputId}
                 value={savePath}
@@ -5945,10 +5342,7 @@ interface MessagesTimelineProps {
 
 type TimelineEntry = ReturnType<typeof deriveTimelineEntries>[number];
 type TimelineMessage = Extract<TimelineEntry, { kind: "message" }>["message"];
-type TimelineProposedPlan = Extract<
-  TimelineEntry,
-  { kind: "proposed-plan" }
->["proposedPlan"];
+type TimelineProposedPlan = Extract<TimelineEntry, { kind: "proposed-plan" }>["proposedPlan"];
 type TimelineWorkEntry = Extract<TimelineEntry, { kind: "work" }>["entry"];
 type TimelineRow =
   | {
@@ -5972,13 +5366,8 @@ type TimelineRow =
     }
   | { kind: "working"; id: string; createdAt: string | null };
 
-function estimateTimelineProposedPlanHeight(
-  proposedPlan: TimelineProposedPlan,
-): number {
-  const estimatedLines = Math.max(
-    1,
-    Math.ceil(proposedPlan.planMarkdown.length / 72),
-  );
+function estimateTimelineProposedPlanHeight(proposedPlan: TimelineProposedPlan): number {
+  const estimatedLines = Math.max(1, Math.ceil(proposedPlan.planMarkdown.length / 72));
   return 120 + Math.min(estimatedLines * 22, 880);
 }
 
@@ -6014,10 +5403,7 @@ const MessagesTimeline = memo(function MessagesTimeline({
 
     const updateWidth = (nextWidth: number) => {
       setTimelineWidthPx((previousWidth) => {
-        if (
-          previousWidth !== null &&
-          Math.abs(previousWidth - nextWidth) < 0.5
-        ) {
+        if (previousWidth !== null && Math.abs(previousWidth - nextWidth) < 0.5) {
           return previousWidth;
         }
         return nextWidth;
@@ -6094,33 +5480,21 @@ const MessagesTimeline = memo(function MessagesTimeline({
     }
 
     return nextRows;
-  }, [
-    timelineEntries,
-    completionDividerBeforeEntryId,
-    isWorking,
-    activeTurnStartedAt,
-  ]);
+  }, [timelineEntries, completionDividerBeforeEntryId, isWorking, activeTurnStartedAt]);
 
   const firstUnvirtualizedRowIndex = useMemo(() => {
-    const firstTailRowIndex = Math.max(
-      rows.length - ALWAYS_UNVIRTUALIZED_TAIL_ROWS,
-      0,
-    );
+    const firstTailRowIndex = Math.max(rows.length - ALWAYS_UNVIRTUALIZED_TAIL_ROWS, 0);
     if (!activeTurnInProgress) return firstTailRowIndex;
 
     const turnStartedAtMs =
-      typeof activeTurnStartedAt === "string"
-        ? Date.parse(activeTurnStartedAt)
-        : Number.NaN;
+      typeof activeTurnStartedAt === "string" ? Date.parse(activeTurnStartedAt) : Number.NaN;
     let firstCurrentTurnRowIndex = -1;
     if (!Number.isNaN(turnStartedAtMs)) {
       firstCurrentTurnRowIndex = rows.findIndex((row) => {
         if (row.kind === "working") return true;
         if (!row.createdAt) return false;
         const rowCreatedAtMs = Date.parse(row.createdAt);
-        return (
-          !Number.isNaN(rowCreatedAtMs) && rowCreatedAtMs >= turnStartedAtMs
-        );
+        return !Number.isNaN(rowCreatedAtMs) && rowCreatedAtMs >= turnStartedAtMs;
       });
     }
 
@@ -6138,10 +5512,7 @@ const MessagesTimeline = memo(function MessagesTimeline({
       if (previousRow.message.role === "user") {
         return Math.min(index, firstTailRowIndex);
       }
-      if (
-        previousRow.message.role === "assistant" &&
-        !previousRow.message.streaming
-      ) {
+      if (previousRow.message.role === "assistant" && !previousRow.message.streaming) {
         break;
       }
     }
@@ -6163,8 +5534,7 @@ const MessagesTimeline = memo(function MessagesTimeline({
       const row = rows[index];
       if (!row) return 96;
       if (row.kind === "work") return 112;
-      if (row.kind === "proposed-plan")
-        return estimateTimelineProposedPlanHeight(row.proposedPlan);
+      if (row.kind === "proposed-plan") return estimateTimelineProposedPlanHeight(row.proposedPlan);
       if (row.kind === "working") return 40;
       return estimateTimelineMessageHeight(row.message, { timelineWidthPx });
     },
@@ -6177,18 +5547,13 @@ const MessagesTimeline = memo(function MessagesTimeline({
     rowVirtualizer.measure();
   }, [rowVirtualizer, timelineWidthPx]);
   useEffect(() => {
-    rowVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = (
-      _item,
-      _delta,
-      instance,
-    ) => {
+    rowVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = (_item, _delta, instance) => {
       if (shouldSuppressScrollAdjustment()) {
         return false;
       }
       const viewportHeight = instance.scrollRect?.height ?? 0;
       const scrollOffset = instance.scrollOffset ?? 0;
-      const remainingDistance =
-        instance.getTotalSize() - (scrollOffset + viewportHeight);
+      const remainingDistance = instance.getTotalSize() - (scrollOffset + viewportHeight);
       return remainingDistance > AUTO_SCROLL_BOTTOM_THRESHOLD_PX;
     };
     return () => {
@@ -6214,8 +5579,9 @@ const MessagesTimeline = memo(function MessagesTimeline({
 
   const virtualRows = rowVirtualizer.getVirtualItems();
   const nonVirtualizedRows = rows.slice(virtualizedRowCount);
-  const [allDirectoriesExpandedByTurnId, setAllDirectoriesExpandedByTurnId] =
-    useState<Record<string, boolean>>({});
+  const [allDirectoriesExpandedByTurnId, setAllDirectoriesExpandedByTurnId] = useState<
+    Record<string, boolean>
+  >({});
   const onToggleAllDirectories = useCallback((turnId: TurnId) => {
     setAllDirectoriesExpandedByTurnId((current) => ({
       ...current,
@@ -6235,16 +5601,13 @@ const MessagesTimeline = memo(function MessagesTimeline({
           const groupId = row.id;
           const groupedEntries = row.groupedEntries;
           const isExpanded = expandedWorkGroups[groupId] ?? false;
-          const hasOverflow =
-            groupedEntries.length > MAX_VISIBLE_WORK_LOG_ENTRIES;
+          const hasOverflow = groupedEntries.length > MAX_VISIBLE_WORK_LOG_ENTRIES;
           const visibleEntries =
             hasOverflow && !isExpanded
               ? groupedEntries.slice(-MAX_VISIBLE_WORK_LOG_ENTRIES)
               : groupedEntries;
           const hiddenCount = groupedEntries.length - visibleEntries.length;
-          const onlyToolEntries = groupedEntries.every(
-            (entry) => entry.tone === "tool",
-          );
+          const onlyToolEntries = groupedEntries.every((entry) => entry.tone === "tool");
           const groupLabel = onlyToolEntries
             ? groupedEntries.length === 1
               ? "Tool call"
@@ -6271,15 +5634,10 @@ const MessagesTimeline = memo(function MessagesTimeline({
               </div>
               <div className="space-y-1">
                 {visibleEntries.map((workEntry) => (
-                  <div
-                    key={`work-row:${workEntry.id}`}
-                    className="flex items-start gap-2 py-0.5"
-                  >
+                  <div key={`work-row:${workEntry.id}`} className="flex items-start gap-2 py-0.5">
                     <span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/30" />
                     <div className="min-w-0 flex-1 py-[2px]">
-                      <p
-                        className={`text-[11px] leading-relaxed ${workToneClass(workEntry.tone)}`}
-                      >
+                      <p className={`text-[11px] leading-relaxed ${workToneClass(workEntry.tone)}`}>
                         {workEntry.label}
                       </p>
                       {workEntry.command && (
@@ -6287,30 +5645,26 @@ const MessagesTimeline = memo(function MessagesTimeline({
                           {workEntry.command}
                         </pre>
                       )}
-                      {workEntry.changedFiles &&
-                        workEntry.changedFiles.length > 0 && (
-                          <div className="mt-1 flex flex-wrap gap-1">
-                            {workEntry.changedFiles
-                              .slice(0, 6)
-                              .map((filePath) => (
-                                <span
-                                  key={`${workEntry.id}:${filePath}`}
-                                  className="rounded-md border border-border/70 bg-background/65 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/85"
-                                  title={filePath}
-                                >
-                                  {filePath}
-                                </span>
-                              ))}
-                            {workEntry.changedFiles.length > 6 && (
-                              <span className="px-1 text-[10px] text-muted-foreground/65">
-                                +{workEntry.changedFiles.length - 6} more
-                              </span>
-                            )}
-                          </div>
-                        )}
+                      {workEntry.changedFiles && workEntry.changedFiles.length > 0 && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {workEntry.changedFiles.slice(0, 6).map((filePath) => (
+                            <span
+                              key={`${workEntry.id}:${filePath}`}
+                              className="rounded-md border border-border/70 bg-background/65 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/85"
+                              title={filePath}
+                            >
+                              {filePath}
+                            </span>
+                          ))}
+                          {workEntry.changedFiles.length > 6 && (
+                            <span className="px-1 text-[10px] text-muted-foreground/65">
+                              +{workEntry.changedFiles.length - 6} more
+                            </span>
+                          )}
+                        </div>
+                      )}
                       {workEntry.detail &&
-                        (!workEntry.command ||
-                          workEntry.detail !== workEntry.command) && (
+                        (!workEntry.command || workEntry.detail !== workEntry.command) && (
                           <p
                             className="mt-1 text-[11px] leading-relaxed text-muted-foreground/75"
                             title={workEntry.detail}
@@ -6330,20 +5684,14 @@ const MessagesTimeline = memo(function MessagesTimeline({
         row.message.role === "user" &&
         (() => {
           const userImages = row.message.attachments ?? [];
-          const canRevertAgentWork = revertTurnCountByUserMessageId.has(
-            row.message.id,
-          );
+          const canRevertAgentWork = revertTurnCountByUserMessageId.has(row.message.id);
           return (
             <div className="flex justify-end">
               <div className="group relative max-w-[80%] rounded-2xl rounded-br-sm border border-border bg-secondary px-4 py-3">
                 {userImages.length > 0 && (
                   <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
                     {userImages.map(
-                      (
-                        image: NonNullable<
-                          TimelineMessage["attachments"]
-                        >[number],
-                      ) => (
+                      (image: NonNullable<TimelineMessage["attachments"]>[number]) => (
                         <div
                           key={image.id}
                           className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
@@ -6354,10 +5702,7 @@ const MessagesTimeline = memo(function MessagesTimeline({
                               className="h-full w-full cursor-zoom-in"
                               aria-label={`Preview ${image.name}`}
                               onClick={() => {
-                                const preview = buildExpandedImagePreview(
-                                  userImages,
-                                  image.id,
-                                );
+                                const preview = buildExpandedImagePreview(userImages, image.id);
                                 if (!preview) return;
                                 onImageExpand(preview);
                               }}
@@ -6387,9 +5732,7 @@ const MessagesTimeline = memo(function MessagesTimeline({
                 )}
                 <div className="mt-1.5 flex items-center justify-end gap-2">
                   <div className="flex items-center gap-1.5 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
-                    {row.message.text && (
-                      <MessageCopyButton text={row.message.text} />
-                    )}
+                    {row.message.text && <MessageCopyButton text={row.message.text} />}
                     {canRevertAgentWork && (
                       <Button
                         type="button"
@@ -6415,18 +5758,14 @@ const MessagesTimeline = memo(function MessagesTimeline({
       {row.kind === "message" &&
         row.message.role === "assistant" &&
         (() => {
-          const messageText =
-            row.message.text ||
-            (row.message.streaming ? "" : "(empty response)");
+          const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
           return (
             <>
               {row.showCompletionDivider && (
                 <div className="my-3 flex items-center gap-3">
                   <span className="h-px flex-1 bg-border" />
                   <span className="rounded-full border border-border bg-background px-2.5 py-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/80">
-                    {completionSummary
-                      ? `Response • ${completionSummary}`
-                      : "Response"}
+                    {completionSummary ? `Response • ${completionSummary}` : "Response"}
                   </span>
                   <span className="h-px flex-1 bg-border" />
                 </div>
@@ -6438,9 +5777,7 @@ const MessagesTimeline = memo(function MessagesTimeline({
                   isStreaming={Boolean(row.message.streaming)}
                 />
                 {(() => {
-                  const turnSummary = turnDiffSummaryByAssistantMessageId.get(
-                    row.message.id,
-                  );
+                  const turnSummary = turnDiffSummaryByAssistantMessageId.get(row.message.id);
                   if (!turnSummary) return null;
                   const checkpointFiles = turnSummary.files;
                   if (checkpointFiles.length === 0) return null;
@@ -6468,23 +5805,16 @@ const MessagesTimeline = memo(function MessagesTimeline({
                             type="button"
                             size="xs"
                             variant="outline"
-                            onClick={() =>
-                              onToggleAllDirectories(turnSummary.turnId)
-                            }
+                            onClick={() => onToggleAllDirectories(turnSummary.turnId)}
                           >
-                            {allDirectoriesExpanded
-                              ? "Collapse all"
-                              : "Expand all"}
+                            {allDirectoriesExpanded ? "Collapse all" : "Expand all"}
                           </Button>
                           <Button
                             type="button"
                             size="xs"
                             variant="outline"
                             onClick={() =>
-                              onOpenTurnDiff(
-                                turnSummary.turnId,
-                                checkpointFiles[0]?.path,
-                              )
+                              onOpenTurnDiff(turnSummary.turnId, checkpointFiles[0]?.path)
                             }
                           >
                             View diff
@@ -6507,10 +5837,7 @@ const MessagesTimeline = memo(function MessagesTimeline({
                     row.message.createdAt,
                     row.message.streaming
                       ? formatElapsed(row.message.createdAt, nowIso)
-                      : formatElapsed(
-                          row.message.createdAt,
-                          row.message.completedAt,
-                        ),
+                      : formatElapsed(row.message.createdAt, row.message.completedAt),
                   )}
                 </p>
               </div>
@@ -6564,10 +5891,7 @@ const MessagesTimeline = memo(function MessagesTimeline({
       className="mx-auto w-full min-w-0 max-w-3xl overflow-x-hidden"
     >
       {virtualizedRowCount > 0 && (
-        <div
-          className="relative"
-          style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
-        >
+        <div className="relative" style={{ height: `${rowVirtualizer.getTotalSize()}px` }}>
           {virtualRows.map((virtualRow: VirtualItem) => {
             const row = rows[virtualRow.index];
             if (!row) return null;
@@ -6594,9 +5918,7 @@ const MessagesTimeline = memo(function MessagesTimeline({
   );
 });
 
-function isAvailableProviderOption(
-  option: (typeof PROVIDER_OPTIONS)[number],
-): option is {
+function isAvailableProviderOption(option: (typeof PROVIDER_OPTIONS)[number]): option is {
   value: ProviderKind;
   label: string;
   available: true;
@@ -6604,12 +5926,8 @@ function isAvailableProviderOption(
   return option.available && option.value !== "claudeCode";
 }
 
-const AVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter(
-  isAvailableProviderOption,
-);
-const UNAVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter(
-  (option) => !option.available,
-);
+const AVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter(isAvailableProviderOption);
+const UNAVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter((option) => !option.available);
 const COMING_SOON_PROVIDER_OPTIONS = [
   { id: "opencode", label: "OpenCode", icon: OpenCodeIcon },
   { id: "gemini", label: "Gemini", icon: Gemini },
@@ -6644,9 +5962,7 @@ function resolveModelForProviderPicker(
     return direct.slug;
   }
 
-  const byName = options.find(
-    (option) => option.name.toLowerCase() === trimmedValue.toLowerCase(),
-  );
+  const byName = options.find((option) => option.name.toLowerCase() === trimmedValue.toLowerCase());
   if (byName) {
     return byName.slug;
   }
@@ -6668,18 +5984,14 @@ const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   provider: ProviderKind;
   model: ModelSlug;
   lockedProvider: ProviderKind | null;
-  modelOptionsByProvider: Record<
-    ProviderKind,
-    ReadonlyArray<{ slug: string; name: string }>
-  >;
+  modelOptionsByProvider: Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>>;
   disabled?: boolean;
   onProviderModelChange: (provider: ProviderKind, model: ModelSlug) => void;
 }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const selectedProviderOptions = props.modelOptionsByProvider[props.provider];
   const selectedModelLabel =
-    selectedProviderOptions.find((option) => option.slug === props.model)
-      ?.name ?? props.model;
+    selectedProviderOptions.find((option) => option.slug === props.model)?.name ?? props.model;
   const ProviderIcon = PROVIDER_ICON_BY_PROVIDER[props.provider];
 
   return (
@@ -6713,8 +6025,7 @@ const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         {AVAILABLE_PROVIDER_OPTIONS.map((option) => {
           const OptionIcon = PROVIDER_ICON_BY_PROVIDER[option.value];
           const isDisabledByProviderLock =
-            props.lockedProvider !== null &&
-            props.lockedProvider !== option.value;
+            props.lockedProvider !== null && props.lockedProvider !== option.value;
           return (
             <MenuSub key={option.value}>
               <MenuSubTrigger disabled={isDisabledByProviderLock}>
@@ -6766,9 +6077,7 @@ const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                 aria-hidden="true"
                 className={cn(
                   "size-4 shrink-0 opacity-80",
-                  option.value === "claudeCode"
-                    ? ""
-                    : "text-muted-foreground/85",
+                  option.value === "claudeCode" ? "" : "text-muted-foreground/85",
                 )}
               />
               <span>{option.label}</span>
@@ -6783,10 +6092,7 @@ const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           const OptionIcon = option.icon;
           return (
             <MenuItem key={option.id} disabled>
-              <OptionIcon
-                aria-hidden="true"
-                className="size-4 shrink-0 opacity-80"
-              />
+              <OptionIcon aria-hidden="true" className="size-4 shrink-0 opacity-80" />
               <span>{option.label}</span>
               <span className="ms-auto text-[11px] text-muted-foreground/80 uppercase tracking-[0.08em]">
                 Coming soon
@@ -6842,16 +6148,12 @@ const CodexTraitsPicker = memo(function CodexTraitsPicker(props: {
       </MenuTrigger>
       <MenuPopup align="start">
         <MenuGroup>
-          <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">
-            Reasoning
-          </div>
+          <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Reasoning</div>
           <MenuRadioGroup
             value={props.effort}
             onValueChange={(value) => {
               if (!value) return;
-              const nextEffort = props.options.find(
-                (option) => option === value,
-              );
+              const nextEffort = props.options.find((option) => option === value);
               if (!nextEffort) return;
               props.onEffortChange(nextEffort);
             }}
@@ -6866,9 +6168,7 @@ const CodexTraitsPicker = memo(function CodexTraitsPicker(props: {
         </MenuGroup>
         <MenuDivider />
         <MenuGroup>
-          <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">
-            Fast Mode
-          </div>
+          <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Fast Mode</div>
           <MenuRadioGroup
             value={props.fastModeEnabled ? "on" : "off"}
             onValueChange={(value) => {
@@ -6897,9 +6197,7 @@ const OpenInPicker = memo(function OpenInPicker({
     preferredTerminalEditor(availableEditors),
   );
 
-  const allOptions = useMemo<
-    Array<{ label: string; Icon: Icon; value: EditorId }>
-  >(
+  const allOptions = useMemo<Array<{ label: string; Icon: Icon; value: EditorId }>>(
     () => [
       {
         label: "Cursor",
@@ -6929,16 +6227,14 @@ const OpenInPicker = memo(function OpenInPicker({
     [],
   );
   const options = useMemo(
-    () =>
-      allOptions.filter((option) => availableEditors.includes(option.value)),
+    () => allOptions.filter((option) => availableEditors.includes(option.value)),
     [allOptions, availableEditors],
   );
 
   const effectiveEditor = options.some((option) => option.value === lastEditor)
     ? lastEditor
     : (options[0]?.value ?? null);
-  const primaryOption =
-    options.find(({ value }) => value === effectiveEditor) ?? null;
+  const primaryOption = options.find(({ value }) => value === effectiveEditor) ?? null;
 
   useEffect(() => {
     if (!effectiveEditor) return;
@@ -6988,30 +6284,18 @@ const OpenInPicker = memo(function OpenInPicker({
         disabled={!effectiveEditor || !openInCwd}
         onClick={() => openInEditor(effectiveEditor)}
       >
-        {primaryOption?.Icon && (
-          <primaryOption.Icon aria-hidden="true" className="size-3.5" />
-        )}
+        {primaryOption?.Icon && <primaryOption.Icon aria-hidden="true" className="size-3.5" />}
         <span className="sr-only @sm/header-actions:not-sr-only @sm/header-actions:ml-0.5">
           Open
         </span>
       </Button>
       <GroupSeparator className="hidden @sm/header-actions:block" />
       <Menu>
-        <MenuTrigger
-          render={
-            <Button
-              aria-label="Copy options"
-              size="icon-xs"
-              variant="outline"
-            />
-          }
-        >
+        <MenuTrigger render={<Button aria-label="Copy options" size="icon-xs" variant="outline" />}>
           <ChevronDownIcon aria-hidden="true" className="size-4" />
         </MenuTrigger>
         <MenuPopup align="end">
-          {options.length === 0 && (
-            <MenuItem disabled>No installed editors found</MenuItem>
-          )}
+          {options.length === 0 && <MenuItem disabled>No installed editors found</MenuItem>}
           {options.map(({ label, Icon, value }) => (
             <MenuItem key={value} onClick={() => openInEditor(value)}>
               <Icon aria-hidden="true" className="text-muted-foreground" />

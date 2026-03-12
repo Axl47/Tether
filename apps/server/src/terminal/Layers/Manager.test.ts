@@ -125,9 +125,7 @@ function waitFor(predicate: () => boolean, timeoutMs = 800): Promise<void> {
   });
 }
 
-function openInput(
-  overrides: Partial<TerminalOpenInput> = {},
-): TerminalOpenInput {
+function openInput(overrides: Partial<TerminalOpenInput> = {}): TerminalOpenInput {
   return {
     threadId: "thread-1",
     cwd: process.cwd(),
@@ -151,10 +149,7 @@ function historyLogName(threadId: string): string {
   return `terminal_${Encoding.encodeBase64Url(threadId)}.log`;
 }
 
-function multiTerminalHistoryLogName(
-  threadId: string,
-  terminalId: string,
-): string {
+function multiTerminalHistoryLogName(threadId: string, terminalId: string): string {
   const threadPart = `terminal_${Encoding.encodeBase64Url(threadId)}`;
   if (terminalId === DEFAULT_TERMINAL_ID) {
     return `${threadPart}.log`;
@@ -202,15 +197,11 @@ describe("TerminalManager", () => {
       ptyAdapter,
       historyLineLimit,
       shellResolver: options.shellResolver ?? (() => "/bin/bash"),
-      ...(options.subprocessChecker
-        ? { subprocessChecker: options.subprocessChecker }
-        : {}),
+      ...(options.subprocessChecker ? { subprocessChecker: options.subprocessChecker } : {}),
       ...(options.subprocessPollIntervalMs
         ? { subprocessPollIntervalMs: options.subprocessPollIntervalMs }
         : {}),
-      ...(options.processKillGraceMs
-        ? { processKillGraceMs: options.processKillGraceMs }
-        : {}),
+      ...(options.processKillGraceMs ? { processKillGraceMs: options.processKillGraceMs } : {}),
       ...(options.maxRetainedInactiveSessions
         ? { maxRetainedInactiveSessions: options.maxRetainedInactiveSessions }
         : {}),
@@ -367,9 +358,7 @@ describe("TerminalManager", () => {
     process.emitData("hello\n");
     await waitFor(() => fs.existsSync(historyLogPath(logsDir)));
     await manager.clear({ threadId: "thread-1" });
-    await waitFor(
-      () => fs.readFileSync(historyLogPath(logsDir), "utf8") === "",
-    );
+    await waitFor(() => fs.readFileSync(historyLogPath(logsDir), "utf8") === "");
 
     expect(events.some((event) => event.type === "cleared")).toBe(true);
     expect(
@@ -397,9 +386,7 @@ describe("TerminalManager", () => {
     expect(snapshot.history).toBe("");
     expect(snapshot.status).toBe("running");
     expect(ptyAdapter.spawnInputs).toHaveLength(2);
-    await waitFor(
-      () => fs.readFileSync(historyLogPath(logsDir), "utf8") === "",
-    );
+    await waitFor(() => fs.readFileSync(historyLogPath(logsDir), "utf8") === "");
 
     manager.dispose();
   });
@@ -437,9 +424,7 @@ describe("TerminalManager", () => {
 
     process.emitExit({ exitCode: 0, signal: 0 });
 
-    await expect(
-      manager.write({ threadId: "thread-1", data: "\r" }),
-    ).resolves.toBeUndefined();
+    await expect(manager.write({ threadId: "thread-1", data: "\r" })).resolves.toBeUndefined();
     expect(process.writes).toEqual([]);
 
     manager.dispose();
@@ -463,20 +448,14 @@ describe("TerminalManager", () => {
     hasRunningSubprocess = true;
     await waitFor(
       () =>
-        events.some(
-          (event) =>
-            event.type === "activity" && event.hasRunningSubprocess === true,
-        ),
+        events.some((event) => event.type === "activity" && event.hasRunningSubprocess === true),
       1_200,
     );
 
     hasRunningSubprocess = false;
     await waitFor(
       () =>
-        events.some(
-          (event) =>
-            event.type === "activity" && event.hasRunningSubprocess === false,
-        ),
+        events.some((event) => event.type === "activity" && event.hasRunningSubprocess === false),
       1_200,
     );
 
@@ -494,9 +473,7 @@ describe("TerminalManager", () => {
     await manager.close({ threadId: "thread-1" });
 
     const reopened = await manager.open(openInput());
-    const nonEmptyLines = reopened.history
-      .split("\n")
-      .filter((line) => line.length > 0);
+    const nonEmptyLines = reopened.history.split("\n").filter((line) => line.length > 0);
     expect(nonEmptyLines).toEqual(["line2", "line3", "line4"]);
 
     manager.dispose();
@@ -529,31 +506,15 @@ describe("TerminalManager", () => {
 
     defaultProcess.emitData("default\n");
     sidecarProcess.emitData("sidecar\n");
-    await waitFor(() =>
-      fs.existsSync(
-        multiTerminalHistoryLogPath(logsDir, "thread-1", "default"),
-      ),
-    );
-    await waitFor(() =>
-      fs.existsSync(
-        multiTerminalHistoryLogPath(logsDir, "thread-1", "sidecar"),
-      ),
-    );
+    await waitFor(() => fs.existsSync(multiTerminalHistoryLogPath(logsDir, "thread-1", "default")));
+    await waitFor(() => fs.existsSync(multiTerminalHistoryLogPath(logsDir, "thread-1", "sidecar")));
 
     await manager.close({ threadId: "thread-1", deleteHistory: true });
 
     expect(defaultProcess.killed).toBe(true);
     expect(sidecarProcess.killed).toBe(true);
-    expect(
-      fs.existsSync(
-        multiTerminalHistoryLogPath(logsDir, "thread-1", "default"),
-      ),
-    ).toBe(false);
-    expect(
-      fs.existsSync(
-        multiTerminalHistoryLogPath(logsDir, "thread-1", "sidecar"),
-      ),
-    ).toBe(false);
+    expect(fs.existsSync(multiTerminalHistoryLogPath(logsDir, "thread-1", "default"))).toBe(false);
+    expect(fs.existsSync(multiTerminalHistoryLogPath(logsDir, "thread-1", "sidecar"))).toBe(false);
 
     manager.dispose();
   });
@@ -593,14 +554,11 @@ describe("TerminalManager", () => {
     second.emitExit({ exitCode: 0, signal: 0 });
 
     await waitFor(() => {
-      const sessions = (
-        manager as unknown as { sessions: Map<string, unknown> }
-      ).sessions;
+      const sessions = (manager as unknown as { sessions: Map<string, unknown> }).sessions;
       return sessions.size === 1;
     });
 
-    const sessions = (manager as unknown as { sessions: Map<string, unknown> })
-      .sessions;
+    const sessions = (manager as unknown as { sessions: Map<string, unknown> }).sessions;
     const keys = [...sessions.keys()];
     expect(keys).toEqual(["thread-2\u0000default"]);
 
@@ -638,16 +596,13 @@ describe("TerminalManager", () => {
     if (process.platform === "win32") {
       expect(
         ptyAdapter.spawnInputs.some(
-          (input) =>
-            input.shell === "cmd.exe" || input.shell === "powershell.exe",
+          (input) => input.shell === "cmd.exe" || input.shell === "powershell.exe",
         ),
       ).toBe(true);
     } else {
       expect(
         ptyAdapter.spawnInputs.some((input) =>
-          ["/bin/zsh", "/bin/bash", "/bin/sh", "zsh", "bash", "sh"].includes(
-            input.shell,
-          ),
+          ["/bin/zsh", "/bin/bash", "/bin/sh", "zsh", "bash", "sh"].includes(input.shell),
         ),
       ).toBe(true);
     }

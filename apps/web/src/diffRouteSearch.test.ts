@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseDiffRouteSearch } from "./diffRouteSearch";
+import { closeDiffSearchParams, parseDiffRouteSearch } from "./diffRouteSearch";
 
 describe("parseDiffRouteSearch", () => {
   it("parses valid diff search values", () => {
@@ -49,6 +49,16 @@ describe("parseDiffRouteSearch", () => {
     expect(parsed).toEqual({});
   });
 
+  it("treats numeric closed sentinels as closed", () => {
+    const parsed = parseDiffRouteSearch({
+      diff: 0,
+      diffTurnId: "turn-1",
+      diffFilePath: "src/app.ts",
+    });
+
+    expect(parsed).toEqual({});
+  });
+
   it("drops file value when turn is not selected", () => {
     const parsed = parseDiffRouteSearch({
       diff: "1",
@@ -69,6 +79,20 @@ describe("parseDiffRouteSearch", () => {
 
     expect(parsed).toEqual({
       diff: "1",
+    });
+  });
+
+  it("returns an explicit closed sentinel when collapsing the diff panel", () => {
+    expect(
+      closeDiffSearchParams({
+        diff: "1",
+        diffTurnId: "turn-1",
+        diffFilePath: "src/app.ts",
+        view: "timeline",
+      }),
+    ).toEqual({
+      diff: 0,
+      view: "timeline",
     });
   });
 });

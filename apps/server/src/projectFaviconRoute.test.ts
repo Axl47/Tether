@@ -61,10 +61,7 @@ async function withRouteServer(run: (baseUrl: string) => Promise<void>): Promise
   }
 }
 
-async function request(
-  baseUrl: string,
-  pathname: string,
-): Promise<HttpResponse> {
+async function request(baseUrl: string, pathname: string): Promise<HttpResponse> {
   const response = await fetch(`${baseUrl}${pathname}`);
   return {
     statusCode: response.status,
@@ -90,11 +87,7 @@ describe("tryHandleProjectFaviconRequest", () => {
 
   it("serves a well-known favicon file from the project root", async () => {
     const projectDir = makeTempDir("tether-favicon-route-root-");
-    fs.writeFileSync(
-      path.join(projectDir, "favicon.svg"),
-      "<svg>favicon</svg>",
-      "utf8",
-    );
+    fs.writeFileSync(path.join(projectDir, "favicon.svg"), "<svg>favicon</svg>", "utf8");
 
     await withRouteServer(async (baseUrl) => {
       const pathname = `/api/project-favicon?cwd=${encodeURIComponent(projectDir)}`;

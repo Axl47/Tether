@@ -156,10 +156,7 @@ describe("isCommandAvailable", () => {
         PATH: dir,
         PATHEXT: ".COM;.EXE;.BAT;.CMD",
       } satisfies NodeJS.ProcessEnv;
-      assert.equal(
-        isCommandAvailable("code", { platform: "win32", env }),
-        true,
-      );
+      assert.equal(isCommandAvailable("code", { platform: "win32", env }), true);
     });
   });
 
@@ -184,10 +181,7 @@ describe("isCommandAvailable", () => {
         PATH: dir,
         PATHEXT: ".COM;.EXE;.BAT;.CMD",
       } satisfies NodeJS.ProcessEnv;
-      assert.equal(
-        isCommandAvailable("npm", { platform: "win32", env }),
-        false,
-      );
+      assert.equal(isCommandAvailable("npm", { platform: "win32", env }), false);
     });
   });
 
@@ -198,29 +192,19 @@ describe("isCommandAvailable", () => {
         PATH: dir,
         PATHEXT: ".COM;.EXE;.BAT;.CMD",
       } satisfies NodeJS.ProcessEnv;
-      assert.equal(
-        isCommandAvailable("my.tool", { platform: "win32", env }),
-        true,
-      );
+      assert.equal(isCommandAvailable("my.tool", { platform: "win32", env }), true);
     });
   });
 
   it("uses platform-specific PATH delimiter for platform overrides", () => {
     withTempDir((firstDir) => {
       withTempDir((secondDir) => {
-        fs.writeFileSync(
-          path.join(secondDir, "code.CMD"),
-          "@echo off\r\n",
-          "utf8",
-        );
+        fs.writeFileSync(path.join(secondDir, "code.CMD"), "@echo off\r\n", "utf8");
         const env = {
           PATH: `${firstDir};${secondDir}`,
           PATHEXT: ".COM;.EXE;.BAT;.CMD",
         } satisfies NodeJS.ProcessEnv;
-        assert.equal(
-          isCommandAvailable("code", { platform: "win32", env }),
-          true,
-        );
+        assert.equal(isCommandAvailable("code", { platform: "win32", env }), true);
       });
     });
   });
