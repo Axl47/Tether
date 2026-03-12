@@ -2623,6 +2623,69 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("separates reported session totals from the context footprint when totals exceed the window", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: (() => {
+        const snapshot = createSnapshotForTargetUser({
+          targetMessageId: "msg-user-context-window-overflow" as MessageId,
+          targetText: "context overflow target",
+        });
+        const [thread] = snapshot.threads;
+        if (!thread) {
+          return snapshot;
+        }
+        return {
+          ...snapshot,
+          threads: [
+            {
+              ...thread,
+              contextWindow: {
+                provider: "codex" as const,
+                usedTokens: 9_300_000,
+                maxTokens: 258_000,
+                remainingTokens: 0,
+                usedPercent: 100,
+                inputTokens: 9_120_000,
+                cachedInputTokens: 2_400_000,
+                outputTokens: 180_000,
+                reasoningOutputTokens: 9_000,
+                updatedAt: NOW_ISO,
+              },
+            },
+          ],
+        };
+      })(),
+    });
+
+    try {
+      const badge = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll("button")).find(
+            (button) => button.getAttribute("aria-label") === "Context window usage",
+          ) as HTMLButtonElement | null,
+        "Unable to find context-window badge.",
+      );
+      expect(badge.textContent?.trim()).toBe("100%");
+
+      badge.focus();
+
+      await vi.waitFor(
+        () => {
+          expect(document.body.textContent).toContain("100% used (0% left)");
+          expect(document.body.textContent).toContain("258k / 258k tokens used");
+          expect(document.body.textContent).toContain("Reported session total: 9.3m tokens");
+          expect(document.body.textContent).toContain(
+            "Reported totals: Input 9.1m, cached 2.4m, output 180k, reasoning 9k",
+          );
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("moves queued content back into the composer for editing and supports deleting queued items", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,

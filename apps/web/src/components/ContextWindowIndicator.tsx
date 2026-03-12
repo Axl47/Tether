@@ -3,6 +3,8 @@ import type { OrchestrationContextWindow } from "@t3tools/contracts";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import {
   formatCompactTokenCount,
+  hasReportedSessionTokenTotal,
+  resolveContextTokensUsed,
   resolveContextWindowSeverity,
 } from "./ContextWindowIndicator.logic";
 import { cn } from "~/lib/utils";
@@ -31,6 +33,8 @@ export default function ContextWindowIndicator(props: {
 }) {
   const { contextWindow } = props;
   const remainingPercent = Math.max(0, 100 - contextWindow.usedPercent);
+  const contextTokensUsed = resolveContextTokensUsed(contextWindow);
+  const showsReportedSessionTotal = hasReportedSessionTokenTotal(contextWindow);
   const severity = resolveContextWindowSeverity(contextWindow.usedPercent);
   const badgeClassName =
     severity === "danger"
@@ -63,10 +67,19 @@ export default function ContextWindowIndicator(props: {
             {contextWindow.usedPercent}% used ({remainingPercent}% left)
           </p>
           <p>
-            {formatCompactTokenCount(contextWindow.usedTokens)} /{" "}
+            {formatCompactTokenCount(contextTokensUsed)} /{" "}
             {formatCompactTokenCount(contextWindow.maxTokens)} tokens used
           </p>
-          {breakdown ? <p className="text-muted-foreground">{breakdown}</p> : null}
+          {showsReportedSessionTotal ? (
+            <p>
+              Reported session total: {formatCompactTokenCount(contextWindow.usedTokens)} tokens
+            </p>
+          ) : null}
+          {breakdown ? (
+            <p className="text-muted-foreground">
+              {showsReportedSessionTotal ? `Reported totals: ${breakdown}` : breakdown}
+            </p>
+          ) : null}
         </div>
       </TooltipPopup>
     </Tooltip>

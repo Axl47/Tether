@@ -1,3 +1,5 @@
+import type { OrchestrationContextWindow } from "@t3tools/contracts";
+
 export type ContextWindowSeverity = "default" | "warning" | "danger";
 
 export function resolveContextWindowSeverity(usedPercent: number): ContextWindowSeverity {
@@ -21,4 +23,15 @@ export function formatCompactTokenCount(value: number): string {
     return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)}k`;
   }
   return value.toLocaleString("en-US");
+}
+
+export function resolveContextTokensUsed(contextWindow: OrchestrationContextWindow): number {
+  return Math.max(
+    0,
+    Math.min(contextWindow.maxTokens, contextWindow.maxTokens - contextWindow.remainingTokens),
+  );
+}
+
+export function hasReportedSessionTokenTotal(contextWindow: OrchestrationContextWindow): boolean {
+  return contextWindow.usedTokens !== resolveContextTokensUsed(contextWindow);
 }
