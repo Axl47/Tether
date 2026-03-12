@@ -54,7 +54,11 @@ import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { serverConfigQueryOptions, serverQueryKeys } from "~/lib/serverReactQuery";
 
 import { isElectron } from "../env";
-import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
+import {
+  closeDiffSearchParams,
+  parseDiffRouteSearch,
+  stripDiffSearchParams,
+} from "../diffRouteSearch";
 import {
   type ComposerSlashCommand,
   type ComposerTrigger,
@@ -1507,20 +1511,24 @@ export default function ChatView({ threadId }: ChatViewProps) {
     () => shortcutLabelForCommand(keybindings, "diff.toggle"),
     [keybindings],
   );
-  const onToggleDiff = useCallback(() => {
-    void navigate({
-      to: "/$threadId",
-      params: { threadId },
-      replace: true,
-      search: (previous) => {
-        if (diffOpen) {
-          return stripDiffSearchParams(previous);
-        }
-        const rest = stripDiffSearchParams(previous);
-        return { ...rest, diff: "1" };
-      },
-    });
-  }, [diffOpen, navigate, threadId]);
+  const onToggleDiff = useCallback(
+    (nextOpen?: boolean) => {
+      const shouldOpen = nextOpen ?? !diffOpen;
+      void navigate({
+        to: "/$threadId",
+        params: { threadId },
+        replace: true,
+        search: (previous) => {
+          if (!shouldOpen) {
+            return closeDiffSearchParams(previous);
+          }
+          const rest = stripDiffSearchParams(previous);
+          return { ...rest, diff: "1" };
+        },
+      });
+    },
+    [diffOpen, navigate, threadId],
+  );
   const onTogglePlanSidebar = useCallback(
     (open: boolean) => {
       if (open) {
@@ -2607,7 +2615,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       if (command === "diff.toggle") {
         event.preventDefault();
         event.stopPropagation();
-        onToggleDiff();
+        onToggleDiff(!diffOpen);
         return;
       }
 
@@ -2632,6 +2640,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     runProjectScript,
     splitTerminal,
     keybindings,
+    diffOpen,
     onToggleDiff,
     toggleTerminalVisibility,
   ]);
@@ -4914,8 +4923,13 @@ const ChatHeaderDropdown = memo(function ChatHeaderDropdown({
                 <GitCommitIcon className="size-4" />
                 Git
               </MenuSubTrigger>
-              <MenuSubPopup>
-                <GitActionsDropdownContent />
+              <MenuSubPopup side="inline-start" keepMounted>
+                <GitActionsControl
+                  gitCwd={gitCwd}
+                  activeThreadId={activeThreadId}
+                  availableEditors={availableEditors}
+                  mode="menu-items"
+                />
               </MenuSubPopup>
             </MenuSub>
           )}
@@ -4927,7 +4941,7 @@ const ChatHeaderDropdown = memo(function ChatHeaderDropdown({
                 <FolderClosedIcon className="size-4" />
                 Open in...
               </MenuSubTrigger>
-              <MenuSubPopup>
+              <MenuSubPopup side="inline-start">
                 <OpenInDropdownContent
                   keybindings={keybindings}
                   availableEditors={availableEditors}
@@ -4967,34 +4981,8 @@ const ChatHeaderDropdown = memo(function ChatHeaderDropdown({
             onDeleteScript={onDeleteProjectScript}
           />
         )}
-        {activeProjectName && (
-          <GitActionsControl
-            gitCwd={gitCwd}
-            activeThreadId={activeThreadId}
-            availableEditors={availableEditors}
-          />
-        )}
       </div>
     </>
-  );
-});
-
-const GitActionsDropdownContent = memo(function GitActionsDropdownContent() {
-  // Delegate to the existing GitActionsControl which already handles everything
-  // For the submenu, we just render a placeholder that opens the git controls
-  return (
-    <MenuItem
-      onClick={() => {
-        // Click the hidden git actions button to open its menu
-        const gitButton = document.querySelector<HTMLButtonElement>(
-          '[aria-label="Git action options"]',
-        );
-        gitButton?.click();
-      }}
-    >
-      <GitCommitIcon className="size-4" />
-      Open Git actions
-    </MenuItem>
   );
 });
 
@@ -5124,7 +5112,7 @@ interface ChatHeaderProps {
   onUpdateProjectScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void>;
   onDeleteProjectScript: (scriptId: string) => Promise<void>;
   onToggleTerminal: () => void;
-  onToggleDiff: () => void;
+  onToggleDiff: (open: boolean) => void;
   onTogglePlanSidebar: (open: boolean) => void;
 }
 

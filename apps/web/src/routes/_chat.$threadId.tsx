@@ -5,6 +5,7 @@ import { Suspense, lazy, type ReactNode, useCallback, useEffect } from "react";
 import ChatView from "../components/ChatView";
 import { useComposerDraftStore } from "../composerDraftStore";
 import {
+  closeDiffSearchParams,
   type DiffRouteSearch,
   parseDiffRouteSearch,
   stripDiffSearchParams,
@@ -171,7 +172,7 @@ function ChatThreadRouteView() {
       to: "/$threadId",
       params: { threadId },
       search: (previous) => {
-        return stripDiffSearchParams(previous);
+        return closeDiffSearchParams(previous);
       },
     });
   }, [navigate, threadId]);
