@@ -116,6 +116,23 @@ function resolveEffectiveReportedTotal(
   );
 }
 
+function resolveContextWindowEffectiveReportedTotal(
+  contextWindow: OrchestrationContextWindow | null | undefined,
+): number | undefined {
+  const previousContextWindow = previousCodexContextWindow(contextWindow);
+  if (!previousContextWindow) {
+    return undefined;
+  }
+
+  return resolveEffectiveReportedTotal(
+    previousContextWindow.inputTokens,
+    previousContextWindow.reportedTotalTokens ?? previousContextWindow.usedTokens,
+    previousContextWindow.cachedInputTokens,
+    previousContextWindow.outputTokens,
+    previousContextWindow.reasoningOutputTokens,
+  );
+}
+
 function resolveCompactionAnchoredEstimate(input: {
   effectiveReportedTotal: number;
   effectiveReportedLastTotal: number | undefined;
@@ -138,6 +155,8 @@ function resolveCompactionAnchoredEstimate(input: {
   ) {
     const previousReportedTotalTokens =
       previousContextWindow?.reportedTotalTokens ?? previousContextWindow?.usedTokens;
+    const previousEffectiveReportedTotal =
+      resolveContextWindowEffectiveReportedTotal(previousContextWindow);
     const canRecoverOverflowEstimate =
       effectiveReportedTotal >= maxTokens ||
       (previousReportedTotalTokens !== undefined &&
@@ -146,14 +165,18 @@ function resolveCompactionAnchoredEstimate(input: {
 
     if (canRecoverOverflowEstimate) {
       const recoveredAnchorUsedTokens = resolveCompactionResetTokens(maxTokens);
+      const recoveredGrowthTokens =
+        effectiveReportedLastTotal ??
+        Math.max(
+          0,
+          effectiveReportedTotal - (previousEffectiveReportedTotal ?? effectiveReportedTotal),
+        );
       const recoveredAnchorNonCachedTokens = Math.max(
         0,
-        effectiveReportedTotal - (effectiveReportedLastTotal ?? 0),
+        effectiveReportedTotal - recoveredGrowthTokens,
       );
       return {
-        usedTokens: normalizeUsedTokens(
-          recoveredAnchorUsedTokens + (effectiveReportedLastTotal ?? 0),
-        ),
+        usedTokens: normalizeUsedTokens(recoveredAnchorUsedTokens + recoveredGrowthTokens),
         compactionAnchorNonCachedTokens: recoveredAnchorNonCachedTokens,
         compactionAnchorUsedTokens: recoveredAnchorUsedTokens,
       };

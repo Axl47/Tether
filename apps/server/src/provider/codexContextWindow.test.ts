@@ -391,6 +391,38 @@ describe("normalizeCodexContextWindow", () => {
     });
   });
 
+  it("derives overflow growth from the previous snapshot when Codex omits the last-turn delta", () => {
+    expect(
+      normalizeCodexContextWindow(
+        {
+          info: {
+            total_token_usage: {
+              total_tokens: 400_000,
+            },
+            model_context_window: 258_000,
+          },
+        },
+        "2026-03-07T03:50:00.000Z",
+        {
+          provider: "codex",
+          usedTokens: 240_000,
+          reportedTotalTokens: 240_000,
+          maxTokens: 258_000,
+          remainingTokens: 18_000,
+          usedPercent: 93,
+          updatedAt: "2026-03-07T03:40:00.000Z",
+        },
+      ),
+    ).toMatchObject({
+      usedTokens: 198_700,
+      reportedTotalTokens: 400_000,
+      compactionAnchorNonCachedTokens: 240_000,
+      compactionAnchorUsedTokens: 38_700,
+      remainingTokens: 59_300,
+      usedPercent: 77,
+    });
+  });
+
   it("recovers from legacy snapshots clamped exactly to the model limit", () => {
     expect(
       normalizeCodexContextWindow(
