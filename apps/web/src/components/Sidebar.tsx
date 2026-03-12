@@ -74,7 +74,6 @@ import {
 } from "./desktopUpdate.logic";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert";
 import { Button } from "./ui/button";
-import { Collapsible, CollapsibleContent } from "./ui/collapsible";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import {
   SidebarContent,
@@ -103,8 +102,10 @@ import {
 import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
 import { isNonEmpty as isNonEmptyString } from "effect/String";
 import { MobileContextMenu, type MobileContextMenuItem } from "./MobileContextMenu";
+import type { Thread } from "../types";
 
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
+const EMPTY_PROJECT_THREADS: readonly Thread[] = [];
 const THREAD_PREVIEW_LIMIT = 6;
 const PROJECT_DRAG_CLICK_SUPPRESSION_MS = 200;
 const DRAFT_THREAD_LABEL_CLASS_NAME =
@@ -1350,19 +1351,41 @@ export default function Sidebar() {
   const threadSort = appSettings.sidebarThreadSort ?? DEFAULT_SIDEBAR_THREAD_SORT;
   const hasSidebarThreadSearch = threadSearchQuery.trim().length > 0;
   const hasAnyThreads = sidebarThreads.length > 0;
-  const orderedProjects = useMemo(
-    () =>
-      sortSidebarProjects(projects, sidebarThreads, {
-        sortBy: threadSort,
-        hasPendingApprovalsByThreadId: pendingApprovalByThreadId,
-        hasPendingUserInputByThreadId: pendingUserInputByThreadId,
-      }),
-    [pendingApprovalByThreadId, pendingUserInputByThreadId, projects, sidebarThreads, threadSort],
+  const sidebarThreadSortOptions = useMemo(
+    () => ({
+      sortBy: threadSort,
+      hasPendingApprovalsByThreadId: pendingApprovalByThreadId,
+      hasPendingUserInputByThreadId: pendingUserInputByThreadId,
+    }),
+    [pendingApprovalByThreadId, pendingUserInputByThreadId, threadSort],
   );
-  const hasAnyMatchingThreads = useMemo(
-    () => filterSidebarThreads(sidebarThreads, threadSearchQuery).length > 0,
+  const filteredSidebarThreads = useMemo(
+    () => filterSidebarThreads(sidebarThreads, threadSearchQuery),
     [sidebarThreads, threadSearchQuery],
   );
+  const sortedProjectThreadsById = useMemo(() => {
+    const threadsByProjectId = new Map<ProjectId, Thread[]>();
+    for (const thread of filteredSidebarThreads) {
+      const existingThreads = threadsByProjectId.get(thread.projectId);
+      if (existingThreads) {
+        existingThreads.push(thread);
+        continue;
+      }
+      threadsByProjectId.set(thread.projectId, [thread]);
+    }
+
+    const next = new Map<ProjectId, readonly Thread[]>();
+    for (const [projectId, projectThreads] of threadsByProjectId) {
+      next.set(projectId, sortSidebarThreads(projectThreads, sidebarThreadSortOptions));
+    }
+
+    return next;
+  }, [filteredSidebarThreads, sidebarThreadSortOptions]);
+  const orderedProjects = useMemo(
+    () => sortSidebarProjects(projects, filteredSidebarThreads, sidebarThreadSortOptions),
+    [filteredSidebarThreads, projects, sidebarThreadSortOptions],
+  );
+  const hasAnyMatchingThreads = filteredSidebarThreads.length > 0;
 
   const handleDesktopUpdateButtonClick = useCallback(() => {
     const bridge = window.desktopBridge;
@@ -1716,18 +1739,8 @@ export default function Sidebar() {
                 strategy={verticalListSortingStrategy}
               >
                 {orderedProjects.map((project) => {
-                  const allProjectThreads = sidebarThreads.filter(
-                    (thread) => thread.projectId === project.id,
-                  );
-                  const filteredProjectThreads = filterSidebarThreads(
-                    allProjectThreads,
-                    threadSearchQuery,
-                  );
-                  const projectThreads = sortSidebarThreads(filteredProjectThreads, {
-                    sortBy: threadSort,
-                    hasPendingApprovalsByThreadId: pendingApprovalByThreadId,
-                    hasPendingUserInputByThreadId: pendingUserInputByThreadId,
-                  });
+                  const projectThreads =
+                    sortedProjectThreadsById.get(project.id) ?? EMPTY_PROJECT_THREADS;
                   const isProjectOpen = project.expanded || hasSidebarThreadSearch;
                   const isThreadListExpanded = expandedThreadListsByProject.has(project.id);
                   const hasHiddenThreads =
@@ -1741,7 +1754,7 @@ export default function Sidebar() {
                   return (
                     <SortableProjectItem key={project.id} projectId={project.id}>
                       {(dragHandleProps) => (
-                        <Collapsible className="group/collapsible" open={isProjectOpen}>
+                        <>
                           <div className="group/project-header relative">
                             <SidebarMenuButton
                               size="sm"
@@ -1827,7 +1840,7 @@ export default function Sidebar() {
                             </div>
                           </div>
 
-                          <CollapsibleContent>
+                          {isProjectOpen ? (
                             <SidebarMenuSub className="mx-1 my-0 translate-x-0 gap-0 px-1.5 py-0">
                               {visibleThreads.map((thread) => {
                                 const isActive = routeThreadId === thread.id;
@@ -2040,8 +2053,8 @@ export default function Sidebar() {
                                 </SidebarMenuSubItem>
                               )}
                             </SidebarMenuSub>
-                          </CollapsibleContent>
-                        </Collapsible>
+                          ) : null}
+                        </>
                       )}
                     </SortableProjectItem>
                   );

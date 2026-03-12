@@ -499,6 +499,46 @@ export default function GitActionsControl({
     });
   }, [isCommitDialogOpen, dialogCommitMessage, checkoutNewBranchAndRunAction]);
 
+  const openDialogForMenuItem = useCallback(
+    (item: GitActionMenuItem) => {
+      if (item.disabled) return;
+      if (item.kind === "open_pr") {
+        void openExistingPr();
+        return;
+      }
+      if (item.dialogAction === "push") {
+        void runGitActionWithToast({ action: "commit_push", forcePushOnlyProgress: true });
+        return;
+      }
+      if (item.dialogAction === "create_pr") {
+        void runGitActionWithToast({ action: "commit_push_pr" });
+        return;
+      }
+      setIsCommitDialogOpen(true);
+    },
+    [openExistingPr, runGitActionWithToast, setIsCommitDialogOpen],
+  );
+
+  const runCommitDialogAction = useCallback(
+    (action: "commit" | "commit_push") => {
+      if (!isCommitDialogOpen) return;
+      const commitMessage = dialogCommitMessage.trim();
+      setIsCommitDialogOpen(false);
+      setDialogCommitMessage("");
+      void runGitActionWithToast({
+        action,
+        ...(commitMessage ? { commitMessage } : {}),
+      });
+    },
+    [
+      dialogCommitMessage,
+      isCommitDialogOpen,
+      runGitActionWithToast,
+      setDialogCommitMessage,
+      setIsCommitDialogOpen,
+    ],
+  );
+
   const runQuickAction = useCallback(() => {
     if (quickAction.kind === "open_pr") {
       void openExistingPr();
@@ -538,43 +578,6 @@ export default function GitActionsControl({
       void runGitActionWithToast({ action: quickAction.action });
     }
   }, [openExistingPr, pullMutation, quickAction, runGitActionWithToast, threadToastData]);
-
-  const openDialogForMenuItem = useCallback(
-    (item: GitActionMenuItem) => {
-      if (item.disabled) return;
-      if (item.kind === "open_pr") {
-        void openExistingPr();
-        return;
-      }
-      if (item.dialogAction === "push") {
-        void runGitActionWithToast({ action: "commit_push", forcePushOnlyProgress: true });
-        return;
-      }
-      if (item.dialogAction === "create_pr") {
-        void runGitActionWithToast({ action: "commit_push_pr" });
-        return;
-      }
-      setIsCommitDialogOpen(true);
-    },
-    [openExistingPr, runGitActionWithToast, setIsCommitDialogOpen],
-  );
-
-  const runDialogAction = useCallback(() => {
-    if (!isCommitDialogOpen) return;
-    const commitMessage = dialogCommitMessage.trim();
-    setIsCommitDialogOpen(false);
-    setDialogCommitMessage("");
-    void runGitActionWithToast({
-      action: "commit",
-      ...(commitMessage ? { commitMessage } : {}),
-    });
-  }, [
-    dialogCommitMessage,
-    isCommitDialogOpen,
-    runGitActionWithToast,
-    setDialogCommitMessage,
-    setIsCommitDialogOpen,
-  ]);
 
   const openChangedFileInEditor = useCallback(
     (filePath: string) => {
@@ -859,9 +862,30 @@ export default function GitActionsControl({
             <Button variant="outline" size="sm" onClick={runDialogActionOnNewBranch}>
               Commit on new branch
             </Button>
-            <Button size="sm" onClick={runDialogAction}>
-              Commit
-            </Button>
+            <Group className="w-full sm:w-auto">
+              <Button
+                className="flex-1 sm:flex-none"
+                size="sm"
+                onClick={() => runCommitDialogAction("commit")}
+              >
+                Commit
+              </Button>
+              <Menu>
+                <MenuTrigger
+                  render={
+                    <Button aria-label="More commit actions" className="px-2" size="icon-sm" />
+                  }
+                >
+                  <ChevronDownIcon aria-hidden="true" className="size-3.5" />
+                </MenuTrigger>
+                <MenuPopup align="end" side="top" className="min-w-40">
+                  <MenuItem onClick={() => runCommitDialogAction("commit_push")}>
+                    <CloudUploadIcon className="size-4" />
+                    Commit and Push
+                  </MenuItem>
+                </MenuPopup>
+              </Menu>
+            </Group>
           </DialogFooter>
         </DialogPopup>
       </Dialog>
