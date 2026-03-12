@@ -4973,11 +4973,8 @@ const ChatHeaderGitButton = memo(function ChatHeaderGitButton({
 }) {
   return (
     <Menu>
-      <MenuTrigger render={<Button aria-label="Git" size="xs" variant="outline" />}>
+      <MenuTrigger render={<Button aria-label="Git" size="icon-xs" variant="outline" />}>
         <GitCommitIcon className="size-3.5" />
-        <span className="sr-only @sm/header-actions:not-sr-only @sm/header-actions:ml-0.5">
-          Git
-        </span>
       </MenuTrigger>
       <MenuPopup align="end" className="min-w-48" keepMounted>
         <GitActionsControl
