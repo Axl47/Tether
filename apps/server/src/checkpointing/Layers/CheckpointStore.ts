@@ -17,10 +17,7 @@ import { CheckpointInvariantError } from "../Errors.ts";
 import { GitCommandError } from "../../git/Errors.ts";
 import { GitServiceLive } from "../../git/Layers/GitService.ts";
 import { GitService } from "../../git/Services/GitService.ts";
-import {
-  CheckpointStore,
-  type CheckpointStoreShape,
-} from "../Services/CheckpointStore.ts";
+import { CheckpointStore, type CheckpointStoreShape } from "../Services/CheckpointStore.ts";
 import { CheckpointRef } from "@t3tools/contracts";
 
 const makeCheckpointStore = Effect.gen(function* () {
@@ -28,9 +25,7 @@ const makeCheckpointStore = Effect.gen(function* () {
   const path = yield* Path.Path;
   const git = yield* GitService;
 
-  const resolveHeadCommit = (
-    cwd: string,
-  ): Effect.Effect<string | null, GitCommandError> =>
+  const resolveHeadCommit = (cwd: string): Effect.Effect<string | null, GitCommandError> =>
     git
       .execute({
         operation: "CheckpointStore.resolveHeadCommit",
@@ -48,9 +43,7 @@ const makeCheckpointStore = Effect.gen(function* () {
         }),
       );
 
-  const hasHeadCommit = (
-    cwd: string,
-  ): Effect.Effect<boolean, GitCommandError> =>
+  const hasHeadCommit = (cwd: string): Effect.Effect<boolean, GitCommandError> =>
     git
       .execute({
         operation: "CheckpointStore.hasHeadCommit",
@@ -90,15 +83,11 @@ const makeCheckpointStore = Effect.gen(function* () {
         allowNonZeroExit: true,
       })
       .pipe(
-        Effect.map(
-          (result) => result.code === 0 && result.stdout.trim() === "true",
-        ),
+        Effect.map((result) => result.code === 0 && result.stdout.trim() === "true"),
         Effect.catch(() => Effect.succeed(false)),
       );
 
-  const captureCheckpoint: CheckpointStoreShape["captureCheckpoint"] = (
-    input,
-  ) =>
+  const captureCheckpoint: CheckpointStoreShape["captureCheckpoint"] = (input) =>
     Effect.gen(function* () {
       const operation = "CheckpointStore.captureCheckpoint";
 
@@ -192,16 +181,11 @@ const makeCheckpointStore = Effect.gen(function* () {
       Effect.map((commit) => commit !== null),
     );
 
-  const restoreCheckpoint: CheckpointStoreShape["restoreCheckpoint"] = (
-    input,
-  ) =>
+  const restoreCheckpoint: CheckpointStoreShape["restoreCheckpoint"] = (input) =>
     Effect.gen(function* () {
       const operation = "CheckpointStore.restoreCheckpoint";
 
-      let commitOid = yield* resolveCheckpointCommit(
-        input.cwd,
-        input.checkpointRef,
-      );
+      let commitOid = yield* resolveCheckpointCommit(input.cwd, input.checkpointRef);
 
       if (!commitOid && input.fallbackToHead === true) {
         commitOid = yield* resolveHeadCommit(input.cwd);
@@ -214,15 +198,7 @@ const makeCheckpointStore = Effect.gen(function* () {
       yield* git.execute({
         operation,
         cwd: input.cwd,
-        args: [
-          "restore",
-          "--source",
-          commitOid,
-          "--worktree",
-          "--staged",
-          "--",
-          ".",
-        ],
+        args: ["restore", "--source", commitOid, "--worktree", "--staged", "--", "."],
       });
       yield* git.execute({
         operation,
@@ -246,14 +222,8 @@ const makeCheckpointStore = Effect.gen(function* () {
     Effect.gen(function* () {
       const operation = "CheckpointStore.diffCheckpoints";
 
-      let fromCommitOid = yield* resolveCheckpointCommit(
-        input.cwd,
-        input.fromCheckpointRef,
-      );
-      const toCommitOid = yield* resolveCheckpointCommit(
-        input.cwd,
-        input.toCheckpointRef,
-      );
+      let fromCommitOid = yield* resolveCheckpointCommit(input.cwd, input.fromCheckpointRef);
+      const toCommitOid = yield* resolveCheckpointCommit(input.cwd, input.toCheckpointRef);
 
       if (!fromCommitOid && input.fallbackFromToHead === true) {
         const headCommit = yield* resolveHeadCommit(input.cwd);
@@ -274,22 +244,13 @@ const makeCheckpointStore = Effect.gen(function* () {
       const result = yield* git.execute({
         operation,
         cwd: input.cwd,
-        args: [
-          "diff",
-          "--patch",
-          "--minimal",
-          "--no-color",
-          fromCommitOid,
-          toCommitOid,
-        ],
+        args: ["diff", "--patch", "--minimal", "--no-color", fromCommitOid, toCommitOid],
       });
 
       return result.stdout;
     });
 
-  const deleteCheckpointRefs: CheckpointStoreShape["deleteCheckpointRefs"] = (
-    input,
-  ) =>
+  const deleteCheckpointRefs: CheckpointStoreShape["deleteCheckpointRefs"] = (input) =>
     Effect.gen(function* () {
       const operation = "CheckpointStore.deleteCheckpointRefs";
 
@@ -316,7 +277,6 @@ const makeCheckpointStore = Effect.gen(function* () {
   } satisfies CheckpointStoreShape;
 });
 
-export const CheckpointStoreLive = Layer.effect(
-  CheckpointStore,
-  makeCheckpointStore,
-).pipe(Layer.provideMerge(GitServiceLive));
+export const CheckpointStoreLive = Layer.effect(CheckpointStore, makeCheckpointStore).pipe(
+  Layer.provideMerge(GitServiceLive),
+);

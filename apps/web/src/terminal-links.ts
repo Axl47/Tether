@@ -35,10 +35,7 @@ function trimClosingDelimiters(value: string): string {
   return output;
 }
 
-function overlaps(
-  a: { start: number; end: number },
-  b: { start: number; end: number },
-): boolean {
+function overlaps(a: { start: number; end: number }, b: { start: number; end: number }): boolean {
   return a.start < b.end && b.start < a.end;
 }
 
@@ -67,9 +64,7 @@ function collectMatches(
       end: start + trimmed.length,
     };
 
-    const collides = [...existing, ...matches].some((other) =>
-      overlaps(candidate, other),
-    );
+    const collides = [...existing, ...matches].some((other) => overlaps(candidate, other));
     if (collides) continue;
 
     matches.push(candidate);
@@ -148,12 +143,7 @@ function splitPathAndPosition(value: string): {
 
 export function extractTerminalLinks(line: string): TerminalLinkMatch[] {
   const urlMatches = collectMatches(line, "url", URL_PATTERN, []);
-  const pathMatches = collectMatches(
-    line,
-    "path",
-    FILE_PATH_PATTERN,
-    urlMatches,
-  );
+  const pathMatches = collectMatches(line, "path", FILE_PATH_PATTERN, urlMatches);
   return [...urlMatches, ...pathMatches].toSorted((a, b) => a.start - b.start);
 }
 
@@ -211,9 +201,7 @@ export function writePreferredTerminalEditor(editor: EditorId): void {
   window.localStorage.setItem(LAST_EDITOR_KEY, editor);
 }
 
-export function preferredTerminalEditor(
-  availableEditors?: ReadonlyArray<EditorId>,
-): EditorId {
+export function preferredTerminalEditor(availableEditors?: ReadonlyArray<EditorId>): EditorId {
   const fallback = EDITORS.find((editor) => editor.command)?.id ?? "cursor";
 
   const storedEditor = readPreferredTerminalEditor();

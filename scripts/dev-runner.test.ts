@@ -41,8 +41,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
       Effect.gen(function* () {
         const error = yield* Effect.flip(
           Effect.try({
-            try: () =>
-              resolveOffset({ portOffset: -1, devInstance: undefined }),
+            try: () => resolveOffset({ portOffset: -1, devInstance: undefined }),
             catch: (cause) => String(cause),
           }),
         );
@@ -105,70 +104,64 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
       }),
     );
 
-    it.effect(
-      "does not force websocket logging on in dev mode when unset",
-      () =>
-        Effect.gen(function* () {
-          const env = yield* createDevRunnerEnv({
-            mode: "dev",
-            baseEnv: {
-              TETHER_LOG_WS_EVENTS: "keep-me-out",
-            },
-            serverOffset: 0,
-            webOffset: 0,
-            stateDir: undefined,
-            authToken: undefined,
-            noBrowser: undefined,
-            autoBootstrapProjectFromCwd: undefined,
-            logWebSocketEvents: undefined,
-            host: undefined,
-            port: undefined,
-            devUrl: undefined,
-          });
+    it.effect("does not force websocket logging on in dev mode when unset", () =>
+      Effect.gen(function* () {
+        const env = yield* createDevRunnerEnv({
+          mode: "dev",
+          baseEnv: {
+            TETHER_LOG_WS_EVENTS: "keep-me-out",
+          },
+          serverOffset: 0,
+          webOffset: 0,
+          stateDir: undefined,
+          authToken: undefined,
+          noBrowser: undefined,
+          autoBootstrapProjectFromCwd: undefined,
+          logWebSocketEvents: undefined,
+          host: undefined,
+          port: undefined,
+          devUrl: undefined,
+        });
 
-          assert.equal(env.TETHER_MODE, "web");
-          assert.equal(env.TETHER_LOG_WS_EVENTS, undefined);
-        }),
+        assert.equal(env.TETHER_MODE, "web");
+        assert.equal(env.TETHER_LOG_WS_EVENTS, undefined);
+      }),
     );
 
-    it.effect(
-      "forwards explicit websocket logging false without coercing it away",
-      () =>
-        Effect.gen(function* () {
-          const env = yield* createDevRunnerEnv({
-            mode: "dev",
-            baseEnv: {},
-            serverOffset: 0,
-            webOffset: 0,
-            stateDir: undefined,
-            authToken: undefined,
-            noBrowser: undefined,
-            autoBootstrapProjectFromCwd: undefined,
-            logWebSocketEvents: false,
-            host: undefined,
-            port: undefined,
-            devUrl: undefined,
-          });
+    it.effect("forwards explicit websocket logging false without coercing it away", () =>
+      Effect.gen(function* () {
+        const env = yield* createDevRunnerEnv({
+          mode: "dev",
+          baseEnv: {},
+          serverOffset: 0,
+          webOffset: 0,
+          stateDir: undefined,
+          authToken: undefined,
+          noBrowser: undefined,
+          autoBootstrapProjectFromCwd: undefined,
+          logWebSocketEvents: false,
+          host: undefined,
+          port: undefined,
+          devUrl: undefined,
+        });
 
-          assert.equal(env.TETHER_LOG_WS_EVENTS, "0");
-        }),
+        assert.equal(env.TETHER_LOG_WS_EVENTS, "0");
+      }),
     );
   });
 
   describe("findFirstAvailableOffset", () => {
-    it.effect(
-      "returns the starting offset when required ports are available",
-      () =>
-        Effect.gen(function* () {
-          const offset = yield* findFirstAvailableOffset({
-            startOffset: 0,
-            requireServerPort: true,
-            requireWebPort: true,
-            checkPortAvailability: () => Effect.succeed(true),
-          });
+    it.effect("returns the starting offset when required ports are available", () =>
+      Effect.gen(function* () {
+        const offset = yield* findFirstAvailableOffset({
+          startOffset: 0,
+          requireServerPort: true,
+          requireWebPort: true,
+          checkPortAvailability: () => Effect.succeed(true),
+        });
 
-          assert.equal(offset, 0);
-        }),
+        assert.equal(offset, 0);
+      }),
     );
 
     it.effect("advances until all required ports are available", () =>
@@ -215,21 +208,19 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
       }),
     );
 
-    it.effect(
-      "keeps server offset stable for dev:web and only shifts web offset",
-      () =>
-        Effect.gen(function* () {
-          const taken = new Set([5733]);
-          const offsets = yield* resolveModePortOffsets({
-            mode: "dev:web",
-            startOffset: 0,
-            hasExplicitServerPort: false,
-            hasExplicitDevUrl: false,
-            checkPortAvailability: (port) => Effect.succeed(!taken.has(port)),
-          });
+    it.effect("keeps server offset stable for dev:web and only shifts web offset", () =>
+      Effect.gen(function* () {
+        const taken = new Set([5733]);
+        const offsets = yield* resolveModePortOffsets({
+          mode: "dev:web",
+          startOffset: 0,
+          hasExplicitServerPort: false,
+          hasExplicitDevUrl: false,
+          checkPortAvailability: (port) => Effect.succeed(!taken.has(port)),
+        });
 
-          assert.deepStrictEqual(offsets, { serverOffset: 0, webOffset: 1 });
-        }),
+        assert.deepStrictEqual(offsets, { serverOffset: 0, webOffset: 1 });
+      }),
     );
 
     it.effect("shifts only server offset for dev:server", () =>

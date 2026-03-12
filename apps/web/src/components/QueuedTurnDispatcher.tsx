@@ -11,9 +11,7 @@ export function QueuedTurnDispatcher() {
   const { settings } = useAppSettings();
   const threads = useStore((store) => store.threads);
   const setThreadError = useStore((store) => store.setError);
-  const queuedMessagesByThreadId = useComposerDraftStore(
-    (store) => store.queuedMessagesByThreadId,
-  );
+  const queuedMessagesByThreadId = useComposerDraftStore((store) => store.queuedMessagesByThreadId);
   const setDispatchingQueuedMessage = useQueuedTurnRuntimeStore(
     (store) => store.setDispatchingQueuedMessage,
   );
@@ -38,16 +36,12 @@ export function QueuedTurnDispatcher() {
         isRevertingCheckpoint: false,
         isLocalSendInFlight: false,
       });
-      const cycleState =
-        queuedTurnCycleStateByThreadIdRef.current.get(thread.id) ?? null;
+      const cycleState = queuedTurnCycleStateByThreadIdRef.current.get(thread.id) ?? null;
       if (!queueHead) {
         failedDispatchSignatureByThreadIdRef.current.delete(thread.id);
         if (cycleState === "awaiting-busy") {
           if (!canDispatch) {
-            queuedTurnCycleStateByThreadIdRef.current.set(
-              thread.id,
-              "awaiting-idle",
-            );
+            queuedTurnCycleStateByThreadIdRef.current.set(thread.id, "awaiting-idle");
             setDispatchingQueuedMessage(thread.id, null);
           }
           continue;
@@ -65,10 +59,7 @@ export function QueuedTurnDispatcher() {
 
       if (cycleState === "awaiting-busy") {
         if (!canDispatch) {
-          queuedTurnCycleStateByThreadIdRef.current.set(
-            thread.id,
-            "awaiting-idle",
-          );
+          queuedTurnCycleStateByThreadIdRef.current.set(thread.id, "awaiting-idle");
           setDispatchingQueuedMessage(thread.id, null);
         }
         continue;
@@ -85,20 +76,14 @@ export function QueuedTurnDispatcher() {
       }`;
       const previousFailureSignature =
         failedDispatchSignatureByThreadIdRef.current.get(thread.id) ?? null;
-      if (
-        previousFailureSignature !== null &&
-        previousFailureSignature !== failureSignature
-      ) {
+      if (previousFailureSignature !== null && previousFailureSignature !== failureSignature) {
         failedDispatchSignatureByThreadIdRef.current.delete(thread.id);
       }
 
       if (dispatchingThreadIdsRef.current.has(thread.id)) {
         continue;
       }
-      if (
-        failedDispatchSignatureByThreadIdRef.current.get(thread.id) ===
-        failureSignature
-      ) {
+      if (failedDispatchSignatureByThreadIdRef.current.get(thread.id) === failureSignature) {
         continue;
       }
       if (!canDispatch) {
@@ -119,24 +104,14 @@ export function QueuedTurnDispatcher() {
         setThreadError,
       })
         .then(() => {
-          useComposerDraftStore
-            .getState()
-            .consumeQueuedMessage(thread.id, queueHead.id);
+          useComposerDraftStore.getState().consumeQueuedMessage(thread.id, queueHead.id);
           failedDispatchSignatureByThreadIdRef.current.delete(thread.id);
-          queuedTurnCycleStateByThreadIdRef.current.set(
-            thread.id,
-            "awaiting-busy",
-          );
+          queuedTurnCycleStateByThreadIdRef.current.set(thread.id, "awaiting-busy");
         })
         .catch((error: unknown) => {
           const message =
-            error instanceof Error
-              ? error.message
-              : "Failed to send queued follow-up.";
-          failedDispatchSignatureByThreadIdRef.current.set(
-            thread.id,
-            failureSignature,
-          );
+            error instanceof Error ? error.message : "Failed to send queued follow-up.";
+          failedDispatchSignatureByThreadIdRef.current.set(thread.id, failureSignature);
           queuedTurnCycleStateByThreadIdRef.current.delete(thread.id);
           setDispatchingQueuedMessage(thread.id, null);
           setThreadError(thread.id, message);

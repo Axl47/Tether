@@ -33,10 +33,7 @@ export function projectScriptIdFromCommand(command: string): string | null {
   return trimmed.slice(prefix.literal.length, -suffix.literal.length);
 }
 
-export function nextProjectScriptId(
-  name: string,
-  existingIds: Iterable<string>,
-): string {
+export function nextProjectScriptId(name: string, existingIds: Iterable<string>): string {
   const taken = new Set(Array.from(existingIds));
   const baseId = normalizeScriptId(name);
   if (!taken.has(baseId)) return baseId;
@@ -81,15 +78,11 @@ export function projectScriptRuntimeEnv(
   return env;
 }
 
-export function primaryProjectScript(
-  scripts: ProjectScript[],
-): ProjectScript | null {
+export function primaryProjectScript(scripts: ProjectScript[]): ProjectScript | null {
   const regular = scripts.find((script) => !script.runOnWorktreeCreate);
   return regular ?? scripts[0] ?? null;
 }
 
-export function setupProjectScript(
-  scripts: ProjectScript[],
-): ProjectScript | null {
+export function setupProjectScript(scripts: ProjectScript[]): ProjectScript | null {
   return scripts.find((script) => script.runOnWorktreeCreate) ?? null;
 }

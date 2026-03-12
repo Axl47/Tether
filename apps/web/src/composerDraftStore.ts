@@ -9,16 +9,54 @@ import {
   type RuntimeMode,
 } from "@t3tools/contracts";
 import { normalizeModelSlug } from "@t3tools/shared/model";
-import {
-  DEFAULT_INTERACTION_MODE,
-  DEFAULT_RUNTIME_MODE,
-  type ChatImageAttachment,
-} from "./types";
+import { DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE, type ChatImageAttachment } from "./types";
+import { Debouncer } from "@tanstack/react-pacer";
 import { create } from "zustand";
-import { createJSONStorage, persist } from "zustand/middleware";
+import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
 
 export const COMPOSER_DRAFT_STORAGE_KEY = "tether:composer-drafts:v1";
 export type DraftThreadEnvMode = "local" | "worktree";
+
+const COMPOSER_PERSIST_DEBOUNCE_MS = 300;
+
+interface DebouncedStorage extends StateStorage {
+  flush: () => void;
+}
+
+export function createDebouncedStorage(baseStorage: StateStorage): DebouncedStorage {
+  const debouncedSetItem = new Debouncer(
+    (name: string, value: string) => {
+      baseStorage.setItem(name, value);
+    },
+    { wait: COMPOSER_PERSIST_DEBOUNCE_MS },
+  );
+
+  return {
+    getItem: (name) => baseStorage.getItem(name),
+    setItem: (name, value) => {
+      debouncedSetItem.maybeExecute(name, value);
+    },
+    removeItem: (name) => {
+      debouncedSetItem.cancel();
+      baseStorage.removeItem(name);
+    },
+    flush: () => {
+      debouncedSetItem.flush();
+    },
+  };
+}
+
+const composerDebouncedStorage: DebouncedStorage =
+  typeof localStorage !== "undefined"
+    ? createDebouncedStorage(localStorage)
+    : { getItem: () => null, setItem: () => {}, removeItem: () => {}, flush: () => {} };
+
+// Flush pending composer draft writes before page unload to prevent data loss.
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeunload", () => {
+    composerDebouncedStorage.flush();
+  });
+}
 
 export interface PersistedComposerImageAttachment {
   id: string;
@@ -41,10 +79,7 @@ export interface PersistedQueuedComposerMessageState {
   codexFastMode?: boolean | null;
 }
 
-export interface ComposerImageAttachment extends Omit<
-  ChatImageAttachment,
-  "previewUrl"
-> {
+export interface ComposerImageAttachment extends Omit<ChatImageAttachment, "previewUrl"> {
   previewUrl: string;
   file: File;
 }
@@ -73,10 +108,7 @@ interface PersistedDraftThreadState {
 
 interface PersistedComposerDraftStoreState {
   draftsByThreadId: Record<ThreadId, PersistedComposerThreadDraftState>;
-  queuedMessagesByThreadId: Record<
-    ThreadId,
-    PersistedQueuedComposerMessageState[]
-  >;
+  queuedMessagesByThreadId: Record<ThreadId, PersistedQueuedComposerMessageState[]>;
   draftThreadsByThreadId: Record<ThreadId, PersistedDraftThreadState>;
   projectDraftThreadIdByProjectId: Record<ProjectId, ThreadId>;
 }
@@ -128,9 +160,7 @@ interface ComposerDraftStoreState {
   queuedMessagesByThreadId: Record<ThreadId, QueuedComposerMessageState[]>;
   draftThreadsByThreadId: Record<ThreadId, DraftThreadState>;
   projectDraftThreadIdByProjectId: Record<ProjectId, ThreadId>;
-  getDraftThreadByProjectId: (
-    projectId: ProjectId,
-  ) => ProjectDraftThread | null;
+  getDraftThreadByProjectId: (projectId: ProjectId) => ProjectDraftThread | null;
   getDraftThread: (threadId: ThreadId) => DraftThreadState | null;
   setProjectDraftThreadId: (
     projectId: ProjectId,
@@ -157,33 +187,18 @@ interface ComposerDraftStoreState {
     },
   ) => void;
   clearProjectDraftThreadId: (projectId: ProjectId) => void;
-  clearProjectDraftThreadById: (
-    projectId: ProjectId,
-    threadId: ThreadId,
-  ) => void;
+  clearProjectDraftThreadById: (projectId: ProjectId, threadId: ThreadId) => void;
   clearDraftThread: (threadId: ThreadId) => void;
   setPrompt: (threadId: ThreadId, prompt: string) => void;
-  setProvider: (
-    threadId: ThreadId,
-    provider: ProviderKind | null | undefined,
-  ) => void;
+  setProvider: (threadId: ThreadId, provider: ProviderKind | null | undefined) => void;
   setModel: (threadId: ThreadId, model: string | null | undefined) => void;
-  setRuntimeMode: (
-    threadId: ThreadId,
-    runtimeMode: RuntimeMode | null | undefined,
-  ) => void;
+  setRuntimeMode: (threadId: ThreadId, runtimeMode: RuntimeMode | null | undefined) => void;
   setInteractionMode: (
     threadId: ThreadId,
     interactionMode: ProviderInteractionMode | null | undefined,
   ) => void;
-  setEffort: (
-    threadId: ThreadId,
-    effort: CodexReasoningEffort | null | undefined,
-  ) => void;
-  setCodexFastMode: (
-    threadId: ThreadId,
-    enabled: boolean | null | undefined,
-  ) => void;
+  setEffort: (threadId: ThreadId, effort: CodexReasoningEffort | null | undefined) => void;
+  setCodexFastMode: (threadId: ThreadId, enabled: boolean | null | undefined) => void;
   addImage: (threadId: ThreadId, image: ComposerImageAttachment) => void;
   addImages: (threadId: ThreadId, images: ComposerImageAttachment[]) => void;
   removeImage: (threadId: ThreadId, imageId: string) => void;
@@ -201,11 +216,7 @@ interface ComposerDraftStoreState {
   ) => void;
   removeQueuedMessage: (threadId: ThreadId, queuedMessageId: string) => void;
   promoteQueuedMessage: (threadId: ThreadId, queuedMessageId: string) => void;
-  moveQueuedMessage: (
-    threadId: ThreadId,
-    fromIndex: number,
-    toIndex: number,
-  ) => void;
+  moveQueuedMessage: (threadId: ThreadId, fromIndex: number, toIndex: number) => void;
   consumeQueuedMessage: (threadId: ThreadId, queuedMessageId: string) => void;
   loadQueuedMessageIntoComposer: (
     threadId: ThreadId,
@@ -303,9 +314,7 @@ function revokeObjectPreviewUrl(previewUrl: string): void {
   URL.revokeObjectURL(previewUrl);
 }
 
-function normalizePersistedAttachment(
-  value: unknown,
-): PersistedComposerImageAttachment | null {
+function normalizePersistedAttachment(value: unknown): PersistedComposerImageAttachment | null {
   if (!value || typeof value !== "object") {
     return null;
   }
@@ -367,20 +376,16 @@ function normalizePersistedQueuedComposerMessageState(
       ? normalizeModelSlug(candidate.model, provider ?? "codex")
       : null;
   const runtimeMode =
-    candidate.runtimeMode === "approval-required" ||
-    candidate.runtimeMode === "full-access"
+    candidate.runtimeMode === "approval-required" || candidate.runtimeMode === "full-access"
       ? candidate.runtimeMode
       : null;
   const interactionMode =
-    candidate.interactionMode === "plan" ||
-    candidate.interactionMode === "default"
+    candidate.interactionMode === "plan" || candidate.interactionMode === "default"
       ? candidate.interactionMode
       : null;
-  const effortCandidate =
-    typeof candidate.effort === "string" ? candidate.effort : null;
+  const effortCandidate = typeof candidate.effort === "string" ? candidate.effort : null;
   const effort =
-    effortCandidate &&
-    REASONING_EFFORT_VALUES.has(effortCandidate as CodexReasoningEffort)
+    effortCandidate && REASONING_EFFORT_VALUES.has(effortCandidate as CodexReasoningEffort)
       ? (effortCandidate as CodexReasoningEffort)
       : null;
   const codexFastMode = candidate.codexFastMode === true;
@@ -408,9 +413,7 @@ function normalizeDraftThreadEnvMode(
   return fallbackWorktreePath ? "worktree" : "local";
 }
 
-function normalizePersistedComposerDraftState(
-  value: unknown,
-): PersistedComposerDraftStoreState {
+function normalizePersistedComposerDraftState(value: unknown): PersistedComposerDraftStoreState {
   if (!value || typeof value !== "object") {
     return EMPTY_PERSISTED_DRAFT_STORE_STATE;
   }
@@ -418,14 +421,9 @@ function normalizePersistedComposerDraftState(
   const rawDraftMap = candidate.draftsByThreadId;
   const rawQueuedMessagesByThreadId = candidate.queuedMessagesByThreadId;
   const rawDraftThreadsByThreadId = candidate.draftThreadsByThreadId;
-  const rawProjectDraftThreadIdByProjectId =
-    candidate.projectDraftThreadIdByProjectId;
-  const draftThreadsByThreadId: PersistedComposerDraftStoreState["draftThreadsByThreadId"] =
-    {};
-  if (
-    rawDraftThreadsByThreadId &&
-    typeof rawDraftThreadsByThreadId === "object"
-  ) {
+  const rawProjectDraftThreadIdByProjectId = candidate.projectDraftThreadIdByProjectId;
+  const draftThreadsByThreadId: PersistedComposerDraftStoreState["draftThreadsByThreadId"] = {};
+  if (rawDraftThreadsByThreadId && typeof rawDraftThreadsByThreadId === "object") {
     for (const [threadId, rawDraftThread] of Object.entries(
       rawDraftThreadsByThreadId as Record<string, unknown>,
     )) {
@@ -440,8 +438,7 @@ function normalizePersistedComposerDraftState(
       const createdAt = candidateDraftThread.createdAt;
       const branch = candidateDraftThread.branch;
       const worktreePath = candidateDraftThread.worktreePath;
-      const normalizedWorktreePath =
-        typeof worktreePath === "string" ? worktreePath : null;
+      const normalizedWorktreePath = typeof worktreePath === "string" ? worktreePath : null;
       if (typeof projectId !== "string" || projectId.length === 0) {
         continue;
       }
@@ -463,10 +460,7 @@ function normalizePersistedComposerDraftState(
             : DEFAULT_INTERACTION_MODE,
         branch: typeof branch === "string" ? branch : null,
         worktreePath: normalizedWorktreePath,
-        envMode: normalizeDraftThreadEnvMode(
-          candidateDraftThread.envMode,
-          normalizedWorktreePath,
-        ),
+        envMode: normalizeDraftThreadEnvMode(candidateDraftThread.envMode, normalizedWorktreePath),
       };
     }
   }
@@ -485,8 +479,7 @@ function normalizePersistedComposerDraftState(
         typeof threadId === "string" &&
         threadId.length > 0
       ) {
-        projectDraftThreadIdByProjectId[projectId as ProjectId] =
-          threadId as ThreadId;
+        projectDraftThreadIdByProjectId[projectId as ProjectId] = threadId as ThreadId;
         if (!draftThreadsByThreadId[threadId as ThreadId]) {
           draftThreadsByThreadId[threadId as ThreadId] = {
             projectId: projectId as ProjectId,
@@ -497,9 +490,7 @@ function normalizePersistedComposerDraftState(
             worktreePath: null,
             envMode: "local",
           };
-        } else if (
-          draftThreadsByThreadId[threadId as ThreadId]?.projectId !== projectId
-        ) {
+        } else if (draftThreadsByThreadId[threadId as ThreadId]?.projectId !== projectId) {
           draftThreadsByThreadId[threadId as ThreadId] = {
             ...draftThreadsByThreadId[threadId as ThreadId]!,
             projectId: projectId as ProjectId,
@@ -508,12 +499,9 @@ function normalizePersistedComposerDraftState(
       }
     }
   }
-  const nextDraftsByThreadId: PersistedComposerDraftStoreState["draftsByThreadId"] =
-    {};
+  const nextDraftsByThreadId: PersistedComposerDraftStoreState["draftsByThreadId"] = {};
   if (rawDraftMap && typeof rawDraftMap === "object") {
-    for (const [threadId, draftValue] of Object.entries(
-      rawDraftMap as Record<string, unknown>,
-    )) {
+    for (const [threadId, draftValue] of Object.entries(rawDraftMap as Record<string, unknown>)) {
       if (typeof threadId !== "string" || threadId.length === 0) {
         continue;
       }
@@ -521,8 +509,7 @@ function normalizePersistedComposerDraftState(
         continue;
       }
       const draftCandidate = draftValue as Record<string, unknown>;
-      const prompt =
-        typeof draftCandidate.prompt === "string" ? draftCandidate.prompt : "";
+      const prompt = typeof draftCandidate.prompt === "string" ? draftCandidate.prompt : "";
       const attachments = Array.isArray(draftCandidate.attachments)
         ? draftCandidate.attachments.flatMap((entry) => {
             const normalized = normalizePersistedAttachment(entry);
@@ -540,23 +527,18 @@ function normalizePersistedComposerDraftState(
           ? draftCandidate.runtimeMode
           : null;
       const interactionMode =
-        draftCandidate.interactionMode === "plan" ||
-        draftCandidate.interactionMode === "default"
+        draftCandidate.interactionMode === "plan" || draftCandidate.interactionMode === "default"
           ? draftCandidate.interactionMode
           : null;
       const effortCandidate =
-        typeof draftCandidate.effort === "string"
-          ? draftCandidate.effort
-          : null;
+        typeof draftCandidate.effort === "string" ? draftCandidate.effort : null;
       const effort =
-        effortCandidate &&
-        REASONING_EFFORT_VALUES.has(effortCandidate as CodexReasoningEffort)
+        effortCandidate && REASONING_EFFORT_VALUES.has(effortCandidate as CodexReasoningEffort)
           ? (effortCandidate as CodexReasoningEffort)
           : null;
       const codexFastMode =
         draftCandidate.codexFastMode === true ||
-        (typeof draftCandidate.serviceTier === "string" &&
-          draftCandidate.serviceTier === "fast");
+        (typeof draftCandidate.serviceTier === "string" && draftCandidate.serviceTier === "fast");
       if (
         prompt.length === 0 &&
         attachments.length === 0 &&
@@ -581,12 +563,8 @@ function normalizePersistedComposerDraftState(
       };
     }
   }
-  const queuedMessagesByThreadId: PersistedComposerDraftStoreState["queuedMessagesByThreadId"] =
-    {};
-  if (
-    rawQueuedMessagesByThreadId &&
-    typeof rawQueuedMessagesByThreadId === "object"
-  ) {
+  const queuedMessagesByThreadId: PersistedComposerDraftStoreState["queuedMessagesByThreadId"] = {};
+  if (rawQueuedMessagesByThreadId && typeof rawQueuedMessagesByThreadId === "object") {
     for (const [threadId, rawQueue] of Object.entries(
       rawQueuedMessagesByThreadId as Record<string, unknown>,
     )) {
@@ -614,18 +592,14 @@ function normalizePersistedComposerDraftState(
   };
 }
 
-function parsePersistedDraftStateRaw(
-  raw: string | null,
-): PersistedComposerDraftStoreState {
+function parsePersistedDraftStateRaw(raw: string | null): PersistedComposerDraftStoreState {
   if (!raw) {
     return EMPTY_PERSISTED_DRAFT_STORE_STATE;
   }
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (parsed && typeof parsed === "object" && "state" in parsed) {
-      return normalizePersistedComposerDraftState(
-        (parsed as { state?: unknown }).state,
-      );
+      return normalizePersistedComposerDraftState((parsed as { state?: unknown }).state);
     }
     return normalizePersistedComposerDraftState(parsed);
   } catch {
@@ -652,12 +626,8 @@ function hydreatePersistedComposerImageAttachment(
   attachment: PersistedComposerImageAttachment,
 ): File | null {
   const commaIndex = attachment.dataUrl.indexOf(",");
-  const header =
-    commaIndex === -1
-      ? attachment.dataUrl
-      : attachment.dataUrl.slice(0, commaIndex);
-  const payload =
-    commaIndex === -1 ? "" : attachment.dataUrl.slice(commaIndex + 1);
+  const header = commaIndex === -1 ? attachment.dataUrl : attachment.dataUrl.slice(0, commaIndex);
+  const payload = commaIndex === -1 ? "" : attachment.dataUrl.slice(commaIndex + 1);
   if (payload.length === 0) {
     return null;
   }
@@ -813,22 +783,16 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
         }
         set((state) => {
           const existingThread = state.draftThreadsByThreadId[threadId];
-          const previousThreadIdForProject =
-            state.projectDraftThreadIdByProjectId[projectId];
+          const previousThreadIdForProject = state.projectDraftThreadIdByProjectId[projectId];
           const nextWorktreePath =
             options?.worktreePath === undefined
               ? (existingThread?.worktreePath ?? null)
               : (options.worktreePath ?? null);
           const nextDraftThread: DraftThreadState = {
             projectId,
-            createdAt:
-              options?.createdAt ??
-              existingThread?.createdAt ??
-              new Date().toISOString(),
+            createdAt: options?.createdAt ?? existingThread?.createdAt ?? new Date().toISOString(),
             runtimeMode:
-              options?.runtimeMode ??
-              existingThread?.runtimeMode ??
-              DEFAULT_RUNTIME_MODE,
+              options?.runtimeMode ?? existingThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE,
             interactionMode:
               options?.interactionMode ??
               existingThread?.interactionMode ??
@@ -840,9 +804,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             worktreePath: nextWorktreePath,
             envMode:
               options?.envMode ??
-              (nextWorktreePath
-                ? "worktree"
-                : (existingThread?.envMode ?? "local")),
+              (nextWorktreePath ? "worktree" : (existingThread?.envMode ?? "local")),
           };
           const hasSameProjectMapping = previousThreadIdForProject === threadId;
           const hasSameDraftThread =
@@ -850,46 +812,34 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             existingThread.projectId === nextDraftThread.projectId &&
             existingThread.createdAt === nextDraftThread.createdAt &&
             existingThread.runtimeMode === nextDraftThread.runtimeMode &&
-            existingThread.interactionMode ===
-              nextDraftThread.interactionMode &&
+            existingThread.interactionMode === nextDraftThread.interactionMode &&
             existingThread.branch === nextDraftThread.branch &&
             existingThread.worktreePath === nextDraftThread.worktreePath &&
             existingThread.envMode === nextDraftThread.envMode;
           if (hasSameProjectMapping && hasSameDraftThread) {
             return state;
           }
-          const nextProjectDraftThreadIdByProjectId: Record<
-            ProjectId,
-            ThreadId
-          > = {
+          const nextProjectDraftThreadIdByProjectId: Record<ProjectId, ThreadId> = {
             ...state.projectDraftThreadIdByProjectId,
             [projectId]: threadId,
           };
-          const nextDraftThreadsByThreadId: Record<ThreadId, DraftThreadState> =
-            {
-              ...state.draftThreadsByThreadId,
-              [threadId]: nextDraftThread,
-            };
+          const nextDraftThreadsByThreadId: Record<ThreadId, DraftThreadState> = {
+            ...state.draftThreadsByThreadId,
+            [threadId]: nextDraftThread,
+          };
           let nextDraftsByThreadId = state.draftsByThreadId;
           let nextQueuedMessagesByThreadId = state.queuedMessagesByThreadId;
           if (
             previousThreadIdForProject &&
             previousThreadIdForProject !== threadId &&
-            !Object.values(nextProjectDraftThreadIdByProjectId).includes(
-              previousThreadIdForProject,
-            )
+            !Object.values(nextProjectDraftThreadIdByProjectId).includes(previousThreadIdForProject)
           ) {
             delete nextDraftThreadsByThreadId[previousThreadIdForProject];
-            if (
-              state.draftsByThreadId[previousThreadIdForProject] !== undefined
-            ) {
+            if (state.draftsByThreadId[previousThreadIdForProject] !== undefined) {
               nextDraftsByThreadId = { ...state.draftsByThreadId };
               delete nextDraftsByThreadId[previousThreadIdForProject];
             }
-            if (
-              state.queuedMessagesByThreadId[previousThreadIdForProject] !==
-              undefined
-            ) {
+            if (state.queuedMessagesByThreadId[previousThreadIdForProject] !== undefined) {
               revokeComposerImages(
                 state.queuedMessagesByThreadId[previousThreadIdForProject]!.flatMap(
                   (queuedMessage) => queuedMessage.images,
@@ -905,8 +855,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             draftsByThreadId: nextDraftsByThreadId,
             queuedMessagesByThreadId: nextQueuedMessagesByThreadId,
             draftThreadsByThreadId: nextDraftThreadsByThreadId,
-            projectDraftThreadIdByProjectId:
-              nextProjectDraftThreadIdByProjectId,
+            projectDraftThreadIdByProjectId: nextProjectDraftThreadIdByProjectId,
           };
         });
       },
@@ -934,16 +883,11 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
                 ? existing.createdAt
                 : options.createdAt || existing.createdAt,
             runtimeMode: options.runtimeMode ?? existing.runtimeMode,
-            interactionMode:
-              options.interactionMode ?? existing.interactionMode,
-            branch:
-              options.branch === undefined
-                ? existing.branch
-                : (options.branch ?? null),
+            interactionMode: options.interactionMode ?? existing.interactionMode,
+            branch: options.branch === undefined ? existing.branch : (options.branch ?? null),
             worktreePath: nextWorktreePath,
             envMode:
-              options.envMode ??
-              (nextWorktreePath ? "worktree" : (existing.envMode ?? "local")),
+              options.envMode ?? (nextWorktreePath ? "worktree" : (existing.envMode ?? "local")),
           };
           const isUnchanged =
             nextDraftThread.projectId === existing.projectId &&
@@ -956,18 +900,12 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           if (isUnchanged) {
             return state;
           }
-          const nextProjectDraftThreadIdByProjectId: Record<
-            ProjectId,
-            ThreadId
-          > = {
+          const nextProjectDraftThreadIdByProjectId: Record<ProjectId, ThreadId> = {
             ...state.projectDraftThreadIdByProjectId,
             [nextProjectId]: threadId,
           };
           if (existing.projectId !== nextProjectId) {
-            if (
-              nextProjectDraftThreadIdByProjectId[existing.projectId] ===
-              threadId
-            ) {
+            if (nextProjectDraftThreadIdByProjectId[existing.projectId] === threadId) {
               delete nextProjectDraftThreadIdByProjectId[existing.projectId];
             }
           }
@@ -976,8 +914,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
               ...state.draftThreadsByThreadId,
               [threadId]: nextDraftThread,
             },
-            projectDraftThreadIdByProjectId:
-              nextProjectDraftThreadIdByProjectId,
+            projectDraftThreadIdByProjectId: nextProjectDraftThreadIdByProjectId,
           };
         });
       },
@@ -992,14 +929,10 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           }
           const { [projectId]: _removed, ...restProjectMappingsRaw } =
             state.projectDraftThreadIdByProjectId;
-          const restProjectMappings = restProjectMappingsRaw as Record<
-            ProjectId,
-            ThreadId
-          >;
-          const nextDraftThreadsByThreadId: Record<ThreadId, DraftThreadState> =
-            {
-              ...state.draftThreadsByThreadId,
-            };
+          const restProjectMappings = restProjectMappingsRaw as Record<ProjectId, ThreadId>;
+          const nextDraftThreadsByThreadId: Record<ThreadId, DraftThreadState> = {
+            ...state.draftThreadsByThreadId,
+          };
           let nextDraftsByThreadId = state.draftsByThreadId;
           let nextQueuedMessagesByThreadId = state.queuedMessagesByThreadId;
           if (!Object.values(restProjectMappings).includes(threadId)) {
@@ -1038,14 +971,10 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           }
           const { [projectId]: _removed, ...restProjectMappingsRaw } =
             state.projectDraftThreadIdByProjectId;
-          const restProjectMappings = restProjectMappingsRaw as Record<
-            ProjectId,
-            ThreadId
-          >;
-          const nextDraftThreadsByThreadId: Record<ThreadId, DraftThreadState> =
-            {
-              ...state.draftThreadsByThreadId,
-            };
+          const restProjectMappings = restProjectMappingsRaw as Record<ProjectId, ThreadId>;
+          const nextDraftThreadsByThreadId: Record<ThreadId, DraftThreadState> = {
+            ...state.draftThreadsByThreadId,
+          };
           let nextDraftsByThreadId = state.draftsByThreadId;
           let nextQueuedMessagesByThreadId = state.queuedMessagesByThreadId;
           if (!Object.values(restProjectMappings).includes(threadId)) {
@@ -1079,40 +1008,31 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           return;
         }
         set((state) => {
-          const hasDraftThread =
-            state.draftThreadsByThreadId[threadId] !== undefined;
-          const hasQueuedMessages =
-            state.queuedMessagesByThreadId[threadId] !== undefined;
-          const hasProjectMapping = Object.values(
-            state.projectDraftThreadIdByProjectId,
-          ).includes(threadId);
+          const hasDraftThread = state.draftThreadsByThreadId[threadId] !== undefined;
+          const hasQueuedMessages = state.queuedMessagesByThreadId[threadId] !== undefined;
+          const hasProjectMapping = Object.values(state.projectDraftThreadIdByProjectId).includes(
+            threadId,
+          );
           if (!hasDraftThread && !hasQueuedMessages && !hasProjectMapping) {
             return state;
           }
           const queuedMessages = state.queuedMessagesByThreadId[threadId];
           if (queuedMessages) {
-            revokeComposerImages(
-              queuedMessages.flatMap((queuedMessage) => queuedMessage.images),
-            );
+            revokeComposerImages(queuedMessages.flatMap((queuedMessage) => queuedMessage.images));
           }
           const nextProjectDraftThreadIdByProjectId = Object.fromEntries(
             Object.entries(state.projectDraftThreadIdByProjectId).filter(
               ([, draftThreadId]) => draftThreadId !== threadId,
             ),
           ) as Record<ProjectId, ThreadId>;
-          const {
-            [threadId]: _removedDraftThread,
-            ...restDraftThreadsByThreadId
-          } = state.draftThreadsByThreadId;
-          const {
-            [threadId]: _removedQueuedMessages,
-            ...restQueuedMessagesByThreadId
-          } = state.queuedMessagesByThreadId;
+          const { [threadId]: _removedDraftThread, ...restDraftThreadsByThreadId } =
+            state.draftThreadsByThreadId;
+          const { [threadId]: _removedQueuedMessages, ...restQueuedMessagesByThreadId } =
+            state.queuedMessagesByThreadId;
           return {
             queuedMessagesByThreadId: restQueuedMessagesByThreadId,
             draftThreadsByThreadId: restDraftThreadsByThreadId,
-            projectDraftThreadIdByProjectId:
-              nextProjectDraftThreadIdByProjectId,
+            projectDraftThreadIdByProjectId: nextProjectDraftThreadIdByProjectId,
           };
         });
       },
@@ -1121,8 +1041,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           return;
         }
         set((state) => {
-          const existing =
-            state.draftsByThreadId[threadId] ?? createEmptyThreadDraft();
+          const existing = state.draftsByThreadId[threadId] ?? createEmptyThreadDraft();
           const nextDraft: ComposerThreadDraftState = {
             ...existing,
             prompt,
@@ -1195,9 +1114,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           return;
         }
         const nextRuntimeMode =
-          runtimeMode === "approval-required" || runtimeMode === "full-access"
-            ? runtimeMode
-            : null;
+          runtimeMode === "approval-required" || runtimeMode === "full-access" ? runtimeMode : null;
         set((state) => {
           const existing = state.draftsByThreadId[threadId];
           if (!existing && nextRuntimeMode === null) {
@@ -1225,9 +1142,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           return;
         }
         const nextInteractionMode =
-          interactionMode === "plan" || interactionMode === "default"
-            ? interactionMode
-            : null;
+          interactionMode === "plan" || interactionMode === "default" ? interactionMode : null;
         set((state) => {
           const existing = state.draftsByThreadId[threadId];
           if (!existing && nextInteractionMode === null) {
@@ -1320,15 +1235,12 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           return;
         }
         set((state) => {
-          const existing =
-            state.draftsByThreadId[threadId] ?? createEmptyThreadDraft();
+          const existing = state.draftsByThreadId[threadId] ?? createEmptyThreadDraft();
           const existingIds = new Set(existing.images.map((image) => image.id));
           const existingDedupKeys = new Set(
             existing.images.map((image) => composerImageDedupKey(image)),
           );
-          const acceptedPreviewUrls = new Set(
-            existing.images.map((image) => image.previewUrl),
-          );
+          const acceptedPreviewUrls = new Set(existing.images.map((image) => image.previewUrl));
           const dedupedIncoming: ComposerImageAttachment[] = [];
           for (const image of images) {
             const dedupKey = composerImageDedupKey(image);
@@ -1366,9 +1278,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
         if (!existing) {
           return;
         }
-        const removedImage = existing.images.find(
-          (image) => image.id === imageId,
-        );
+        const removedImage = existing.images.find((image) => image.id === imageId);
         if (removedImage) {
           revokeObjectPreviewUrl(removedImage.previewUrl);
         }
@@ -1380,9 +1290,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           const nextDraft: ComposerThreadDraftState = {
             ...current,
             images: current.images.filter((image) => image.id !== imageId),
-            nonPersistedImageIds: current.nonPersistedImageIds.filter(
-              (id) => id !== imageId,
-            ),
+            nonPersistedImageIds: current.nonPersistedImageIds.filter((id) => id !== imageId),
             persistedAttachments: current.persistedAttachments.filter(
               (attachment) => attachment.id !== imageId,
             ),
@@ -1423,9 +1331,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
         if (threadId.length === 0) {
           return;
         }
-        const attachmentIdSet = new Set(
-          attachments.map((attachment) => attachment.id),
-        );
+        const attachmentIdSet = new Set(attachments.map((attachment) => attachment.id));
         set((state) => {
           const current = state.draftsByThreadId[threadId];
           if (!current) {
@@ -1448,9 +1354,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           return { draftsByThreadId: nextDraftsByThreadId };
         });
         Promise.resolve().then(() => {
-          const persistedIdSet = new Set(
-            readPersistedAttachmentIdsFromStorage(threadId),
-          );
+          const persistedIdSet = new Set(readPersistedAttachmentIdsFromStorage(threadId));
           set((state) => {
             const current = state.draftsByThreadId[threadId];
             if (!current) {
@@ -1458,9 +1362,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             }
             const imageIdSet = new Set(current.images.map((image) => image.id));
             const persistedAttachments = attachments.filter(
-              (attachment) =>
-                imageIdSet.has(attachment.id) &&
-                persistedIdSet.has(attachment.id),
+              (attachment) => imageIdSet.has(attachment.id) && persistedIdSet.has(attachment.id),
             );
             const nonPersistedImageIds = current.images
               .map((image) => image.id)
@@ -1571,11 +1473,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
         });
       },
       moveQueuedMessage: (threadId, fromIndex, toIndex) => {
-        if (
-          threadId.length === 0 ||
-          !Number.isInteger(fromIndex) ||
-          !Number.isInteger(toIndex)
-        ) {
+        if (threadId.length === 0 || !Number.isInteger(fromIndex) || !Number.isInteger(toIndex)) {
           return;
         }
         set((state) => {
@@ -1662,9 +1560,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             options.swapComposerContent &&
             currentDraft !== null &&
             hasSendableDraftContent(currentDraft);
-          const nextQueue = existingQueue.filter(
-            (entry) => entry.id !== queuedMessageId,
-          );
+          const nextQueue = existingQueue.filter((entry) => entry.id !== queuedMessageId);
           if (currentDraft && !shouldSwapComposerContent) {
             revokeComposerImages(currentDraft.images);
           }
@@ -1747,40 +1643,24 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
         }
         const queuedMessages = get().queuedMessagesByThreadId[threadId];
         if (queuedMessages) {
-          revokeComposerImages(
-            queuedMessages.flatMap((queuedMessage) => queuedMessage.images),
-          );
+          revokeComposerImages(queuedMessages.flatMap((queuedMessage) => queuedMessage.images));
         }
         set((state) => {
-          const hasComposerDraft =
-            state.draftsByThreadId[threadId] !== undefined;
-          const hasQueuedMessages =
-            state.queuedMessagesByThreadId[threadId] !== undefined;
-          const hasDraftThread =
-            state.draftThreadsByThreadId[threadId] !== undefined;
-          const hasProjectMapping = Object.values(
-            state.projectDraftThreadIdByProjectId,
-          ).includes(threadId);
-          if (
-            !hasComposerDraft &&
-            !hasQueuedMessages &&
-            !hasDraftThread &&
-            !hasProjectMapping
-          ) {
+          const hasComposerDraft = state.draftsByThreadId[threadId] !== undefined;
+          const hasQueuedMessages = state.queuedMessagesByThreadId[threadId] !== undefined;
+          const hasDraftThread = state.draftThreadsByThreadId[threadId] !== undefined;
+          const hasProjectMapping = Object.values(state.projectDraftThreadIdByProjectId).includes(
+            threadId,
+          );
+          if (!hasComposerDraft && !hasQueuedMessages && !hasDraftThread && !hasProjectMapping) {
             return state;
           }
-          const {
-            [threadId]: _removedComposerDraft,
-            ...restComposerDraftsByThreadId
-          } = state.draftsByThreadId;
-          const {
-            [threadId]: _removedQueuedMessages,
-            ...restQueuedMessagesByThreadId
-          } = state.queuedMessagesByThreadId;
-          const {
-            [threadId]: _removedDraftThread,
-            ...restDraftThreadsByThreadId
-          } = state.draftThreadsByThreadId;
+          const { [threadId]: _removedComposerDraft, ...restComposerDraftsByThreadId } =
+            state.draftsByThreadId;
+          const { [threadId]: _removedQueuedMessages, ...restQueuedMessagesByThreadId } =
+            state.queuedMessagesByThreadId;
+          const { [threadId]: _removedDraftThread, ...restDraftThreadsByThreadId } =
+            state.draftThreadsByThreadId;
           const nextProjectDraftThreadIdByProjectId = Object.fromEntries(
             Object.entries(state.projectDraftThreadIdByProjectId).filter(
               ([, draftThreadId]) => draftThreadId !== threadId,
@@ -1790,8 +1670,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             draftsByThreadId: restComposerDraftsByThreadId,
             queuedMessagesByThreadId: restQueuedMessagesByThreadId,
             draftThreadsByThreadId: restDraftThreadsByThreadId,
-            projectDraftThreadIdByProjectId:
-              nextProjectDraftThreadIdByProjectId,
+            projectDraftThreadIdByProjectId: nextProjectDraftThreadIdByProjectId,
           };
         });
       },
@@ -1799,13 +1678,10 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
     {
       name: COMPOSER_DRAFT_STORAGE_KEY,
       version: 1,
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() => composerDebouncedStorage),
       partialize: (state) => {
-        const persistedDraftsByThreadId: PersistedComposerDraftStoreState["draftsByThreadId"] =
-          {};
-        for (const [threadId, draft] of Object.entries(
-          state.draftsByThreadId,
-        )) {
+        const persistedDraftsByThreadId: PersistedComposerDraftStoreState["draftsByThreadId"] = {};
+        for (const [threadId, draft] of Object.entries(state.draftsByThreadId)) {
           if (typeof threadId !== "string" || threadId.length === 0) {
             continue;
           }
@@ -1847,9 +1723,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
         }
         const persistedQueuedMessagesByThreadId: PersistedComposerDraftStoreState["queuedMessagesByThreadId"] =
           {};
-        for (const [threadId, queuedMessages] of Object.entries(
-          state.queuedMessagesByThreadId,
-        )) {
+        for (const [threadId, queuedMessages] of Object.entries(state.queuedMessagesByThreadId)) {
           if (typeof threadId !== "string" || threadId.length === 0) {
             continue;
           }
@@ -1859,50 +1733,58 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           if (persistedQueue.length === 0) {
             continue;
           }
-          persistedQueuedMessagesByThreadId[threadId as ThreadId] =
-            persistedQueue;
+          persistedQueuedMessagesByThreadId[threadId as ThreadId] = persistedQueue;
         }
         return {
           draftsByThreadId: persistedDraftsByThreadId,
           queuedMessagesByThreadId: persistedQueuedMessagesByThreadId,
           draftThreadsByThreadId: state.draftThreadsByThreadId,
-          projectDraftThreadIdByProjectId:
-            state.projectDraftThreadIdByProjectId,
+          projectDraftThreadIdByProjectId: state.projectDraftThreadIdByProjectId,
         };
       },
       merge: (persistedState, currentState) => {
-        const normalizedPersisted =
-          normalizePersistedComposerDraftState(persistedState);
+        const normalizedPersisted = normalizePersistedComposerDraftState(persistedState);
         const draftsByThreadId = Object.fromEntries(
-          Object.entries(normalizedPersisted.draftsByThreadId).map(
-            ([threadId, draft]) => [threadId, toHydratedThreadDraft(draft)],
-          ),
+          Object.entries(normalizedPersisted.draftsByThreadId).map(([threadId, draft]) => [
+            threadId,
+            toHydratedThreadDraft(draft),
+          ]),
         );
         const queuedMessagesByThreadId = Object.fromEntries(
-          Object.entries(normalizedPersisted.queuedMessagesByThreadId).map(
-            ([threadId, queue]) => [
-              threadId,
-              queue.map((queuedMessage) => toHydratedQueuedMessage(queuedMessage)),
-            ],
-          ),
+          Object.entries(normalizedPersisted.queuedMessagesByThreadId).map(([threadId, queue]) => [
+            threadId,
+            queue.map((queuedMessage) => toHydratedQueuedMessage(queuedMessage)),
+          ]),
         );
         return {
           ...currentState,
           draftsByThreadId,
           queuedMessagesByThreadId,
           draftThreadsByThreadId: normalizedPersisted.draftThreadsByThreadId,
-          projectDraftThreadIdByProjectId:
-            normalizedPersisted.projectDraftThreadIdByProjectId,
+          projectDraftThreadIdByProjectId: normalizedPersisted.projectDraftThreadIdByProjectId,
         };
       },
     },
   ),
 );
 
-export function useComposerThreadDraft(
-  threadId: ThreadId,
-): ComposerThreadDraftState {
-  return useComposerDraftStore(
-    (state) => state.draftsByThreadId[threadId] ?? EMPTY_THREAD_DRAFT,
-  );
+export function useComposerThreadDraft(threadId: ThreadId): ComposerThreadDraftState {
+  return useComposerDraftStore((state) => state.draftsByThreadId[threadId] ?? EMPTY_THREAD_DRAFT);
+}
+
+/**
+ * Clear draft threads that have been promoted to server threads.
+ *
+ * Call this after a snapshot sync so the route guard in `_chat.$threadId`
+ * sees the server thread before the draft is removed — avoids a redirect
+ * to `/` caused by a gap where neither draft nor server thread exists.
+ */
+export function clearPromotedDraftThreads(serverThreadIds: ReadonlySet<ThreadId>): void {
+  const store = useComposerDraftStore.getState();
+  const draftThreadIds = Object.keys(store.draftThreadsByThreadId) as ThreadId[];
+  for (const draftId of draftThreadIds) {
+    if (serverThreadIds.has(draftId)) {
+      store.clearDraftThread(draftId);
+    }
+  }
 }

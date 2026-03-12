@@ -1,9 +1,4 @@
-import {
-  EventId,
-  ProjectId,
-  ThreadId,
-  TurnId,
-} from "@t3tools/contracts";
+import { EventId, ProjectId, ThreadId, TurnId } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
 import { canAutoDispatchQueuedTurn, queuedMessagePreview } from "./queuedTurns";

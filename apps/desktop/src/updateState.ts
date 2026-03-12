@@ -24,9 +24,7 @@ export function nextStatusAfterDownloadFailure(
   return currentState.availableVersion ? "available" : "error";
 }
 
-export function getCanRetryAfterDownloadFailure(
-  currentState: DesktopUpdateState,
-): boolean {
+export function getCanRetryAfterDownloadFailure(currentState: DesktopUpdateState): boolean {
   return currentState.availableVersion !== null;
 }
 

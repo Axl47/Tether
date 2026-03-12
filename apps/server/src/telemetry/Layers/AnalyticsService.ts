@@ -8,17 +8,10 @@
  */
 
 import { Config, DateTime, Effect, Layer, Ref } from "effect";
-import {
-  HttpClient,
-  HttpClientRequest,
-  HttpClientResponse,
-} from "effect/unstable/http";
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 
 import { ServerConfig } from "../../config.ts";
-import {
-  AnalyticsService,
-  type AnalyticsServiceShape,
-} from "../Services/AnalyticsService.ts";
+import { AnalyticsService, type AnalyticsServiceShape } from "../Services/AnalyticsService.ts";
 import { getTelemetryIdentifier } from "../Identify.ts";
 import { version } from "../../../package.json" with { type: "json" };
 
@@ -35,12 +28,8 @@ const TelemetryEnvConfig = Config.all({
   posthogHost: Config.string("TETHER_POSTHOG_HOST").pipe(
     Config.withDefault("https://us.i.posthog.com"),
   ),
-  enabled: Config.boolean("TETHER_TELEMETRY_ENABLED").pipe(
-    Config.withDefault(true),
-  ),
-  flushBatchSize: Config.number("TETHER_TELEMETRY_FLUSH_BATCH_SIZE").pipe(
-    Config.withDefault(20),
-  ),
+  enabled: Config.boolean("TETHER_TELEMETRY_ENABLED").pipe(Config.withDefault(true)),
+  flushBatchSize: Config.number("TETHER_TELEMETRY_FLUSH_BATCH_SIZE").pipe(Config.withDefault(20)),
   maxBufferedEvents: Config.number("TETHER_TELEMETRY_MAX_BUFFERED_EVENTS").pipe(
     Config.withDefault(1_000),
   ),
@@ -52,13 +41,9 @@ const makeAnalyticsService = Effect.gen(function* () {
   const serverConfig = yield* ServerConfig;
   const identifier = yield* getTelemetryIdentifier;
   const bufferRef = yield* Ref.make<ReadonlyArray<BufferedAnalyticsEvent>>([]);
-  const clientType =
-    serverConfig.mode === "desktop" ? "desktop-app" : "cli-web-client";
+  const clientType = serverConfig.mode === "desktop" ? "desktop-app" : "cli-web-client";
 
-  const enqueueBufferedEvent = (
-    event: string,
-    properties?: Readonly<Record<string, unknown>>,
-  ) =>
+  const enqueueBufferedEvent = (event: string, properties?: Readonly<Record<string, unknown>>) =>
     Effect.flatMap(DateTime.now, (now) =>
       Ref.modify(bufferRef, (current) => {
         const appended = [
@@ -72,9 +57,7 @@ const makeAnalyticsService = Effect.gen(function* () {
 
         const next =
           appended.length > telemetryConfig.maxBufferedEvents
-            ? appended.slice(
-                appended.length - telemetryConfig.maxBufferedEvents,
-              )
+            ? appended.slice(appended.length - telemetryConfig.maxBufferedEvents)
             : appended;
 
         return [
@@ -109,9 +92,7 @@ const makeAnalyticsService = Effect.gen(function* () {
         })),
       };
 
-      yield* HttpClientRequest.post(
-        `${telemetryConfig.posthogHost}/batch/`,
-      ).pipe(
+      yield* HttpClientRequest.post(`${telemetryConfig.posthogHost}/batch/`).pipe(
         HttpClientRequest.bodyJson(payload),
         Effect.flatMap(httpClient.execute),
         Effect.flatMap(HttpClientResponse.filterStatusOk),
@@ -122,10 +103,7 @@ const makeAnalyticsService = Effect.gen(function* () {
     while (true) {
       const batch = yield* Ref.modify(bufferRef, (current) => {
         if (current.length === 0) {
-          return [
-            [] as ReadonlyArray<BufferedAnalyticsEvent>,
-            current,
-          ] as const;
+          return [[] as ReadonlyArray<BufferedAnalyticsEvent>, current] as const;
         }
         const nextBatch = current.slice(0, telemetryConfig.flushBatchSize);
         const remaining = current.slice(nextBatch.length);
@@ -144,25 +122,19 @@ const makeAnalyticsService = Effect.gen(function* () {
         ),
       );
     }
-  }).pipe(
-    Effect.catch((cause) =>
-      Effect.logError("Failed to flush telemetry", { cause }),
-    ),
-  );
+  }).pipe(Effect.catch((cause) => Effect.logError("Failed to flush telemetry", { cause })));
 
-  const record: AnalyticsServiceShape["record"] = Effect.fnUntraced(
-    function* (event, properties) {
-      if (!telemetryConfig.enabled || !identifier) return;
+  const record: AnalyticsServiceShape["record"] = Effect.fnUntraced(function* (event, properties) {
+    if (!telemetryConfig.enabled || !identifier) return;
 
-      const enqueueResult = yield* enqueueBufferedEvent(event, properties);
-      if (enqueueResult.dropped) {
-        yield* Effect.logDebug("analytics buffer full; dropping oldest event", {
-          size: enqueueResult.size,
-          event,
-        });
-      }
-    },
-  );
+    const enqueueResult = yield* enqueueBufferedEvent(event, properties);
+    if (enqueueResult.dropped) {
+      yield* Effect.logDebug("analytics buffer full; dropping oldest event", {
+        size: enqueueResult.size,
+        event,
+      });
+    }
+  });
 
   yield* Effect.forever(Effect.sleep(1000).pipe(Effect.flatMap(() => flush)), {
     disableYield: true,
@@ -176,7 +148,4 @@ const makeAnalyticsService = Effect.gen(function* () {
   } satisfies AnalyticsServiceShape;
 });
 
-export const AnalyticsServiceLayerLive = Layer.effect(
-  AnalyticsService,
-  makeAnalyticsService,
-);
+export const AnalyticsServiceLayerLive = Layer.effect(AnalyticsService, makeAnalyticsService);

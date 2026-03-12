@@ -45,9 +45,7 @@ it.layer(NodeServices.layer)("AnalyticsService test", (it) => {
       const capturedRequests: Array<RecordedBatchRequest> = [];
       const serverConfigLayer = ServerConfig.layerTest(process.cwd(), stateDir);
 
-      const telemetryLayer = AnalyticsServiceLayerLive.pipe(
-        Layer.provideMerge(serverConfigLayer),
-      );
+      const telemetryLayer = AnalyticsServiceLayerLive.pipe(Layer.provideMerge(serverConfigLayer));
       const configLayer = ConfigProvider.layer(
         ConfigProvider.fromUnknown({
           TETHER_TELEMETRY_ENABLED: true,
@@ -100,9 +98,7 @@ it.layer(NodeServices.layer)("AnalyticsService test", (it) => {
       );
       assert.equal(batchRequests.length, 3);
       assert.equal(
-        batchRequests.every(
-          (request) => request.path === "/batch/" || request.path === "/batch",
-        ),
+        batchRequests.every((request) => request.path === "/batch/" || request.path === "/batch"),
         true,
       );
       const deliveredIndexes = batchRequests.flatMap((request) =>
@@ -120,9 +116,7 @@ it.layer(NodeServices.layer)("AnalyticsService test", (it) => {
       );
       assert.equal(
         batchRequests.every((request) =>
-          request.body.batch.every(
-            (event) => event.properties?.clientType === "cli-web-client",
-          ),
+          request.body.batch.every((event) => event.properties?.clientType === "cli-web-client"),
         ),
         true,
       );

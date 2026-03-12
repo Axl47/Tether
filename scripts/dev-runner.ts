@@ -5,17 +5,7 @@ import { homedir } from "node:os";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { NetService } from "@t3tools/shared/Net";
-import {
-  Config,
-  Data,
-  Effect,
-  Hash,
-  Layer,
-  Logger,
-  Option,
-  Path,
-  Schema,
-} from "effect";
+import { Config, Data, Effect, Hash, Layer, Logger, Option, Path, Schema } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { ChildProcess } from "effect/unstable/process";
 
@@ -24,9 +14,8 @@ const BASE_WEB_PORT = 5733;
 const MAX_HASH_OFFSET = 3000;
 const MAX_PORT = 65535;
 
-export const DEFAULT_DEV_STATE_DIR = Effect.map(
-  Effect.service(Path.Path),
-  (path) => path.join(homedir(), ".t3", "dev"),
+export const DEFAULT_DEV_STATE_DIR = Effect.map(Effect.service(Path.Path), (path) =>
+  path.join(homedir(), ".t3", "dev"),
 );
 
 const MODE_ARGS = {
@@ -41,19 +30,11 @@ const MODE_ARGS = {
   ],
   "dev:server": ["run", "dev", "--filter=t3"],
   "dev:web": ["run", "dev", "--filter=@t3tools/web"],
-  "dev:desktop": [
-    "run",
-    "dev",
-    "--filter=@t3tools/desktop",
-    "--filter=@t3tools/web",
-    "--parallel",
-  ],
+  "dev:desktop": ["run", "dev", "--filter=@t3tools/desktop", "--filter=@t3tools/web", "--parallel"],
 } as const satisfies Record<string, ReadonlyArray<string>>;
 
 type DevMode = keyof typeof MODE_ARGS;
-type PortAvailabilityCheck<R = never> = (
-  port: number,
-) => Effect.Effect<boolean, never, R>;
+type PortAvailabilityCheck<R = never> = (port: number) => Effect.Effect<boolean, never, R>;
 
 const DEV_RUNNER_MODES = Object.keys(MODE_ARGS) as Array<DevMode>;
 
@@ -62,16 +43,12 @@ class DevRunnerError extends Data.TaggedError("DevRunnerError")<{
   readonly cause?: unknown;
 }> {}
 
-const optionalStringConfig = (
-  name: string,
-): Config.Config<string | undefined> =>
+const optionalStringConfig = (name: string): Config.Config<string | undefined> =>
   Config.string(name).pipe(
     Config.option,
     Config.map((value) => Option.getOrUndefined(value)),
   );
-const optionalBooleanConfig = (
-  name: string,
-): Config.Config<boolean | undefined> =>
+const optionalBooleanConfig = (name: string): Config.Config<boolean | undefined> =>
   Config.boolean(name).pipe(
     Config.option,
     Config.map((value) => Option.getOrUndefined(value)),
@@ -81,9 +58,7 @@ const optionalPortConfig = (name: string): Config.Config<number | undefined> =>
     Config.option,
     Config.map((value) => Option.getOrUndefined(value)),
   );
-const optionalIntegerConfig = (
-  name: string,
-): Config.Config<number | undefined> =>
+const optionalIntegerConfig = (name: string): Config.Config<number | undefined> =>
   Config.int(name).pipe(
     Config.option,
     Config.map((value) => Option.getOrUndefined(value)),
@@ -129,9 +104,7 @@ export function resolveOffset(config: {
   return { offset, source: `hashed TETHER_DEV_INSTANCE=${seed}` };
 }
 
-function resolveStateDir(
-  stateDir: string | undefined,
-): Effect.Effect<string, never, Path.Path> {
+function resolveStateDir(stateDir: string | undefined): Effect.Effect<string, never, Path.Path> {
   return Effect.gen(function* () {
     const path = yield* Path.Path;
     const configured = stateDir?.trim();
@@ -173,11 +146,7 @@ export function createDevRunnerEnv({
   host,
   port,
   devUrl,
-}: CreateDevRunnerEnvInput): Effect.Effect<
-  NodeJS.ProcessEnv,
-  never,
-  Path.Path
-> {
+}: CreateDevRunnerEnvInput): Effect.Effect<NodeJS.ProcessEnv, never, Path.Path> {
   return Effect.gen(function* () {
     const serverPort = port ?? BASE_SERVER_PORT + serverOffset;
     const webPort = BASE_WEB_PORT + webOffset;
@@ -210,8 +179,7 @@ export function createDevRunnerEnv({
     }
 
     if (autoBootstrapProjectFromCwd !== undefined) {
-      output.TETHER_AUTO_BOOTSTRAP_PROJECT_FROM_CWD =
-        autoBootstrapProjectFromCwd ? "1" : "0";
+      output.TETHER_AUTO_BOOTSTRAP_PROJECT_FROM_CWD = autoBootstrapProjectFromCwd ? "1" : "0";
     } else {
       delete output.TETHER_AUTO_BOOTSTRAP_PROJECT_FROM_CWD;
     }
@@ -246,9 +214,7 @@ function portPairForOffset(offset: number): {
   };
 }
 
-const defaultCheckPortAvailability: PortAvailabilityCheck<NetService> = (
-  port,
-) =>
+const defaultCheckPortAvailability: PortAvailabilityCheck<NetService> = (port) =>
   Effect.gen(function* () {
     const net = yield* NetService;
     return yield* net.isPortAvailableOnLoopback(port);
@@ -279,9 +245,7 @@ export function findFirstAvailableOffset<R = NetService>({
       if (
         (requireServerPort && serverPortOutOfRange) ||
         (requireWebPort && webPortOutOfRange) ||
-        (!requireServerPort &&
-          !requireWebPort &&
-          (serverPortOutOfRange || webPortOutOfRange))
+        (!requireServerPort && !requireWebPort && (serverPortOutOfRange || webPortOutOfRange))
       ) {
         break;
       }
@@ -421,8 +385,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       Effect.mapError(
         (cause) =>
           new DevRunnerError({
-            message:
-              "Failed to read TETHER_PORT_OFFSET/TETHER_DEV_INSTANCE configuration.",
+            message: "Failed to read TETHER_PORT_OFFSET/TETHER_DEV_INSTANCE configuration.",
             cause,
           }),
       ),
@@ -439,9 +402,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
 
     const envOverrides = {
       noBrowser: readOptionalBooleanEnv("TETHER_NO_BROWSER"),
-      autoBootstrapProjectFromCwd: readOptionalBooleanEnv(
-        "TETHER_AUTO_BOOTSTRAP_PROJECT_FROM_CWD",
-      ),
+      autoBootstrapProjectFromCwd: readOptionalBooleanEnv("TETHER_AUTO_BOOTSTRAP_PROJECT_FROM_CWD"),
       logWebSocketEvents: readOptionalBooleanEnv("TETHER_LOG_WS_EVENTS"),
     };
 
@@ -459,10 +420,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       webOffset,
       stateDir: input.stateDir,
       authToken: input.authToken,
-      noBrowser: resolveOptionalBooleanOverride(
-        input.noBrowser,
-        envOverrides.noBrowser,
-      ),
+      noBrowser: resolveOptionalBooleanOverride(input.noBrowser, envOverrides.noBrowser),
       autoBootstrapProjectFromCwd: resolveOptionalBooleanOverride(
         input.autoBootstrapProjectFromCwd,
         envOverrides.autoBootstrapProjectFromCwd,
@@ -519,8 +477,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       cause instanceof DevRunnerError
         ? cause
         : new DevRunnerError({
-            message:
-              cause instanceof Error ? cause.message : "dev-runner failed",
+            message: cause instanceof Error ? cause.message : "dev-runner failed",
             cause,
           }),
     ),
@@ -532,9 +489,7 @@ const devRunnerCli = Command.make("dev-runner", {
     Argument.withDescription("Development mode to run."),
   ),
   stateDir: Flag.string("state-dir").pipe(
-    Flag.withDescription(
-      "State directory path (forwards to TETHER_STATE_DIR).",
-    ),
+    Flag.withDescription("State directory path (forwards to TETHER_STATE_DIR)."),
     Flag.withFallbackConfig(optionalStringConfig("TETHER_STATE_DIR")),
   ),
   authToken: Flag.string("auth-token").pipe(
@@ -543,52 +498,36 @@ const devRunnerCli = Command.make("dev-runner", {
     Flag.withFallbackConfig(optionalStringConfig("TETHER_AUTH_TOKEN")),
   ),
   noBrowser: Flag.boolean("no-browser").pipe(
-    Flag.withDescription(
-      "Browser auto-open toggle (equivalent to TETHER_NO_BROWSER).",
-    ),
+    Flag.withDescription("Browser auto-open toggle (equivalent to TETHER_NO_BROWSER)."),
     Flag.withFallbackConfig(optionalBooleanConfig("TETHER_NO_BROWSER")),
   ),
-  autoBootstrapProjectFromCwd: Flag.boolean(
-    "auto-bootstrap-project-from-cwd",
-  ).pipe(
+  autoBootstrapProjectFromCwd: Flag.boolean("auto-bootstrap-project-from-cwd").pipe(
     Flag.withDescription(
       "Auto-bootstrap toggle (equivalent to TETHER_AUTO_BOOTSTRAP_PROJECT_FROM_CWD).",
     ),
-    Flag.withFallbackConfig(
-      optionalBooleanConfig("TETHER_AUTO_BOOTSTRAP_PROJECT_FROM_CWD"),
-    ),
+    Flag.withFallbackConfig(optionalBooleanConfig("TETHER_AUTO_BOOTSTRAP_PROJECT_FROM_CWD")),
   ),
   logWebSocketEvents: Flag.boolean("log-websocket-events").pipe(
-    Flag.withDescription(
-      "WebSocket event logging toggle (equivalent to TETHER_LOG_WS_EVENTS).",
-    ),
+    Flag.withDescription("WebSocket event logging toggle (equivalent to TETHER_LOG_WS_EVENTS)."),
     Flag.withAlias("log-ws-events"),
     Flag.withFallbackConfig(optionalBooleanConfig("TETHER_LOG_WS_EVENTS")),
   ),
   host: Flag.string("host").pipe(
-    Flag.withDescription(
-      "Server host/interface override (forwards to TETHER_HOST).",
-    ),
+    Flag.withDescription("Server host/interface override (forwards to TETHER_HOST)."),
     Flag.withFallbackConfig(optionalStringConfig("TETHER_HOST")),
   ),
   port: Flag.integer("port").pipe(
-    Flag.withSchema(
-      Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 })),
-    ),
+    Flag.withSchema(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }))),
     Flag.withDescription("Server port override (forwards to TETHER_PORT)."),
     Flag.withFallbackConfig(optionalPortConfig("TETHER_PORT")),
   ),
   devUrl: Flag.string("dev-url").pipe(
     Flag.withSchema(Schema.URLFromString),
-    Flag.withDescription(
-      "Web dev URL override (forwards to VITE_DEV_SERVER_URL).",
-    ),
+    Flag.withDescription("Web dev URL override (forwards to VITE_DEV_SERVER_URL)."),
     Flag.withFallbackConfig(optionalUrlConfig("VITE_DEV_SERVER_URL")),
   ),
   dryRun: Flag.boolean("dry-run").pipe(
-    Flag.withDescription(
-      "Resolve mode/ports/env and print, but do not spawn turbo.",
-    ),
+    Flag.withDescription("Resolve mode/ports/env and print, but do not spawn turbo."),
     Flag.withDefault(false),
   ),
   turboArgs: Argument.string("turbo-arg").pipe(
@@ -596,9 +535,7 @@ const devRunnerCli = Command.make("dev-runner", {
     Argument.variadic(),
   ),
 }).pipe(
-  Command.withDescription(
-    "Run monorepo development modes with deterministic port/env wiring.",
-  ),
+  Command.withDescription("Run monorepo development modes with deterministic port/env wiring."),
   Command.withHandler((input) => runDevRunnerWithInput(input)),
 );
 

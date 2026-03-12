@@ -34,9 +34,7 @@ describe("readPathFromLoginShell", () => {
       ) => string
     >(() => "__TETHER_PATH_START__\n/a:/b\n__TETHER_PATH_END__\n");
 
-    expect(readPathFromLoginShell("/opt/homebrew/bin/fish", execFile)).toBe(
-      "/a:/b",
-    );
+    expect(readPathFromLoginShell("/opt/homebrew/bin/fish", execFile)).toBe("/a:/b");
     expect(execFile).toHaveBeenCalledTimes(1);
 
     const firstCall = execFile.mock.calls[0] as

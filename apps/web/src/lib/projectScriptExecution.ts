@@ -1,8 +1,4 @@
-import type {
-  ProjectScript,
-  ProjectScriptIcon,
-  ProjectScriptStep,
-} from "@t3tools/contracts";
+import type { ProjectScript, ProjectScriptIcon, ProjectScriptStep } from "@t3tools/contracts";
 
 import { DEFAULT_THREAD_TERMINAL_ID, MAX_THREAD_TERMINAL_COUNT } from "../types";
 
@@ -64,10 +60,7 @@ interface BuildProjectScriptLaunchPlanInput {
   terminalState: ProjectScriptLaunchPlanTerminalState;
   preferNewTerminal?: boolean;
   maxTerminalCount?: number;
-  readProjectFile?: (input: {
-    cwd: string;
-    relativePath: string;
-  }) => Promise<string>;
+  readProjectFile?: (input: { cwd: string; relativePath: string }) => Promise<string>;
   createTerminalId?: () => string;
 }
 
@@ -117,15 +110,11 @@ function isLegacySingleCommandScript(script: ProjectScript): boolean {
   return !script.steps || script.steps.length === 0;
 }
 
-function parseReactNativeAndroidLauncher(
-  command: string,
-): ReactNativeAndroidLauncher | null {
+function parseReactNativeAndroidLauncher(command: string): ReactNativeAndroidLauncher | null {
   const trimmed = command.trim();
   const rtkPrefixMatch = /^(rtk(?:\s+proxy)?)\s+/.exec(trimmed);
   const prefix = rtkPrefixMatch ? `${rtkPrefixMatch[1]} ` : "";
-  const candidate = rtkPrefixMatch
-    ? trimmed.slice(rtkPrefixMatch[0].length).trim()
-    : trimmed;
+  const candidate = rtkPrefixMatch ? trimmed.slice(rtkPrefixMatch[0].length).trim() : trimmed;
 
   const patterns: Array<{
     kind: ReactNativeAndroidLauncherKind;
@@ -153,19 +142,16 @@ function parseReactNativeAndroidLauncher(
     return {
       kind,
       prefix,
-      androidArgsSuffix: match.groups?.suffix?.trim() ? match[0].slice(
-        match[0].indexOf(match.groups.suffix),
-      ) : "",
+      androidArgsSuffix: match.groups?.suffix?.trim()
+        ? match[0].slice(match[0].indexOf(match.groups.suffix))
+        : "",
     };
   }
 
   return null;
 }
 
-function appendReactNativeFlag(
-  baseCommand: string,
-  launcher: ReactNativeAndroidLauncher,
-): string {
+function appendReactNativeFlag(baseCommand: string, launcher: ReactNativeAndroidLauncher): string {
   const suffix = launcher.androidArgsSuffix;
   if (suffix.length === 0) {
     switch (launcher.kind) {
@@ -181,17 +167,15 @@ function appendReactNativeFlag(
   return `${baseCommand}${suffix} --no-packager`;
 }
 
-function buildCompatCommands(
-  launcher: ReactNativeAndroidLauncher,
-): { start: string; android: string } {
+function buildCompatCommands(launcher: ReactNativeAndroidLauncher): {
+  start: string;
+  android: string;
+} {
   switch (launcher.kind) {
     case "npm":
       return {
         start: `${launcher.prefix}npm run start`,
-        android: appendReactNativeFlag(
-          `${launcher.prefix}npm run android`,
-          launcher,
-        ),
+        android: appendReactNativeFlag(`${launcher.prefix}npm run android`, launcher),
       };
     case "yarn":
       return {
@@ -206,26 +190,17 @@ function buildCompatCommands(
     case "bun":
       return {
         start: `${launcher.prefix}bun run start`,
-        android: appendReactNativeFlag(
-          `${launcher.prefix}bun run android`,
-          launcher,
-        ),
+        android: appendReactNativeFlag(`${launcher.prefix}bun run android`, launcher),
       };
     case "react-native":
       return {
         start: `${launcher.prefix}react-native start`,
-        android: appendReactNativeFlag(
-          `${launcher.prefix}react-native run-android`,
-          launcher,
-        ),
+        android: appendReactNativeFlag(`${launcher.prefix}react-native run-android`, launcher),
       };
     case "npx-react-native":
       return {
         start: `${launcher.prefix}npx react-native start`,
-        android: appendReactNativeFlag(
-          `${launcher.prefix}npx react-native run-android`,
-          launcher,
-        ),
+        android: appendReactNativeFlag(`${launcher.prefix}npx react-native run-android`, launcher),
       };
   }
 }
@@ -233,10 +208,7 @@ function buildCompatCommands(
 async function expandLegacyReactNativeAndroidScript(input: {
   script: ProjectScript;
   cwd: string;
-  readProjectFile?: (input: {
-    cwd: string;
-    relativePath: string;
-  }) => Promise<string>;
+  readProjectFile?: (input: { cwd: string; relativePath: string }) => Promise<string>;
 }): Promise<{
   expandedFromCompatibility: boolean;
   steps: ProjectScriptStep[];
@@ -250,10 +222,7 @@ async function expandLegacyReactNativeAndroidScript(input: {
 
   const command = input.script.command.trim();
   const launcher = parseReactNativeAndroidLauncher(command);
-  if (
-    !launcher ||
-    launcher.androidArgsSuffix.includes("--no-packager")
-  ) {
+  if (!launcher || launcher.androidArgsSuffix.includes("--no-packager")) {
     return {
       expandedFromCompatibility: false,
       steps: projectScriptSteps(input.script),
@@ -281,20 +250,14 @@ async function expandLegacyReactNativeAndroidScript(input: {
       scripts?: Record<string, unknown>;
     };
     const startCommand =
-      typeof parsed.scripts?.start === "string"
-        ? parsed.scripts.start.trim()
-        : null;
+      typeof parsed.scripts?.start === "string" ? parsed.scripts.start.trim() : null;
     const androidCommand =
-      typeof parsed.scripts?.android === "string"
-        ? parsed.scripts.android.trim()
-        : null;
+      typeof parsed.scripts?.android === "string" ? parsed.scripts.android.trim() : null;
     if (
       !startCommand ||
       !androidCommand ||
       !LEGACY_REACT_NATIVE_START_COMMANDS.has(startCommand) ||
-      !["react-native run-android", "npx react-native run-android"].includes(
-        androidCommand,
-      )
+      !["react-native run-android", "npx react-native run-android"].includes(androidCommand)
     ) {
       return {
         expandedFromCompatibility: false,
@@ -347,9 +310,7 @@ export async function buildProjectScriptLaunchPlan(
   const expanded = await expandLegacyReactNativeAndroidScript({
     script: input.script,
     cwd: input.cwd,
-    ...(input.readProjectFile
-      ? { readProjectFile: input.readProjectFile }
-      : {}),
+    ...(input.readProjectFile ? { readProjectFile: input.readProjectFile } : {}),
   });
   const steps = expanded.steps;
   const terminalIds =
@@ -357,18 +318,11 @@ export async function buildProjectScriptLaunchPlan(
       ? input.terminalState.terminalIds
       : [DEFAULT_THREAD_TERMINAL_ID];
   const baseTerminalId =
-    input.terminalState.activeTerminalId ||
-    terminalIds[0] ||
-    DEFAULT_THREAD_TERMINAL_ID;
-  const isBaseTerminalBusy = input.terminalState.runningTerminalIds.includes(
-    baseTerminalId,
-  );
-  const createFirstTerminal =
-    Boolean(input.preferNewTerminal) || isBaseTerminalBusy;
-  const requiredNewTerminals =
-    (createFirstTerminal ? 1 : 0) + Math.max(steps.length - 1, 0);
-  const maxTerminalCount =
-    input.maxTerminalCount ?? MAX_THREAD_TERMINAL_COUNT;
+    input.terminalState.activeTerminalId || terminalIds[0] || DEFAULT_THREAD_TERMINAL_ID;
+  const isBaseTerminalBusy = input.terminalState.runningTerminalIds.includes(baseTerminalId);
+  const createFirstTerminal = Boolean(input.preferNewTerminal) || isBaseTerminalBusy;
+  const requiredNewTerminals = (createFirstTerminal ? 1 : 0) + Math.max(steps.length - 1, 0);
+  const maxTerminalCount = input.maxTerminalCount ?? MAX_THREAD_TERMINAL_COUNT;
 
   if (terminalIds.length + requiredNewTerminals > maxTerminalCount) {
     return {
@@ -378,9 +332,7 @@ export async function buildProjectScriptLaunchPlan(
     };
   }
 
-  const nextTerminalId =
-    input.createTerminalId ??
-    (() => `terminal-${crypto.randomUUID()}`);
+  const nextTerminalId = input.createTerminalId ?? (() => `terminal-${crypto.randomUUID()}`);
   const launchSteps: ProjectScriptLaunchPlanStep[] = steps.map((step, index) => {
     const createNewTerminal = index === 0 ? createFirstTerminal : true;
     return {

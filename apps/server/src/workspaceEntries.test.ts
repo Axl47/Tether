@@ -53,9 +53,7 @@ describe("searchWorkspaceEntries", () => {
     assert.include(paths, "src/components/Composer.tsx");
     assert.include(paths, "README.md");
     assert.isFalse(paths.some((entryPath) => entryPath.startsWith(".git")));
-    assert.isFalse(
-      paths.some((entryPath) => entryPath.startsWith("node_modules")),
-    );
+    assert.isFalse(paths.some((entryPath) => entryPath.startsWith("node_modules")));
     assert.isFalse(result.truncated);
   });
 
@@ -72,14 +70,8 @@ describe("searchWorkspaceEntries", () => {
     });
 
     assert.isAbove(result.entries.length, 0);
-    assert.isTrue(
-      result.entries.some((entry) => entry.path === "src/components"),
-    );
-    assert.isTrue(
-      result.entries.every((entry) =>
-        entry.path.toLowerCase().includes("compo"),
-      ),
-    );
+    assert.isTrue(result.entries.some((entry) => entry.path === "src/components"));
+    assert.isTrue(result.entries.every((entry) => entry.path.toLowerCase().includes("compo")));
   });
 
   it("excludes gitignored paths for git repositories", async () => {
@@ -89,11 +81,7 @@ describe("searchWorkspaceEntries", () => {
     writeFile(cwd, "src/keep.ts", "export {};");
     writeFile(cwd, "ignored.txt", "ignore me");
     writeFile(cwd, ".convex/local-storage/data.json", "{}");
-    writeFile(
-      cwd,
-      "convex/UOoS-l/convex_local_storage/modules/data.json",
-      "{}",
-    );
+    writeFile(cwd, "convex/UOoS-l/convex_local_storage/modules/data.json", "{}");
 
     const result = await searchWorkspaceEntries({ cwd, query: "", limit: 100 });
     const paths = result.entries.map((entry) => entry.path);

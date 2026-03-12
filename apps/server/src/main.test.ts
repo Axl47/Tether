@@ -10,12 +10,7 @@ import { FetchHttpClient } from "effect/unstable/http";
 import { beforeEach } from "vitest";
 import { NetService } from "@t3tools/shared/Net";
 
-import {
-  CliConfig,
-  recordStartupHeartbeat,
-  t3Cli,
-  type CliConfigShape,
-} from "./main";
+import { CliConfig, recordStartupHeartbeat, t3Cli, type CliConfigShape } from "./main";
 import { ServerConfig, type ServerConfigShape } from "./config";
 import { Open, type OpenShape } from "./open";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
@@ -33,9 +28,7 @@ const serverStart = Effect.acquireRelease(
   }),
   () => Effect.sync(() => stop()),
 );
-const findAvailablePort = vi.fn((preferred: number) =>
-  Effect.succeed(preferred),
-);
+const findAvailablePort = vi.fn((preferred: number) => Effect.succeed(preferred));
 
 // Shared service layer used by this CLI test suite.
 const testLayer = Layer.mergeAll(
@@ -87,9 +80,7 @@ beforeEach(() => {
   resolvedConfig = null;
   start.mockImplementation(() => undefined);
   stop.mockImplementation(() => undefined);
-  findAvailablePort.mockImplementation((preferred: number) =>
-    Effect.succeed(preferred),
-  );
+  findAvailablePort.mockImplementation((preferred: number) => Effect.succeed(preferred));
 });
 
 it.layer(testLayer)("server CLI command", (it) => {
@@ -116,10 +107,7 @@ it.layer(testLayer)("server CLI command", (it) => {
       assert.equal(resolvedConfig?.port, 4010);
       assert.equal(resolvedConfig?.host, "0.0.0.0");
       assert.equal(resolvedConfig?.stateDir, "/tmp/t3-cli-state");
-      assert.equal(
-        resolvedConfig?.devUrl?.toString(),
-        "http://127.0.0.1:5173/",
-      );
+      assert.equal(resolvedConfig?.devUrl?.toString(), "http://127.0.0.1:5173/");
       assert.equal(resolvedConfig?.noBrowser, true);
       assert.equal(resolvedConfig?.authToken, "auth-secret");
       assert.equal(resolvedConfig?.autoBootstrapProjectFromCwd, false);
@@ -154,10 +142,7 @@ it.layer(testLayer)("server CLI command", (it) => {
       assert.equal(resolvedConfig?.port, 4999);
       assert.equal(resolvedConfig?.host, "100.88.10.4");
       assert.equal(resolvedConfig?.stateDir, "/tmp/t3-env-state");
-      assert.equal(
-        resolvedConfig?.devUrl?.toString(),
-        "http://localhost:5173/",
-      );
+      assert.equal(resolvedConfig?.devUrl?.toString(), "http://localhost:5173/");
       assert.equal(resolvedConfig?.noBrowser, true);
       assert.equal(resolvedConfig?.authToken, "env-token");
       assert.equal(resolvedConfig?.autoBootstrapProjectFromCwd, false);
@@ -168,9 +153,7 @@ it.layer(testLayer)("server CLI command", (it) => {
 
   it.effect("prefers --mode over TETHER_MODE", () =>
     Effect.gen(function* () {
-      findAvailablePort.mockImplementation((_preferred: number) =>
-        Effect.succeed(4666),
-      );
+      findAvailablePort.mockImplementation((_preferred: number) => Effect.succeed(4666));
       yield* runCli(["--mode", "web"], {
         TETHER_MODE: "desktop",
         TETHER_NO_BROWSER: "true",
@@ -195,20 +178,16 @@ it.layer(testLayer)("server CLI command", (it) => {
     }),
   );
 
-  it.effect(
-    "uses dynamic port discovery in web mode when port is omitted",
-    () =>
-      Effect.gen(function* () {
-        findAvailablePort.mockImplementation((_preferred: number) =>
-          Effect.succeed(5444),
-        );
-        yield* runCli([]);
+  it.effect("uses dynamic port discovery in web mode when port is omitted", () =>
+    Effect.gen(function* () {
+      findAvailablePort.mockImplementation((_preferred: number) => Effect.succeed(5444));
+      yield* runCli([]);
 
-        assert.deepStrictEqual(findAvailablePort.mock.calls, [[3773]]);
-        assert.equal(start.mock.calls.length, 1);
-        assert.equal(resolvedConfig?.port, 5444);
-        assert.equal(resolvedConfig?.mode, "web");
-      }),
+      assert.deepStrictEqual(findAvailablePort.mock.calls, [[3773]]);
+      assert.equal(start.mock.calls.length, 1);
+      assert.equal(resolvedConfig?.port, 5444);
+      assert.equal(resolvedConfig?.mode, "web");
+    }),
   );
 
   it.effect("uses fixed localhost defaults in desktop mode", () =>
@@ -257,8 +236,7 @@ it.layer(testLayer)("server CLI command", (it) => {
   it.effect("records a startup heartbeat with thread/project counts", () =>
     Effect.gen(function* () {
       const recordTelemetry = vi.fn(
-        (_event: string, _properties?: Readonly<Record<string, unknown>>) =>
-          Effect.void,
+        (_event: string, _properties?: Readonly<Record<string, unknown>>) => Effect.void,
       );
       const getSnapshot = vi.fn(() =>
         Effect.succeed({
@@ -303,9 +281,7 @@ it.layer(testLayer)("server CLI command", (it) => {
 
   it.effect("does not start server for invalid --dev-url values", () =>
     Effect.gen(function* () {
-      yield* runCli(["--dev-url", "not-a-url"]).pipe(
-        Effect.catch(() => Effect.void),
-      );
+      yield* runCli(["--dev-url", "not-a-url"]).pipe(Effect.catch(() => Effect.void));
 
       assert.equal(start.mock.calls.length, 0);
       assert.equal(stop.mock.calls.length, 0);

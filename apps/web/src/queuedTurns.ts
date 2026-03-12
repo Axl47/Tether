@@ -1,17 +1,8 @@
-import type {
-  CodexReasoningEffort,
-  NativeApi,
-  ProviderKind,
-  ThreadId,
-} from "@t3tools/contracts";
+import type { CodexReasoningEffort, NativeApi, ProviderKind, ThreadId } from "@t3tools/contracts";
 import { getDefaultReasoningEffort } from "@t3tools/shared/model";
 
 import { type QueuedComposerMessageState } from "./composerDraftStore";
-import {
-  derivePendingApprovals,
-  derivePendingUserInputs,
-  derivePhase,
-} from "./session-logic";
+import { derivePendingApprovals, derivePendingUserInputs, derivePhase } from "./session-logic";
 import { type Thread } from "./types";
 import { newCommandId, newMessageId } from "./lib/utils";
 
@@ -44,16 +35,15 @@ function truncateQueuedPreview(value: string): string {
   return `${trimmed.slice(0, QUEUED_MESSAGE_PREVIEW_MAX_LENGTH - 1).trimEnd()}…`;
 }
 
-function resolveQueuedProvider(
-  thread: Thread,
-  snapshot: QueuedComposerMessageState,
-): ProviderKind {
+function resolveQueuedProvider(thread: Thread, snapshot: QueuedComposerMessageState): ProviderKind {
   return snapshot.provider ?? thread.session?.provider ?? "codex";
 }
 
-function queuedModelOptions(snapshot: QueuedComposerMessageState): {
-  codex: { reasoningEffort?: CodexReasoningEffort; fastMode?: true };
-} | undefined {
+function queuedModelOptions(snapshot: QueuedComposerMessageState):
+  | {
+      codex: { reasoningEffort?: CodexReasoningEffort; fastMode?: true };
+    }
+  | undefined {
   if (snapshot.provider !== "codex") {
     return undefined;
   }
@@ -68,9 +58,7 @@ function queuedModelOptions(snapshot: QueuedComposerMessageState): {
   if (snapshot.codexFastMode) {
     codexOptions.fastMode = true;
   }
-  return Object.keys(codexOptions).length > 0
-    ? { codex: codexOptions }
-    : undefined;
+  return Object.keys(codexOptions).length > 0 ? { codex: codexOptions } : undefined;
 }
 
 function queuedProviderOptions(input: {
@@ -99,10 +87,8 @@ async function persistQueuedThreadSettings(input: {
   createdAt: string;
 }): Promise<void> {
   const nextModel = input.snapshot.model ?? undefined;
-  const nextRuntimeMode =
-    input.snapshot.runtimeMode ?? input.thread.runtimeMode;
-  const nextInteractionMode =
-    input.snapshot.interactionMode ?? input.thread.interactionMode;
+  const nextRuntimeMode = input.snapshot.runtimeMode ?? input.thread.runtimeMode;
+  const nextInteractionMode = input.snapshot.interactionMode ?? input.thread.interactionMode;
 
   if (nextModel !== undefined && nextModel !== input.thread.model) {
     await input.api.orchestration.dispatchCommand({
@@ -159,11 +145,7 @@ export function canAutoDispatchQueuedTurn(input: {
   if (!thread) {
     return false;
   }
-  if (
-    input.isConnecting ||
-    input.isRevertingCheckpoint ||
-    input.isLocalSendInFlight
-  ) {
+  if (input.isConnecting || input.isRevertingCheckpoint || input.isLocalSendInFlight) {
     return false;
   }
   if (derivePhase(thread.session) === "running") {
@@ -192,8 +174,7 @@ export async function dispatchQueuedTurn(input: {
   const messageCreatedAt = new Date().toISOString();
   const provider = resolveQueuedProvider(input.thread, input.snapshot);
   const runtimeMode = input.snapshot.runtimeMode ?? input.thread.runtimeMode;
-  const interactionMode =
-    input.snapshot.interactionMode ?? input.thread.interactionMode;
+  const interactionMode = input.snapshot.interactionMode ?? input.thread.interactionMode;
   const turnAttachments = await Promise.all(
     input.snapshot.images.map(async (image) => ({
       type: "image" as const,
@@ -240,9 +221,7 @@ export async function dispatchQueuedTurn(input: {
     model: input.snapshot.model ?? undefined,
     ...(modelOptions ? { modelOptions } : {}),
     ...(providerOptions ? { providerOptions } : {}),
-    assistantDeliveryMode: input.settings.enableAssistantStreaming
-      ? "streaming"
-      : "buffered",
+    assistantDeliveryMode: input.settings.enableAssistantStreaming ? "streaming" : "buffered",
     runtimeMode,
     interactionMode,
     createdAt: messageCreatedAt,
