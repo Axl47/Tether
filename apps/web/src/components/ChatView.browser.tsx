@@ -1401,6 +1401,53 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("keeps the thread flagger rail pinned while scrolling up from the bottom", async () => {
+    const snapshot = createSnapshotForTargetUser({
+      targetMessageId: "msg-user-target-flagger-pinned" as MessageId,
+      targetText: "flagger pinned target",
+    });
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot,
+    });
+
+    try {
+      const scrollContainer = await waitForMessageScrollContainer();
+      const flaggerRail = await waitForElement(
+        () => document.querySelector<HTMLElement>("[data-thread-flagger-rail='true']"),
+        "Unable to find thread flagger rail.",
+      );
+
+      await vi.waitFor(
+        () => {
+          expect(scrollContainer.scrollHeight).toBeGreaterThan(scrollContainer.clientHeight + 200);
+          expect(flaggerRail.getBoundingClientRect().height).toBeGreaterThan(0);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      scrollContainer.scrollTop = scrollContainer.scrollHeight - scrollContainer.clientHeight;
+      scrollContainer.dispatchEvent(new Event("scroll"));
+      await waitForLayout();
+
+      scrollContainer.scrollTop = Math.max(scrollContainer.scrollTop - 120, 0);
+      scrollContainer.dispatchEvent(new Event("scroll"));
+      await waitForLayout();
+
+      await vi.waitFor(
+        () => {
+          const railRect = flaggerRail.getBoundingClientRect();
+          const scrollRect = scrollContainer.getBoundingClientRect();
+          expect(Math.abs(railRect.top - scrollRect.top)).toBeLessThanOrEqual(2);
+          expect(Math.abs(railRect.height - scrollContainer.clientHeight)).toBeLessThanOrEqual(2);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("uses the latest user message for last thread context", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,

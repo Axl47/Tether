@@ -40,6 +40,7 @@ import {
   useState,
   useId,
 } from "react";
+import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useNavigate, useSearch } from "@tanstack/react-router";
@@ -6747,6 +6748,7 @@ const MessagesTimeline = memo(function MessagesTimeline({
     },
     [scrollContainer, syncScrollMetrics],
   );
+  const flaggerRailPortalTarget = scrollContainer?.parentElement ?? null;
 
   const renderRowContent = (row: TimelineRow) => (
     <div
@@ -7060,20 +7062,24 @@ const MessagesTimeline = memo(function MessagesTimeline({
           </div>
         </div>
       </div>
-      {/* Overview ruler — positioned at the right edge of the scroll container, next to the scrollbar */}
-      <div className="pointer-events-none absolute inset-y-0 right-0 z-10 flex items-stretch justify-end">
-        <div className="pointer-events-auto">
-          <TimelineFlaggerRail
-            viewportHeightPx={scrollMetrics.clientHeight}
-            scrollTop={scrollMetrics.scrollTop}
-            clientHeight={scrollMetrics.clientHeight}
-            scrollHeight={scrollMetrics.scrollHeight}
-            markers={flaggerMarkerLayouts}
-            onJumpToMessage={scrollToMessage}
-            onScrollToRatio={scrollToRatio}
-          />
-        </div>
-      </div>
+      {flaggerRailPortalTarget
+        ? createPortal(
+            <div className="pointer-events-none absolute inset-y-0 right-0 z-10 flex items-stretch justify-end">
+              <div className="pointer-events-auto">
+                <TimelineFlaggerRail
+                  viewportHeightPx={scrollMetrics.clientHeight}
+                  scrollTop={scrollMetrics.scrollTop}
+                  clientHeight={scrollMetrics.clientHeight}
+                  scrollHeight={scrollMetrics.scrollHeight}
+                  markers={flaggerMarkerLayouts}
+                  onJumpToMessage={scrollToMessage}
+                  onScrollToRatio={scrollToRatio}
+                />
+              </div>
+            </div>,
+            flaggerRailPortalTarget,
+          )
+        : null}
     </div>
   );
 });
