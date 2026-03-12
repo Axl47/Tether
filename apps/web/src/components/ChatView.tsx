@@ -4539,7 +4539,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                             onClick={openComposerImagePicker}
                           >
                             <ImagePlusIcon />
-                            <span className="sr-only sm:not-sr-only">Upload images</span>
+                            <span className="sr-only sm:not-sr-only">Images</span>
                           </Button>
                         </>
                       ) : null}
