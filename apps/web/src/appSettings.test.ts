@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   getAppModelOptions,
+  getCustomModelsForProvider,
   getSlashModelOptions,
   normalizeCustomModelSlugs,
+  patchCustomModelsForProvider,
   resolveAppModelSelection,
 } from "./appSettings";
 
@@ -19,6 +21,16 @@ describe("normalizeCustomModelSlugs", () => {
         null,
       ]),
     ).toEqual(["custom/internal-model"]);
+  });
+
+  it("supports provider-specific Gemini custom models", () => {
+    const options = getAppModelOptions("gemini", ["gemini/internal-preview"]);
+
+    expect(options.at(-1)).toEqual({
+      slug: "gemini/internal-preview",
+      name: "gemini/internal-preview",
+      isCustom: true,
+    });
   });
 });
 
@@ -45,6 +57,20 @@ describe("getAppModelOptions", () => {
       isCustom: true,
     });
   });
+
+  it("supports provider-specific Claude custom models", () => {
+    const options = getAppModelOptions("claudeCode", ["claude-sonnet-5-0"]);
+
+    expect(options.map((option) => option.slug)).toContain("claude-sonnet-5-0");
+  });
+
+  it("includes built-in Gemini image models in the picker catalog", () => {
+    const options = getAppModelOptions("gemini", []);
+
+    expect(options.map((option) => option.slug)).toContain("gemini-2.5-flash-image");
+    expect(options.map((option) => option.slug)).toContain("gemini-3-pro-preview");
+    expect(options.map((option) => option.slug)).not.toContain("gemini-3-pro-image-preview");
+  });
 });
 
 describe("resolveAppModelSelection", () => {
@@ -56,6 +82,12 @@ describe("resolveAppModelSelection", () => {
 
   it("falls back to the provider default when no model is selected", () => {
     expect(resolveAppModelSelection("codex", [], "")).toBe("gpt-5.4");
+  });
+
+  it("upgrades a stale Gemini image preview slug to the supported preview model", () => {
+    expect(resolveAppModelSelection("gemini", [], "gemini-3-pro-image-preview")).toBe(
+      "gemini-3-pro-preview",
+    );
   });
 });
 
@@ -70,5 +102,25 @@ describe("getSlashModelOptions", () => {
     const options = getSlashModelOptions("codex", ["openai/gpt-oss-120b"], "oss", "gpt-5.3-codex");
 
     expect(options.map((option) => option.slug)).toEqual(["openai/gpt-oss-120b"]);
+  });
+});
+
+describe("provider-specific custom models", () => {
+  it("reads custom models for the requested provider", () => {
+    expect(
+      getCustomModelsForProvider(
+        {
+          customCodexModels: ["gpt-custom"],
+          customGeminiModels: ["gemini-custom"],
+        },
+        "gemini",
+      ),
+    ).toEqual(["gemini-custom"]);
+  });
+
+  it("patches the correct settings key for Gemini custom models", () => {
+    expect(patchCustomModelsForProvider("gemini", ["gemini-custom"])).toEqual({
+      customGeminiModels: ["gemini-custom"],
+    });
   });
 });

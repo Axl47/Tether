@@ -59,7 +59,9 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           model,
           branch,
           worktree_path,
+          context_window_json,
           latest_turn_id,
+          last_autorename_user_message_id,
           created_at,
           updated_at,
           deleted_at
@@ -71,7 +73,9 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           'gpt-5-codex',
           NULL,
           NULL,
+          '{"provider":"codex","usedTokens":119000,"maxTokens":258000,"remainingTokens":139000,"usedPercent":46,"updatedAt":"2026-02-24T00:00:03.000Z"}',
           'turn-1',
+          'message-autorename-1',
           '2026-02-24T00:00:02.000Z',
           '2026-02-24T00:00:03.000Z',
           NULL
@@ -239,6 +243,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             completedAt: "2026-02-24T00:00:08.000Z",
             assistantMessageId: asMessageId("message-1"),
           },
+          lastAutoRenameUserMessageId: asMessageId("message-autorename-1"),
           createdAt: "2026-02-24T00:00:02.000Z",
           updatedAt: "2026-02-24T00:00:03.000Z",
           deletedAt: null,
@@ -254,6 +259,14 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             },
           ],
           proposedPlans: [],
+          contextWindow: {
+            provider: "codex",
+            usedTokens: 119000,
+            maxTokens: 258000,
+            remainingTokens: 139000,
+            usedPercent: 46,
+            updatedAt: "2026-02-24T00:00:03.000Z",
+          },
           activities: [
             {
               id: asEventId("activity-1"),

@@ -18,8 +18,10 @@ import {
 export const ORCHESTRATION_WS_METHODS = {
   getSnapshot: "orchestration.getSnapshot",
   dispatchCommand: "orchestration.dispatchCommand",
+  forceDeleteThread: "orchestration.forceDeleteThread",
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
+  autorenameProjectThreads: "orchestration.autorenameProjectThreads",
   replayEvents: "orchestration.replayEvents",
 } as const;
 
@@ -27,7 +29,7 @@ export const ORCHESTRATION_WS_CHANNELS = {
   domainEvent: "orchestration.domainEvent",
 } as const;
 
-export const ProviderKind = Schema.Literal("codex");
+export const ProviderKind = Schema.Literals(["codex", "claudeCode", "gemini"]);
 export type ProviderKind = typeof ProviderKind.Type;
 export const ProviderApprovalPolicy = Schema.Literals([
   "untrusted",
@@ -199,6 +201,20 @@ export const OrchestrationSession = Schema.Struct({
 });
 export type OrchestrationSession = typeof OrchestrationSession.Type;
 
+export const OrchestrationContextWindow = Schema.Struct({
+  provider: ProviderKind,
+  usedTokens: NonNegativeInt,
+  maxTokens: NonNegativeInt,
+  remainingTokens: NonNegativeInt,
+  usedPercent: NonNegativeInt.check(Schema.isLessThanOrEqualTo(100)),
+  inputTokens: Schema.optional(NonNegativeInt),
+  cachedInputTokens: Schema.optional(NonNegativeInt),
+  outputTokens: Schema.optional(NonNegativeInt),
+  reasoningOutputTokens: Schema.optional(NonNegativeInt),
+  updatedAt: IsoDateTime,
+});
+export type OrchestrationContextWindow = typeof OrchestrationContextWindow.Type;
+
 export const OrchestrationCheckpointFile = Schema.Struct({
   path: TrimmedNonEmptyString,
   kind: TrimmedNonEmptyString,
@@ -271,11 +287,17 @@ export const OrchestrationThread = Schema.Struct({
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
+  lastAutoRenameUserMessageId: Schema.NullOr(MessageId).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
   messages: Schema.Array(OrchestrationMessage),
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(Schema.withDecodingDefault(() => [])),
+  contextWindow: Schema.NullOr(OrchestrationContextWindow).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
   activities: Schema.Array(OrchestrationThreadActivity),
   checkpoints: Schema.Array(OrchestrationCheckpointSummary),
   session: Schema.NullOr(OrchestrationSession),
@@ -346,6 +368,7 @@ const ThreadMetaUpdateCommand = Schema.Struct({
   model: Schema.optional(TrimmedNonEmptyString),
   branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  lastAutoRenameUserMessageId: Schema.optional(MessageId),
 });
 
 const ThreadRuntimeModeSetCommand = Schema.Struct({
@@ -498,6 +521,7 @@ const ThreadMessageAssistantDeltaCommand = Schema.Struct({
   threadId: ThreadId,
   messageId: MessageId,
   delta: Schema.String,
+  attachments: Schema.optional(Schema.Array(ChatAttachment)),
   turnId: Schema.optional(TurnId),
   createdAt: IsoDateTime,
 });
@@ -507,6 +531,7 @@ const ThreadMessageAssistantCompleteCommand = Schema.Struct({
   commandId: CommandId,
   threadId: ThreadId,
   messageId: MessageId,
+  attachments: Schema.optional(Schema.Array(ChatAttachment)),
   turnId: Schema.optional(TurnId),
   createdAt: IsoDateTime,
 });
@@ -516,6 +541,14 @@ const ThreadProposedPlanUpsertCommand = Schema.Struct({
   commandId: CommandId,
   threadId: ThreadId,
   proposedPlan: OrchestrationProposedPlan,
+  createdAt: IsoDateTime,
+});
+
+const ThreadContextWindowSetCommand = Schema.Struct({
+  type: Schema.Literal("thread.context-window.set"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  contextWindow: OrchestrationContextWindow,
   createdAt: IsoDateTime,
 });
 
@@ -554,6 +587,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadMessageAssistantDeltaCommand,
   ThreadMessageAssistantCompleteCommand,
   ThreadProposedPlanUpsertCommand,
+  ThreadContextWindowSetCommand,
   ThreadTurnDiffCompleteCommand,
   ThreadActivityAppendCommand,
   ThreadRevertCompleteCommand,
@@ -585,6 +619,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.session-stop-requested",
   "thread.session-set",
   "thread.proposed-plan-upserted",
+  "thread.context-window-set",
   "thread.turn-diff-completed",
   "thread.activity-appended",
 ]);
@@ -644,6 +679,7 @@ export const ThreadMetaUpdatedPayload = Schema.Struct({
   model: Schema.optional(TrimmedNonEmptyString),
   branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  lastAutoRenameUserMessageId: Schema.optional(MessageId),
   updatedAt: IsoDateTime,
 });
 
@@ -732,6 +768,11 @@ export const ThreadSessionSetPayload = Schema.Struct({
 export const ThreadProposedPlanUpsertedPayload = Schema.Struct({
   threadId: ThreadId,
   proposedPlan: OrchestrationProposedPlan,
+});
+
+export const ThreadContextWindowSetPayload = Schema.Struct({
+  threadId: ThreadId,
+  contextWindow: OrchestrationContextWindow,
 });
 
 export const ThreadTurnDiffCompletedPayload = Schema.Struct({
@@ -864,6 +905,11 @@ export const OrchestrationEvent = Schema.Union([
   }),
   Schema.Struct({
     ...EventBaseFields,
+    type: Schema.Literal("thread.context-window-set"),
+    payload: ThreadContextWindowSetPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
     type: Schema.Literal("thread.turn-diff-completed"),
     payload: ThreadTurnDiffCompletedPayload,
   }),
@@ -953,6 +999,14 @@ export type OrchestrationGetTurnDiffInput = typeof OrchestrationGetTurnDiffInput
 export const OrchestrationGetTurnDiffResult = ThreadTurnDiff;
 export type OrchestrationGetTurnDiffResult = typeof OrchestrationGetTurnDiffResult.Type;
 
+export const OrchestrationForceDeleteThreadInput = Schema.Struct({
+  threadId: ThreadId,
+});
+export type OrchestrationForceDeleteThreadInput = typeof OrchestrationForceDeleteThreadInput.Type;
+
+export const OrchestrationForceDeleteThreadResult = OrchestrationReadModel;
+export type OrchestrationForceDeleteThreadResult = typeof OrchestrationForceDeleteThreadResult.Type;
+
 export const OrchestrationGetFullThreadDiffInput = Schema.Struct({
   threadId: ThreadId,
   toTurnCount: NonNegativeInt,
@@ -961,6 +1015,42 @@ export type OrchestrationGetFullThreadDiffInput = typeof OrchestrationGetFullThr
 
 export const OrchestrationGetFullThreadDiffResult = ThreadTurnDiff;
 export type OrchestrationGetFullThreadDiffResult = typeof OrchestrationGetFullThreadDiffResult.Type;
+
+export const OrchestrationAutorenameProjectThreadsInput = Schema.Struct({
+  projectId: ProjectId,
+});
+export type OrchestrationAutorenameProjectThreadsInput =
+  typeof OrchestrationAutorenameProjectThreadsInput.Type;
+
+export const OrchestrationAutorenameSkippedReason = Schema.Literals([
+  "no-user-messages",
+  "unchanged",
+  "up-to-date",
+]);
+export type OrchestrationAutorenameSkippedReason = typeof OrchestrationAutorenameSkippedReason.Type;
+
+export const OrchestrationAutorenameProjectThreadsResult = Schema.Struct({
+  renamed: Schema.Array(
+    Schema.Struct({
+      threadId: ThreadId,
+      title: TrimmedNonEmptyString,
+    }),
+  ),
+  skipped: Schema.Array(
+    Schema.Struct({
+      threadId: ThreadId,
+      reason: OrchestrationAutorenameSkippedReason,
+    }),
+  ),
+  failed: Schema.Array(
+    Schema.Struct({
+      threadId: ThreadId,
+      message: TrimmedNonEmptyString,
+    }),
+  ),
+});
+export type OrchestrationAutorenameProjectThreadsResult =
+  typeof OrchestrationAutorenameProjectThreadsResult.Type;
 
 export const OrchestrationReplayEventsInput = Schema.Struct({
   fromSequenceExclusive: NonNegativeInt,
@@ -979,6 +1069,10 @@ export const OrchestrationRpcSchemas = {
     input: ClientOrchestrationCommand,
     output: DispatchResult,
   },
+  forceDeleteThread: {
+    input: OrchestrationForceDeleteThreadInput,
+    output: OrchestrationForceDeleteThreadResult,
+  },
   getTurnDiff: {
     input: OrchestrationGetTurnDiffInput,
     output: OrchestrationGetTurnDiffResult,
@@ -986,6 +1080,10 @@ export const OrchestrationRpcSchemas = {
   getFullThreadDiff: {
     input: OrchestrationGetFullThreadDiffInput,
     output: OrchestrationGetFullThreadDiffResult,
+  },
+  autorenameProjectThreads: {
+    input: OrchestrationAutorenameProjectThreadsInput,
+    output: OrchestrationAutorenameProjectThreadsResult,
   },
   replayEvents: {
     input: OrchestrationReplayEventsInput,

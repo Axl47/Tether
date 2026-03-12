@@ -1,6 +1,7 @@
 import { Effect, Layer, Schema } from "effect";
 import { PositiveInt, TrimmedNonEmptyString } from "@t3tools/contracts";
 
+import { buildNonInteractiveGitEnv } from "../../cliEnvironment";
 import { runProcess } from "../../processRunner";
 import { GitHubCliError } from "../Errors.ts";
 import {
@@ -11,6 +12,9 @@ import {
 } from "../Services/GitHubCli.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+const NON_INTERACTIVE_GH_ENV: NodeJS.ProcessEnv = buildNonInteractiveGitEnv(process.env, {
+  GH_PROMPT_DISABLED: "1",
+});
 
 function normalizeGitHubCliError(operation: "execute" | "stdout", error: unknown): GitHubCliError {
   if (error instanceof Error) {
@@ -168,6 +172,7 @@ const makeGitHubCli = Effect.sync(() => {
         runProcess("gh", input.args, {
           cwd: input.cwd,
           timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+          env: NON_INTERACTIVE_GH_ENV,
         }),
       catch: (error) => normalizeGitHubCliError("execute", error),
     });

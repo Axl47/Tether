@@ -302,6 +302,25 @@ describe("wsNativeApi", () => {
     });
   });
 
+  it("forwards thread force-delete requests to the orchestration websocket method", async () => {
+    requestMock.mockResolvedValue({
+      snapshotSequence: 0,
+      projects: [],
+      threads: [],
+      updatedAt: "2026-03-10T00:00:00.000Z",
+    });
+    const { createWsNativeApi } = await import("./wsNativeApi");
+
+    const api = createWsNativeApi();
+    await api.orchestration.forceDeleteThread({
+      threadId: ThreadId.makeUnsafe("thread-1"),
+    });
+
+    expect(requestMock).toHaveBeenCalledWith(ORCHESTRATION_WS_METHODS.forceDeleteThread, {
+      threadId: "thread-1",
+    });
+  });
+
   it("forwards workspace file writes to the websocket project method", async () => {
     requestMock.mockResolvedValue({ relativePath: "plan.md" });
     const { createWsNativeApi } = await import("./wsNativeApi");
@@ -352,6 +371,20 @@ describe("wsNativeApi", () => {
     expect(requestMock).toHaveBeenCalledWith(ORCHESTRATION_WS_METHODS.getFullThreadDiff, {
       threadId: "thread-1",
       toTurnCount: 1,
+    });
+  });
+
+  it("forwards project thread autorename requests to the orchestration websocket method", async () => {
+    requestMock.mockResolvedValue({ renamed: [], skipped: [], failed: [] });
+    const { createWsNativeApi } = await import("./wsNativeApi");
+
+    const api = createWsNativeApi();
+    await api.orchestration.autorenameProjectThreads({
+      projectId: ProjectId.makeUnsafe("project-1"),
+    });
+
+    expect(requestMock).toHaveBeenCalledWith(ORCHESTRATION_WS_METHODS.autorenameProjectThreads, {
+      projectId: "project-1",
     });
   });
 

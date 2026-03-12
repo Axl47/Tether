@@ -1,6 +1,7 @@
 import {
   ApprovalRequestId,
   type AssistantDeliveryMode,
+  type ChatAttachment,
   CommandId,
   MessageId,
   type OrchestrationEvent,
@@ -13,7 +14,9 @@ import {
 import { Cache, Cause, Duration, Effect, Layer, Option, Ref, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
+import { normalizeClaudeContextWindow } from "../../provider/claudeContextWindow.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
+import { normalizeCodexContextWindow } from "../../provider/codexContextWindow.ts";
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { isGitRepository } from "../../git/isRepo.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
@@ -31,6 +34,8 @@ const TURN_MESSAGE_IDS_BY_TURN_CACHE_CAPACITY = 10_000;
 const TURN_MESSAGE_IDS_BY_TURN_TTL = Duration.minutes(120);
 const BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_CACHE_CAPACITY = 20_000;
 const BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_TTL = Duration.minutes(120);
+const BUFFERED_MESSAGE_ATTACHMENTS_BY_MESSAGE_ID_CACHE_CAPACITY = 20_000;
+const BUFFERED_MESSAGE_ATTACHMENTS_BY_MESSAGE_ID_TTL = Duration.minutes(120);
 const BUFFERED_PROPOSED_PLAN_BY_ID_CACHE_CAPACITY = 10_000;
 const BUFFERED_PROPOSED_PLAN_BY_ID_TTL = Duration.minutes(120);
 const MAX_BUFFERED_ASSISTANT_CHARS = 24_000;
@@ -153,6 +158,36 @@ function orchestrationSessionStatusFromRuntimeState(
       return "stopped";
     case "error":
       return "error";
+  }
+}
+
+function statusFromLifecycleEvent(
+  event:
+    | Extract<ProviderRuntimeEvent, { type: "session.state.changed" }>
+    | Extract<ProviderRuntimeEvent, { type: "turn.started" }>
+    | Extract<ProviderRuntimeEvent, { type: "session.exited" }>
+    | Extract<ProviderRuntimeEvent, { type: "turn.completed" }>
+    | Extract<ProviderRuntimeEvent, { type: "session.started" }>
+    | Extract<ProviderRuntimeEvent, { type: "thread.started" }>,
+  activeTurnId: string | null,
+): "starting" | "running" | "ready" | "interrupted" | "stopped" | "error" {
+  switch (event.type) {
+    case "session.state.changed":
+      // Some providers emit a "ready" heartbeat while a turn is still actively running.
+      // Preserve the run lock until the active turn closes.
+      if (activeTurnId !== null && event.payload.state === "ready") {
+        return "running";
+      }
+      return orchestrationSessionStatusFromRuntimeState(event.payload.state);
+    case "turn.started":
+      return "running";
+    case "session.exited":
+      return "stopped";
+    case "turn.completed":
+      return runtimeTurnState(event) === "failed" ? "error" : "ready";
+    case "session.started":
+    case "thread.started":
+      return activeTurnId !== null ? "running" : "ready";
   }
 }
 
@@ -501,11 +536,30 @@ const make = Effect.gen(function* () {
     timeToLive: TURN_MESSAGE_IDS_BY_TURN_TTL,
     lookup: () => Effect.succeed(new Set<MessageId>()),
   });
+  const fallbackAssistantMessageStateByTurnKeyRef = yield* Ref.make(
+    new Map<
+      string,
+      {
+        currentMessageId: MessageId | null;
+        lastMessageId: MessageId | null;
+        nextMessageIndex: number;
+      }
+    >(),
+  );
 
   const bufferedAssistantTextByMessageId = yield* Cache.make<MessageId, string>({
     capacity: BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_CACHE_CAPACITY,
     timeToLive: BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_TTL,
     lookup: () => Effect.succeed(""),
+  });
+
+  const bufferedAssistantAttachmentsByMessageId = yield* Cache.make<
+    MessageId,
+    ReadonlyArray<ChatAttachment>
+  >({
+    capacity: BUFFERED_MESSAGE_ATTACHMENTS_BY_MESSAGE_ID_CACHE_CAPACITY,
+    timeToLive: BUFFERED_MESSAGE_ATTACHMENTS_BY_MESSAGE_ID_TTL,
+    lookup: () => Effect.succeed([]),
   });
 
   const bufferedProposedPlanById = yield* Cache.make<string, { text: string; createdAt: string }>({
@@ -575,6 +629,107 @@ const make = Effect.gen(function* () {
   const clearAssistantMessageIdsForTurn = (threadId: ThreadId, turnId: TurnId) =>
     Cache.invalidate(turnMessageIdsByTurnKey, providerTurnKey(threadId, turnId));
 
+  const getOrCreateFallbackAssistantMessageIdForTurn = (threadId: ThreadId, turnId: TurnId) =>
+    Ref.modify(fallbackAssistantMessageStateByTurnKeyRef, (stateByTurnKey) => {
+      const turnKey = providerTurnKey(threadId, turnId);
+      const existingState = stateByTurnKey.get(turnKey);
+      if (existingState?.currentMessageId) {
+        return [existingState.currentMessageId, stateByTurnKey] as const;
+      }
+
+      const nextMessageIndex = existingState?.nextMessageIndex ?? 1;
+      const fallbackMessageId = MessageId.makeUnsafe(
+        `assistant:${threadId}:${turnId}:fallback:${nextMessageIndex}`,
+      );
+      const nextStateByTurnKey = new Map(stateByTurnKey);
+      nextStateByTurnKey.set(turnKey, {
+        currentMessageId: fallbackMessageId,
+        lastMessageId: fallbackMessageId,
+        nextMessageIndex: nextMessageIndex + 1,
+      });
+      return [fallbackMessageId, nextStateByTurnKey] as const;
+    });
+
+  const getLatestFallbackAssistantMessageIdForTurn = (threadId: ThreadId, turnId: TurnId) =>
+    Ref.get(fallbackAssistantMessageStateByTurnKeyRef).pipe(
+      Effect.map((stateByTurnKey) => {
+        const state = stateByTurnKey.get(providerTurnKey(threadId, turnId));
+        return state?.currentMessageId ?? state?.lastMessageId ?? null;
+      }),
+    );
+
+  const markFallbackAssistantMessageCompletedForTurn = (
+    threadId: ThreadId,
+    turnId: TurnId,
+    messageId: MessageId,
+  ) =>
+    Ref.update(fallbackAssistantMessageStateByTurnKeyRef, (stateByTurnKey) => {
+      const turnKey = providerTurnKey(threadId, turnId);
+      const existingState = stateByTurnKey.get(turnKey);
+      if (!existingState) {
+        return stateByTurnKey;
+      }
+      const nextStateByTurnKey = new Map(stateByTurnKey);
+      nextStateByTurnKey.set(turnKey, {
+        currentMessageId:
+          existingState.currentMessageId === messageId ? null : existingState.currentMessageId,
+        lastMessageId: messageId,
+        nextMessageIndex: existingState.nextMessageIndex,
+      });
+      return nextStateByTurnKey;
+    });
+
+  const clearFallbackAssistantMessageStateForTurn = (threadId: ThreadId, turnId: TurnId) =>
+    Ref.update(fallbackAssistantMessageStateByTurnKeyRef, (stateByTurnKey) => {
+      const turnKey = providerTurnKey(threadId, turnId);
+      if (!stateByTurnKey.has(turnKey)) {
+        return stateByTurnKey;
+      }
+      const nextStateByTurnKey = new Map(stateByTurnKey);
+      nextStateByTurnKey.delete(turnKey);
+      return nextStateByTurnKey;
+    });
+
+  const clearFallbackAssistantMessageStateForSession = (threadId: ThreadId) =>
+    Ref.update(fallbackAssistantMessageStateByTurnKeyRef, (stateByTurnKey) => {
+      const prefix = `${threadId}:`;
+      const nextStateByTurnKey = new Map(stateByTurnKey);
+      let changed = false;
+      for (const key of nextStateByTurnKey.keys()) {
+        if (!key.startsWith(prefix)) {
+          continue;
+        }
+        nextStateByTurnKey.delete(key);
+        changed = true;
+      }
+      return changed ? nextStateByTurnKey : stateByTurnKey;
+    });
+
+  const resolveAssistantMessageId = (input: {
+    event: ProviderRuntimeEvent;
+    threadId: ThreadId;
+    turnId?: TurnId;
+    createFallback: boolean;
+  }) =>
+    Effect.gen(function* () {
+      if (input.event.itemId) {
+        return MessageId.makeUnsafe(`assistant:${input.event.itemId}`);
+      }
+      if (input.turnId) {
+        if (input.createFallback) {
+          return yield* getOrCreateFallbackAssistantMessageIdForTurn(input.threadId, input.turnId);
+        }
+        const fallbackMessageId = yield* getLatestFallbackAssistantMessageIdForTurn(
+          input.threadId,
+          input.turnId,
+        );
+        if (fallbackMessageId) {
+          return fallbackMessageId;
+        }
+      }
+      return MessageId.makeUnsafe(`assistant:${input.event.eventId}`);
+    });
+
   const appendBufferedAssistantText = (messageId: MessageId, delta: string) =>
     Cache.getOption(bufferedAssistantTextByMessageId, messageId).pipe(
       Effect.flatMap((existingText) =>
@@ -607,6 +762,42 @@ const make = Effect.gen(function* () {
   const clearBufferedAssistantText = (messageId: MessageId) =>
     Cache.invalidate(bufferedAssistantTextByMessageId, messageId);
 
+  const appendBufferedAssistantAttachments = (
+    messageId: MessageId,
+    attachments: ReadonlyArray<ChatAttachment>,
+  ) =>
+    Cache.getOption(bufferedAssistantAttachmentsByMessageId, messageId).pipe(
+      Effect.flatMap((existingAttachments) => {
+        const nextAttachments = [
+          ...Option.getOrElse(existingAttachments, () => [] as ReadonlyArray<ChatAttachment>),
+          ...attachments,
+        ];
+        const dedupedAttachments = nextAttachments.filter(
+          (attachment, index) =>
+            nextAttachments.findIndex((candidate) => candidate.id === attachment.id) === index,
+        );
+        return Cache.set(
+          bufferedAssistantAttachmentsByMessageId,
+          messageId,
+          dedupedAttachments,
+        ).pipe(Effect.as(dedupedAttachments));
+      }),
+    );
+
+  const takeBufferedAssistantAttachments = (messageId: MessageId) =>
+    Cache.getOption(bufferedAssistantAttachmentsByMessageId, messageId).pipe(
+      Effect.flatMap((existingAttachments) =>
+        Cache.invalidate(bufferedAssistantAttachmentsByMessageId, messageId).pipe(
+          Effect.as(
+            Option.getOrElse(existingAttachments, () => [] as ReadonlyArray<ChatAttachment>),
+          ),
+        ),
+      ),
+    );
+
+  const clearBufferedAssistantAttachments = (messageId: MessageId) =>
+    Cache.invalidate(bufferedAssistantAttachmentsByMessageId, messageId);
+
   const appendBufferedProposedPlan = (planId: string, delta: string, createdAt: string) =>
     Cache.getOption(bufferedProposedPlanById, planId).pipe(
       Effect.flatMap((existingEntry) => {
@@ -632,7 +823,10 @@ const make = Effect.gen(function* () {
     Cache.invalidate(bufferedProposedPlanById, planId);
 
   const clearAssistantMessageState = (messageId: MessageId) =>
-    clearBufferedAssistantText(messageId);
+    Effect.all([
+      clearBufferedAssistantText(messageId),
+      clearBufferedAssistantAttachments(messageId),
+    ]).pipe(Effect.asVoid);
 
   const finalizeAssistantMessage = (input: {
     event: ProviderRuntimeEvent;
@@ -643,23 +837,28 @@ const make = Effect.gen(function* () {
     commandTag: string;
     finalDeltaCommandTag: string;
     fallbackText?: string;
+    fallbackAttachments?: ReadonlyArray<ChatAttachment>;
   }) =>
     Effect.gen(function* () {
       const bufferedText = yield* takeBufferedAssistantText(input.messageId);
+      const bufferedAttachments = yield* takeBufferedAssistantAttachments(input.messageId);
       const text =
         bufferedText.length > 0
           ? bufferedText
           : (input.fallbackText?.trim().length ?? 0) > 0
             ? input.fallbackText!
             : "";
+      const attachments =
+        bufferedAttachments.length > 0 ? bufferedAttachments : (input.fallbackAttachments ?? []);
 
-      if (text.length > 0) {
+      if (text.length > 0 || attachments.length > 0) {
         yield* orchestrationEngine.dispatch({
           type: "thread.message.assistant.delta",
           commandId: providerCommandId(input.event, input.finalDeltaCommandTag),
           threadId: input.threadId,
           messageId: input.messageId,
           delta: text,
+          ...(attachments.length > 0 ? { attachments } : {}),
           ...(input.turnId ? { turnId: input.turnId } : {}),
           createdAt: input.createdAt,
         });
@@ -670,6 +869,7 @@ const make = Effect.gen(function* () {
         commandId: providerCommandId(input.event, input.commandTag),
         threadId: input.threadId,
         messageId: input.messageId,
+        ...(attachments.length > 0 ? { attachments } : {}),
         ...(input.turnId ? { turnId: input.turnId } : {}),
         createdAt: input.createdAt,
       });
@@ -773,6 +973,7 @@ const make = Effect.gen(function* () {
           }),
         { concurrency: 1 },
       ).pipe(Effect.asVoid);
+      yield* clearFallbackAssistantMessageStateForSession(threadId);
       yield* Effect.forEach(
         proposedPlanKeys,
         (key) =>
@@ -838,23 +1039,7 @@ const make = Effect.gen(function* () {
             : event.type === "turn.completed" || event.type === "session.exited"
               ? null
               : activeTurnId;
-        const status = (() => {
-          switch (event.type) {
-            case "session.state.changed":
-              return orchestrationSessionStatusFromRuntimeState(event.payload.state);
-            case "turn.started":
-              return "running";
-            case "session.exited":
-              return "stopped";
-            case "turn.completed":
-              return runtimeTurnState(event) === "failed" ? "error" : "ready";
-            case "session.started":
-            case "thread.started":
-              // Provider thread/session start notifications can arrive during an
-              // active turn; preserve turn-running state in that case.
-              return activeTurnId !== null ? "running" : "ready";
-          }
-        })();
+        const status = statusFromLifecycleEvent(event, activeTurnId);
         const lastError =
           event.type === "session.state.changed" && event.payload.state === "error"
             ? (event.payload.reason ?? thread.session?.lastError ?? "Provider session error")
@@ -887,21 +1072,38 @@ const make = Effect.gen(function* () {
         event.type === "content.delta" && event.payload.streamKind === "assistant_text"
           ? event.payload.delta
           : undefined;
+      const assistantAttachments =
+        event.type === "content.delta" && event.payload.streamKind === "assistant_image"
+          ? (event.payload.attachments ?? [])
+          : undefined;
       const proposedPlanDelta =
         event.type === "turn.proposed.delta" ? event.payload.delta : undefined;
 
-      if (assistantDelta && assistantDelta.length > 0) {
-        const assistantMessageId = MessageId.makeUnsafe(
-          `assistant:${event.itemId ?? event.turnId ?? event.eventId}`,
-        );
+      if (
+        (assistantDelta && assistantDelta.length > 0) ||
+        (assistantAttachments?.length ?? 0) > 0
+      ) {
         const turnId = toTurnId(event.turnId);
+        const assistantMessageId = yield* resolveAssistantMessageId({
+          event,
+          threadId: thread.id,
+          ...(turnId ? { turnId } : {}),
+          createFallback: true,
+        });
         if (turnId) {
           yield* rememberAssistantMessageId(thread.id, turnId, assistantMessageId);
         }
 
         const assistantDeliveryMode = yield* Ref.get(assistantDeliveryModeRef);
+        const nextAttachments =
+          assistantAttachments && assistantAttachments.length > 0
+            ? yield* appendBufferedAssistantAttachments(assistantMessageId, assistantAttachments)
+            : [];
         if (assistantDeliveryMode === "buffered") {
-          const spillChunk = yield* appendBufferedAssistantText(assistantMessageId, assistantDelta);
+          const spillChunk =
+            assistantDelta && assistantDelta.length > 0
+              ? yield* appendBufferedAssistantText(assistantMessageId, assistantDelta)
+              : "";
           if (spillChunk.length > 0) {
             yield* orchestrationEngine.dispatch({
               type: "thread.message.assistant.delta",
@@ -909,6 +1111,7 @@ const make = Effect.gen(function* () {
               threadId: thread.id,
               messageId: assistantMessageId,
               delta: spillChunk,
+              ...(nextAttachments.length > 0 ? { attachments: nextAttachments } : {}),
               ...(turnId ? { turnId } : {}),
               createdAt: now,
             });
@@ -919,7 +1122,8 @@ const make = Effect.gen(function* () {
             commandId: providerCommandId(event, "assistant-delta"),
             threadId: thread.id,
             messageId: assistantMessageId,
-            delta: assistantDelta,
+            delta: assistantDelta ?? "",
+            ...(nextAttachments.length > 0 ? { attachments: nextAttachments } : {}),
             ...(turnId ? { turnId } : {}),
             createdAt: now,
           });
@@ -934,10 +1138,8 @@ const make = Effect.gen(function* () {
       const assistantCompletion =
         event.type === "item.completed" && event.payload.itemType === "assistant_message"
           ? {
-              messageId: MessageId.makeUnsafe(
-                `assistant:${event.itemId ?? event.turnId ?? event.eventId}`,
-              ),
               fallbackText: event.payload.detail,
+              fallbackAttachments: undefined,
             }
           : undefined;
       const proposedPlanCompletion =
@@ -950,8 +1152,13 @@ const make = Effect.gen(function* () {
           : undefined;
 
       if (assistantCompletion) {
-        const assistantMessageId = assistantCompletion.messageId;
         const turnId = toTurnId(event.turnId);
+        const assistantMessageId = yield* resolveAssistantMessageId({
+          event,
+          threadId: thread.id,
+          ...(turnId ? { turnId } : {}),
+          createFallback: true,
+        });
         const existingAssistantMessage = thread.messages.find(
           (entry) => entry.id === assistantMessageId,
         );
@@ -972,10 +1179,20 @@ const make = Effect.gen(function* () {
           ...(assistantCompletion.fallbackText !== undefined && shouldApplyFallbackCompletionText
             ? { fallbackText: assistantCompletion.fallbackText }
             : {}),
+          ...(assistantCompletion.fallbackAttachments !== undefined
+            ? { fallbackAttachments: assistantCompletion.fallbackAttachments }
+            : {}),
         });
 
         if (turnId) {
           yield* forgetAssistantMessageId(thread.id, turnId, assistantMessageId);
+          if (!event.itemId) {
+            yield* markFallbackAssistantMessageCompletedForTurn(
+              thread.id,
+              turnId,
+              assistantMessageId,
+            );
+          }
         }
       }
 
@@ -989,6 +1206,38 @@ const make = Effect.gen(function* () {
           fallbackMarkdown: proposedPlanCompletion.planMarkdown,
           updatedAt: now,
         });
+      }
+
+      if (event.type === "thread.token-usage.updated") {
+        const contextWindow = normalizeCodexContextWindow(event.payload.usage, now);
+        if (contextWindow) {
+          yield* orchestrationEngine.dispatch({
+            type: "thread.context-window.set",
+            commandId: providerCommandId(event, "thread-context-window-set"),
+            threadId: thread.id,
+            contextWindow,
+            createdAt: now,
+          });
+        }
+      }
+
+      if (event.type === "turn.completed" && event.provider === "claudeCode") {
+        const contextWindow = normalizeClaudeContextWindow(
+          {
+            usage: event.payload.usage,
+            modelUsage: event.payload.modelUsage,
+          },
+          now,
+        );
+        if (contextWindow) {
+          yield* orchestrationEngine.dispatch({
+            type: "thread.context-window.set",
+            commandId: providerCommandId(event, "thread-context-window-set"),
+            threadId: thread.id,
+            contextWindow,
+            createdAt: now,
+          });
+        }
       }
 
       if (event.type === "turn.completed") {
@@ -1010,6 +1259,7 @@ const make = Effect.gen(function* () {
             { concurrency: 1 },
           ).pipe(Effect.asVoid);
           yield* clearAssistantMessageIdsForTurn(thread.id, turnId);
+          yield* clearFallbackAssistantMessageStateForTurn(thread.id, turnId);
 
           yield* finalizeBufferedProposedPlan({
             event,
@@ -1068,14 +1318,15 @@ const make = Effect.gen(function* () {
           // (non-placeholder) capture from CheckpointReactor should not
           // be clobbered, and dispatching a duplicate placeholder for the
           // same turnId would produce an unstable checkpointTurnCount.
-          if (thread.checkpoints.some((c) => c.turnId === turnId)) {
-            // Already tracked; no-op.
-          } else {
-            const assistantMessageId = MessageId.makeUnsafe(
-              `assistant:${event.itemId ?? event.turnId ?? event.eventId}`,
-            );
+          if (!thread.checkpoints.some((checkpoint) => checkpoint.turnId === turnId)) {
+            const assistantMessageId = yield* resolveAssistantMessageId({
+              event,
+              threadId: thread.id,
+              turnId,
+              createFallback: true,
+            });
             const maxTurnCount = thread.checkpoints.reduce(
-              (max, c) => Math.max(max, c.checkpointTurnCount),
+              (max, checkpoint) => Math.max(max, checkpoint.checkpointTurnCount),
               0,
             );
             yield* orchestrationEngine.dispatch({

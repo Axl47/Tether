@@ -8,12 +8,20 @@ import {
   getReasoningEffortOptions,
   normalizeModelSlug,
   resolveModelSlug,
+  resolveProviderForModel,
 } from "./model";
 
 describe("normalizeModelSlug", () => {
   it("maps known aliases to canonical slugs", () => {
     expect(normalizeModelSlug("5.3")).toBe("gpt-5.3-codex");
     expect(normalizeModelSlug("gpt-5.3")).toBe("gpt-5.3-codex");
+  });
+
+  it("maps Nano Banana Gemini aliases to canonical slugs", () => {
+    expect(normalizeModelSlug("nano banana", "gemini")).toBe("gemini-2.5-flash-image");
+    expect(normalizeModelSlug("Nano Banana 2", "gemini")).toBe("gemini-3-pro-preview");
+    expect(normalizeModelSlug("nano banana 2", "gemini")).toBe("gemini-3-pro-preview");
+    expect(normalizeModelSlug("gemini-3-pro-image-preview", "gemini")).toBe("gemini-3-pro-preview");
   });
 
   it("returns null for empty or missing values", () => {
@@ -65,5 +73,17 @@ describe("getReasoningEffortOptions", () => {
 describe("getDefaultReasoningEffort", () => {
   it("returns provider-scoped defaults", () => {
     expect(getDefaultReasoningEffort("codex")).toBe("high");
+  });
+});
+
+describe("resolveProviderForModel", () => {
+  it("returns the matching provider for built-in Gemini models", () => {
+    expect(resolveProviderForModel("gemini-2.5-pro")).toBe("gemini");
+    expect(resolveProviderForModel("gemini-3-pro-image-preview")).toBe("gemini");
+    expect(resolveProviderForModel("3-flash")).toBe("gemini");
+  });
+
+  it("falls back to codex for unknown models", () => {
+    expect(resolveProviderForModel("unknown-model")).toBe("codex");
   });
 });

@@ -84,7 +84,9 @@ function createMinimalSnapshot(): OrchestrationReadModel {
         latestTurn: null,
         createdAt: NOW_ISO,
         updatedAt: NOW_ISO,
+        lastAutoRenameUserMessageId: null,
         deletedAt: null,
+        contextWindow: null,
         messages: [
           {
             id: "msg-1" as MessageId,

@@ -129,8 +129,27 @@ interface CreateDevRunnerEnvInput {
   readonly autoBootstrapProjectFromCwd: boolean | undefined;
   readonly logWebSocketEvents: boolean | undefined;
   readonly host: string | undefined;
+  readonly publicHost: string | undefined;
   readonly port: number | undefined;
   readonly devUrl: URL | undefined;
+}
+
+const isWildcardHost = (host: string | undefined): boolean =>
+  host === "0.0.0.0" || host === "::" || host === "[::]";
+
+function resolveBrowserHost(input: {
+  readonly host: string | undefined;
+  readonly publicHost: string | undefined;
+}): string {
+  const publicHost = input.publicHost?.trim();
+  if (publicHost) {
+    return publicHost;
+  }
+  const host = input.host?.trim();
+  if (host && !isWildcardHost(host)) {
+    return host;
+  }
+  return "localhost";
 }
 
 export function createDevRunnerEnv({
@@ -144,6 +163,7 @@ export function createDevRunnerEnv({
   autoBootstrapProjectFromCwd,
   logWebSocketEvents,
   host,
+  publicHost,
   port,
   devUrl,
 }: CreateDevRunnerEnvInput): Effect.Effect<NodeJS.ProcessEnv, never, Path.Path> {
@@ -151,19 +171,26 @@ export function createDevRunnerEnv({
     const serverPort = port ?? BASE_SERVER_PORT + serverOffset;
     const webPort = BASE_WEB_PORT + webOffset;
     const resolvedStateDir = yield* resolveStateDir(stateDir);
+    const browserHost = resolveBrowserHost({ host, publicHost });
 
     const output: NodeJS.ProcessEnv = {
       ...baseEnv,
       TETHER_PORT: String(serverPort),
       PORT: String(webPort),
       ELECTRON_RENDERER_PORT: String(webPort),
-      VITE_WS_URL: `ws://localhost:${serverPort}`,
-      VITE_DEV_SERVER_URL: devUrl?.toString() ?? `http://localhost:${webPort}`,
       TETHER_STATE_DIR: resolvedStateDir,
+      VITE_WS_URL: `ws://${browserHost}:${serverPort}`,
+      VITE_DEV_SERVER_URL: devUrl?.toString() ?? `http://${browserHost}:${webPort}`,
     };
 
     if (host !== undefined) {
       output.TETHER_HOST = host;
+    }
+
+    if (publicHost !== undefined) {
+      output.TETHER_PUBLIC_HOST = publicHost;
+    } else {
+      delete output.TETHER_PUBLIC_HOST;
     }
 
     if (authToken !== undefined) {
@@ -344,6 +371,7 @@ interface DevRunnerCliInput {
   readonly autoBootstrapProjectFromCwd: boolean | undefined;
   readonly logWebSocketEvents: boolean | undefined;
   readonly host: string | undefined;
+  readonly publicHost: string | undefined;
   readonly port: number | undefined;
   readonly devUrl: URL | undefined;
   readonly dryRun: boolean;
@@ -430,6 +458,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
         envOverrides.logWebSocketEvents,
       ),
       host: input.host,
+      publicHost: input.publicHost,
       port: input.port,
       devUrl: input.devUrl,
     });
@@ -515,6 +544,16 @@ const devRunnerCli = Command.make("dev-runner", {
   host: Flag.string("host").pipe(
     Flag.withDescription("Server host/interface override (forwards to TETHER_HOST)."),
     Flag.withFallbackConfig(optionalStringConfig("TETHER_HOST")),
+  ),
+  publicHost: Flag.string("public-host").pipe(
+    Flag.withDescription(
+      "Browser-facing host/IP for remote dev URLs (forwards to TETHER_PUBLIC_HOST).",
+    ),
+    Flag.withFallbackConfig(
+      Config.orElse(optionalStringConfig("TETHER_PUBLIC_HOST"), () =>
+        optionalStringConfig("T3CODE_PUBLIC_HOST"),
+      ),
+    ),
   ),
   port: Flag.integer("port").pipe(
     Flag.withSchema(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }))),

@@ -30,6 +30,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     latestTurn: null,
     branch: null,
     worktreePath: null,
+    contextWindow: null,
     ...overrides,
   };
 }
@@ -62,12 +63,14 @@ function makeReadModelThread(overrides: Partial<OrchestrationReadModel["threads"
     branch: null,
     worktreePath: null,
     latestTurn: null,
+    lastAutoRenameUserMessageId: null,
     createdAt: "2026-02-27T00:00:00.000Z",
     updatedAt: "2026-02-27T00:00:00.000Z",
     deletedAt: null,
     messages: [],
     activities: [],
     proposedPlans: [],
+    contextWindow: null,
     checkpoints: [],
     session: null,
     ...overrides,
@@ -192,7 +195,7 @@ describe("store pure functions", () => {
 });
 
 describe("store read model sync", () => {
-  it("falls back to the codex default for unsupported provider models without an active session", () => {
+  it("infers Claude provider models without requiring an active session", () => {
     const initialState = makeState(makeThread());
     const readModel = makeReadModel(
       makeReadModelThread({
@@ -202,7 +205,53 @@ describe("store read model sync", () => {
 
     const next = syncServerReadModel(initialState, readModel);
 
-    expect(next.threads[0]?.model).toBe(DEFAULT_MODEL_BY_PROVIDER.codex);
+    expect(next.threads[0]?.model).toBe("claude-opus-4-6");
+  });
+
+  it("syncs normalized thread context-window snapshots from the read model", () => {
+    const initialState = makeState(makeThread());
+    const readModel = makeReadModel(
+      makeReadModelThread({
+        contextWindow: {
+          provider: "codex",
+          usedTokens: 119000,
+          maxTokens: 258000,
+          remainingTokens: 139000,
+          usedPercent: 46,
+          updatedAt: "2026-02-27T00:00:00.000Z",
+        },
+      }),
+    );
+
+    const next = syncServerReadModel(initialState, readModel);
+
+    expect(next.threads[0]?.contextWindow).toMatchObject({
+      provider: "codex",
+      usedPercent: 46,
+    });
+  });
+
+  it("preserves Gemini provider and model from the server session", () => {
+    const initialState = makeState(makeThread());
+    const readModel = makeReadModel(
+      makeReadModelThread({
+        model: "gemini-3-flash-preview",
+        session: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          status: "ready",
+          providerName: "gemini",
+          runtimeMode: DEFAULT_RUNTIME_MODE,
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: "2026-02-27T00:00:00.000Z",
+        },
+      }),
+    );
+
+    const next = syncServerReadModel(initialState, readModel);
+
+    expect(next.threads[0]?.model).toBe("gemini-3-flash-preview");
+    expect(next.threads[0]?.session?.provider).toBe("gemini");
   });
 
   it("preserves the current project order when syncing incoming read model updates", () => {

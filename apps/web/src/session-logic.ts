@@ -16,7 +16,7 @@ import type {
   TurnDiffSummary,
 } from "./types";
 
-export type ProviderPickerKind = ProviderKind | "claudeCode" | "cursor";
+export type ProviderPickerKind = ProviderKind | "cursor";
 
 export const PROVIDER_OPTIONS: Array<{
   value: ProviderPickerKind;
@@ -24,7 +24,8 @@ export const PROVIDER_OPTIONS: Array<{
   available: boolean;
 }> = [
   { value: "codex", label: "Codex", available: true },
-  { value: "claudeCode", label: "Claude Code", available: false },
+  { value: "gemini", label: "Gemini", available: true },
+  { value: "claudeCode", label: "Claude Code", available: true },
   { value: "cursor", label: "Cursor", available: false },
 ];
 
@@ -423,14 +424,15 @@ export function deriveWorkLogEntries(
           : null;
       const command = extractToolCommand(payload);
       const changedFiles = extractChangedFiles(payload);
+      const detail = extractWorkDetail(payload, changedFiles);
       const entry: WorkLogEntry = {
         id: activity.id,
         createdAt: activity.createdAt,
-        label: activity.summary,
+        label: deriveWorkLabel(activity.summary, payload, command, changedFiles, detail),
         tone: activity.tone === "approval" ? "info" : activity.tone,
       };
-      if (payload && typeof payload.detail === "string" && payload.detail.length > 0) {
-        entry.detail = payload.detail;
+      if (detail) {
+        entry.detail = detail;
       }
       if (command) {
         entry.command = command;
@@ -468,6 +470,106 @@ function normalizeCommandValue(value: unknown): string | null {
   return parts.length > 0 ? parts.join(" ") : null;
 }
 
+function unwrapQuotedValue(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length < 2) {
+    return trimmed;
+  }
+  const first = trimmed[0];
+  const last = trimmed[trimmed.length - 1];
+  if ((first === '"' || first === "'") && first === last) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
+}
+
+function tokenizeCommandLine(value: string): Array<{ raw: string; start: number; end: number }> {
+  const tokens: Array<{ raw: string; start: number; end: number }> = [];
+  let index = 0;
+
+  while (index < value.length) {
+    while (index < value.length && /\s/.test(value[index] ?? "")) {
+      index += 1;
+    }
+    if (index >= value.length) {
+      break;
+    }
+
+    const start = index;
+    let activeQuote: '"' | "'" | null = null;
+
+    while (index < value.length) {
+      const char = value[index];
+      if (!char) {
+        break;
+      }
+      if (activeQuote) {
+        if (char === activeQuote) {
+          activeQuote = null;
+        }
+        index += 1;
+        continue;
+      }
+      if (char === '"' || char === "'") {
+        activeQuote = char;
+        index += 1;
+        continue;
+      }
+      if (/\s/.test(char)) {
+        break;
+      }
+      index += 1;
+    }
+
+    tokens.push({
+      raw: value.slice(start, index),
+      start,
+      end: index,
+    });
+  }
+
+  return tokens;
+}
+
+function isPowerShellExecutable(value: string): boolean {
+  const normalized = unwrapQuotedValue(value).replaceAll("/", "\\").toLowerCase();
+  const segments = normalized.split("\\");
+  const basename = segments[segments.length - 1] ?? normalized;
+  return (
+    basename === "powershell" ||
+    basename === "powershell.exe" ||
+    basename === "pwsh" ||
+    basename === "pwsh.exe"
+  );
+}
+
+function formatCommandForDisplay(command: string): string {
+  const trimmed = command.trim();
+  const tokens = tokenizeCommandLine(trimmed);
+  const executable = tokens[0];
+  if (!executable || !isPowerShellExecutable(executable.raw)) {
+    return trimmed;
+  }
+
+  for (let index = 1; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (!token) {
+      continue;
+    }
+    const flag = unwrapQuotedValue(token.raw).toLowerCase();
+    if (flag === "-encodedcommand" || flag === "-ec") {
+      return "PowerShell: [encoded command]";
+    }
+    if (flag === "-command" || flag === "-c" || flag === "-file") {
+      const inner = unwrapQuotedValue(trimmed.slice(token.end).trim());
+      return inner.length > 0 ? `PowerShell: ${normalizeWhitespace(inner)}` : "PowerShell";
+    }
+  }
+
+  const remainder = unwrapQuotedValue(trimmed.slice(executable.end).trim());
+  return remainder.length > 0 ? `PowerShell: ${normalizeWhitespace(remainder)}` : "PowerShell";
+}
+
 function extractToolCommand(payload: Record<string, unknown> | null): string | null {
   const data = asRecord(payload?.data);
   const item = asRecord(data?.item);
@@ -479,7 +581,122 @@ function extractToolCommand(payload: Record<string, unknown> | null): string | n
     normalizeCommandValue(itemResult?.command),
     normalizeCommandValue(data?.command),
   ];
+  const command = candidates.find((candidate) => candidate !== null) ?? null;
+  return command ? formatCommandForDisplay(command) : null;
+}
+
+function normalizeWhitespace(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function summarizeVerboseText(value: string, maxLength = 180): string {
+  const normalized = normalizeWhitespace(value);
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
+function looksLikeCodeOrMarkup(value: string): boolean {
+  return /<!DOCTYPE|<html|<head|<body|function\s|\bconst\b|\blet\b|\bclass\b/.test(value);
+}
+
+function extractLocationPaths(payload: Record<string, unknown> | null): string[] {
+  const data = asRecord(payload?.data);
+  const locations = data?.locations;
+  if (!Array.isArray(locations)) {
+    return [];
+  }
+  return locations
+    .map((entry) => {
+      const record = asRecord(entry);
+      return (
+        asTrimmedString(record?.path) ??
+        asTrimmedString(record?.filePath) ??
+        asTrimmedString(record?.uri)
+      );
+    })
+    .filter((value): value is string => value !== null);
+}
+
+function extractToolName(payload: Record<string, unknown> | null): string | null {
+  const data = asRecord(payload?.data);
+  const item = asRecord(data?.item);
+  const candidates = [
+    asTrimmedString(payload?.title),
+    asTrimmedString(data?.title),
+    asTrimmedString(data?.tool_name),
+    asTrimmedString(data?.toolName),
+    asTrimmedString(item?.title),
+    asTrimmedString(item?.name),
+  ];
   return candidates.find((candidate) => candidate !== null) ?? null;
+}
+
+function extractWorkDetail(
+  payload: Record<string, unknown> | null,
+  changedFiles: ReadonlyArray<string>,
+): string | null {
+  const data = asRecord(payload?.data);
+  const rawDetail =
+    asTrimmedString(payload?.detail) ??
+    asTrimmedString(data?.detail) ??
+    asTrimmedString(data?.output) ??
+    asTrimmedString(data?.rawOutput);
+
+  if (rawDetail) {
+    if (looksLikeCodeOrMarkup(rawDetail) && changedFiles.length > 0) {
+      return `Updated ${changedFiles.slice(0, 3).join(", ")}`;
+    }
+    return summarizeVerboseText(rawDetail);
+  }
+
+  const locationPaths = extractLocationPaths(payload);
+  if (locationPaths.length > 0) {
+    return `Working in ${locationPaths.slice(0, 3).join(", ")}`;
+  }
+
+  if (changedFiles.length > 0) {
+    return `Updated ${changedFiles.slice(0, 3).join(", ")}`;
+  }
+
+  return null;
+}
+
+function deriveWorkLabel(
+  summary: string,
+  payload: Record<string, unknown> | null,
+  command: string | null,
+  changedFiles: ReadonlyArray<string>,
+  detail: string | null,
+): string {
+  const normalizedSummary = normalizeWhitespace(summary);
+  const toolName = extractToolName(payload);
+  const genericGeminiSummary = /^gemini tool(?: complete)?$/i.test(normalizedSummary);
+
+  if (!genericGeminiSummary && normalizedSummary.length > 0) {
+    return normalizedSummary;
+  }
+
+  if (toolName && toolName.toLowerCase() !== "gemini tool") {
+    return toolName;
+  }
+
+  if (command) {
+    return summarizeVerboseText(command, 72);
+  }
+
+  if (changedFiles.length > 0) {
+    return changedFiles.length === 1
+      ? `Updating ${changedFiles[0]}`
+      : `Updating ${changedFiles.length} files`;
+  }
+
+  if (detail) {
+    return summarizeVerboseText(detail, 72);
+  }
+
+  return normalizedSummary.length > 0 ? normalizedSummary : "Working";
 }
 
 function pushChangedFile(target: string[], seen: Set<string>, value: unknown) {
