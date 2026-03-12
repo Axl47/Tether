@@ -7359,12 +7359,7 @@ const CodexTraitsPicker = memo(function CodexTraitsPicker(props: {
     high: "High",
     xhigh: "Extra High",
   };
-  const triggerLabel = [
-    reasoningLabelByOption[props.effort],
-    ...(props.fastModeEnabled ? ["Fast"] : []),
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const triggerLabel = reasoningLabelByOption[props.effort];
 
   return (
     <Menu
@@ -7382,7 +7377,15 @@ const CodexTraitsPicker = memo(function CodexTraitsPicker(props: {
           />
         }
       >
-        <span>{triggerLabel}</span>
+        <span className="flex items-center gap-1.5">
+          {props.fastModeEnabled ? (
+            <>
+              <ZapIcon aria-hidden="true" className="size-3.5" />
+              <span className="sr-only">Fast mode enabled</span>
+            </>
+          ) : null}
+          <span>{triggerLabel}</span>
+        </span>
         <ChevronDownIcon aria-hidden="true" className="size-3 opacity-60" />
       </MenuTrigger>
       <MenuPopup align="start">
