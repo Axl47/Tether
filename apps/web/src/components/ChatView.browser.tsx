@@ -122,6 +122,7 @@ interface MountedChatView {
   cleanup: () => Promise<void>;
   measureUserRow: (targetMessageId: MessageId) => Promise<UserRowMeasurement>;
   setViewport: (viewport: ViewportSpec) => Promise<void>;
+  pathname: () => string;
 }
 
 function isoAt(offsetSeconds: number): string {
@@ -1062,6 +1063,7 @@ async function mountChatView(options: {
   viewport: ViewportSpec;
   snapshot: OrchestrationReadModel;
   configureFixture?: (fixture: TestFixture) => void;
+  initialEntries?: string[];
 }): Promise<MountedChatView> {
   fixture = buildFixture(options.snapshot);
   options.configureFixture?.(fixture);
@@ -1079,7 +1081,7 @@ async function mountChatView(options: {
 
   const router = getRouter(
     createMemoryHistory({
-      initialEntries: [`/${THREAD_ID}`],
+      initialEntries: options.initialEntries ?? [`/${THREAD_ID}`],
     }),
   );
 
@@ -1099,6 +1101,7 @@ async function mountChatView(options: {
       await setViewport(viewport);
       await waitForProductionStyles();
     },
+    pathname: () => router.state.location.pathname,
   };
 }
 
@@ -2172,6 +2175,44 @@ describe("ChatView timeline estimator parity (full app)", () => {
         },
         { timeout: 8_000, interval: 16 },
       );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps a draft thread selected until snapshot promotion catches up", async () => {
+    useComposerDraftStore.getState().setProjectDraftThreadId(PROJECT_ID, THREAD_ID, {
+      createdAt: NOW_ISO,
+      envMode: "local",
+      runtimeMode: "full-access",
+      interactionMode: "default",
+    });
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createDraftOnlySnapshot(),
+    });
+
+    try {
+      await submitQueuedPrompt("Promote this draft");
+
+      await vi.waitFor(
+        () => {
+          expect(
+            wsRequests.some((request) => dispatchCommand(request)?.type === "thread.create"),
+          ).toBe(true);
+          expect(
+            wsRequests.some((request) => dispatchCommand(request)?.type === "thread.turn.start"),
+          ).toBe(true);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      await new Promise((resolve) => window.setTimeout(resolve, 80));
+      await waitForLayout();
+
+      expect(useComposerDraftStore.getState().getDraftThread(THREAD_ID)).not.toBeNull();
+      expect(mounted.pathname()).toBe(`/${THREAD_ID}`);
     } finally {
       await mounted.cleanup();
     }

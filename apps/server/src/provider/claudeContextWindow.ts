@@ -1,6 +1,12 @@
 import type { OrchestrationContextWindow } from "@t3tools/contracts";
 
-import { asNonNegativeInteger, asRecord, clampPercent } from "./contextWindowCommon.ts";
+import {
+  asNonNegativeInteger,
+  asRecord,
+  clampPercent,
+  resolveContextUsedTokens,
+  sumDefined,
+} from "./contextWindowCommon.ts";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -18,21 +24,6 @@ function pickValue(record: UnknownRecord | null, keys: ReadonlyArray<string>): u
 
 function pickNumber(record: UnknownRecord | null, keys: ReadonlyArray<string>): number | undefined {
   return asNonNegativeInteger(pickValue(record, keys));
-}
-
-function sumDefined(values: ReadonlyArray<number | undefined>): number | undefined {
-  let total = 0;
-  let hasValue = false;
-
-  for (const value of values) {
-    if (value === undefined) {
-      continue;
-    }
-    total += value;
-    hasValue = true;
-  }
-
-  return hasValue ? total : undefined;
 }
 
 function modelUsageRecords(value: unknown): ReadonlyArray<UnknownRecord> {
@@ -96,10 +87,6 @@ export function normalizeClaudeContextWindow(
   // Fold them into the visible input bucket so the breakdown still sums cleanly.
   const inputTokens = sumDefined([directInputTokens, cacheCreationInputTokens]);
 
-  const usedTokens =
-    pickNumber(usageRecord, ["total_tokens", "totalTokens"]) ??
-    sumDefined([directInputTokens, cacheCreationInputTokens, cachedInputTokens, outputTokens]);
-
   const maxTokens =
     pickLastNumber(perModelUsage, ["contextWindow", "context_window"]) ??
     pickNumber(usageRecord, [
@@ -108,6 +95,15 @@ export function normalizeClaudeContextWindow(
       "modelContextWindow",
       "model_context_window",
     ]);
+
+  const usedTokens = resolveContextUsedTokens({
+    totalTokens: pickNumber(usageRecord, ["total_tokens", "totalTokens"]),
+    inputTokens,
+    cachedInputTokens,
+    outputTokens,
+    reasoningOutputTokens: undefined,
+    maxTokens,
+  });
 
   if (usedTokens === undefined || maxTokens === undefined || maxTokens <= 0) {
     return null;
