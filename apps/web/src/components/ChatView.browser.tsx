@@ -2847,6 +2847,67 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("falls back to the post-compaction baseline for overflowing codex snapshots without a last-turn delta", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: (() => {
+        const snapshot = createSnapshotForTargetUser({
+          targetMessageId: "msg-user-context-window-overflow-baseline" as MessageId,
+          targetText: "context overflow baseline target",
+        });
+        const [thread] = snapshot.threads;
+        if (!thread) {
+          return snapshot;
+        }
+        return {
+          ...snapshot,
+          threads: [
+            {
+              ...thread,
+              contextWindow: {
+                provider: "codex" as const,
+                usedTokens: 400_000,
+                reportedTotalTokens: 400_000,
+                maxTokens: 258_000,
+                remainingTokens: 0,
+                usedPercent: 155,
+                updatedAt: NOW_ISO,
+              },
+            },
+          ],
+        };
+      })(),
+    });
+
+    try {
+      const badge = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll("button")).find(
+            (button) => button.getAttribute("aria-label") === "Estimated context window usage",
+          ) as HTMLButtonElement | null,
+        "Unable to find context-window badge.",
+      );
+      expect(badge.textContent?.trim()).toBe("15%");
+
+      badge.focus();
+
+      await vi.waitFor(
+        () => {
+          expect(document.body.textContent).toContain("Estimated context window");
+          expect(document.body.textContent).toContain("15% used (85% left)");
+          expect(document.body.textContent).toContain("Estimated usage: 38.7k / 258k tokens");
+          expect(document.body.textContent).toContain(
+            "Using the post-compaction baseline while waiting for a refreshed last-turn delta from Codex.",
+          );
+          expect(document.body.textContent).toContain("Reported total: 400k tokens");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("moves queued content back into the composer for editing and supports deleting queued items", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,

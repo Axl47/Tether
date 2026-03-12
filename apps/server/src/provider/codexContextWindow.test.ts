@@ -368,6 +368,29 @@ describe("normalizeCodexContextWindow", () => {
     });
   });
 
+  it("falls back to the post-compaction baseline for overflowing updates without a usable last-turn delta", () => {
+    expect(
+      normalizeCodexContextWindow(
+        {
+          info: {
+            total_token_usage: {
+              total_tokens: 400_000,
+            },
+            model_context_window: 258_000,
+          },
+        },
+        "2026-03-07T03:45:00.000Z",
+      ),
+    ).toMatchObject({
+      usedTokens: 38_700,
+      reportedTotalTokens: 400_000,
+      compactionAnchorNonCachedTokens: 400_000,
+      compactionAnchorUsedTokens: 38_700,
+      remainingTokens: 219_300,
+      usedPercent: 15,
+    });
+  });
+
   it("recovers from legacy snapshots clamped exactly to the model limit", () => {
     expect(
       normalizeCodexContextWindow(
@@ -429,7 +452,7 @@ describe("normalizeCodexContextWindow", () => {
     ).toBeNull();
   });
 
-  it("preserves derived values when usage exceeds the model limit", () => {
+  it("switches overflowing totals without a last-turn delta onto the post-compaction baseline", () => {
     expect(
       normalizeCodexContextWindow(
         {
@@ -443,11 +466,13 @@ describe("normalizeCodexContextWindow", () => {
         "2026-03-07T00:00:00.000Z",
       ),
     ).toMatchObject({
-      usedTokens: 300000,
+      usedTokens: 38_760,
       reportedTotalTokens: 300000,
       maxTokens: 258400,
-      remainingTokens: 0,
-      usedPercent: 116,
+      compactionAnchorNonCachedTokens: 300000,
+      compactionAnchorUsedTokens: 38_760,
+      remainingTokens: 219640,
+      usedPercent: 15,
     });
   });
 });

@@ -58,15 +58,22 @@ export default function ContextWindowIndicator(props: {
     !isCompactionEstimate &&
     contextWindow.usedTokens >= contextWindow.maxTokens &&
     (contextWindow.reportedLastEffectiveTokens ?? contextWindow.reportedLastTokens) !== undefined;
+  const hasCodexOverflowBaselineFallback =
+    isCodexEstimate &&
+    !isCompactionEstimate &&
+    !hasLegacyCodexFallback &&
+    contextWindow.usedTokens >= contextWindow.maxTokens;
   const displayedCodexUsedTokens = hasLegacyCodexFallback
     ? Math.max(
         0,
         Math.round(contextWindow.maxTokens * 0.15) +
           (contextWindow.reportedLastEffectiveTokens ?? contextWindow.reportedLastTokens ?? 0),
       )
-    : hasLegacyRawCodexSnapshot
-      ? derivedCodexPromptFootprint
-      : contextWindow.usedTokens;
+    : hasCodexOverflowBaselineFallback
+      ? Math.round(contextWindow.maxTokens * 0.15)
+      : hasLegacyRawCodexSnapshot
+        ? derivedCodexPromptFootprint
+        : contextWindow.usedTokens;
   const displayedUsedPercent = isCodexEstimate
     ? Math.max(0, Math.round((displayedCodexUsedTokens / contextWindow.maxTokens) * 100))
     : contextWindow.usedPercent;
@@ -116,11 +123,13 @@ export default function ContextWindowIndicator(props: {
               <p className="text-muted-foreground">
                 {hasLegacyCodexFallback
                   ? "Approximated from the latest reported turn while waiting for a refreshed compaction anchor."
-                  : hasLegacyRawCodexSnapshot
-                    ? "Derived from the current Codex totals with cached, output, and reasoning tokens removed."
-                    : isCompactionEstimate
-                      ? "Estimated from a 15% post-compaction reset plus new non-cached token growth."
-                      : "Estimated from Codex reported totals with cached, output, and reasoning tokens excluded."}
+                  : hasCodexOverflowBaselineFallback
+                    ? "Using the post-compaction baseline while waiting for a refreshed last-turn delta from Codex."
+                    : hasLegacyRawCodexSnapshot
+                      ? "Derived from the current Codex totals with cached, output, and reasoning tokens removed."
+                      : isCompactionEstimate
+                        ? "Estimated from a 15% post-compaction reset plus new non-cached token growth."
+                        : "Estimated from Codex reported totals with cached, output, and reasoning tokens excluded."}
               </p>
               {contextWindow.reportedTotalTokens !== undefined ? (
                 <p>

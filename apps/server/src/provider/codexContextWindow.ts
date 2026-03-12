@@ -139,20 +139,21 @@ function resolveCompactionAnchoredEstimate(input: {
     const previousReportedTotalTokens =
       previousContextWindow?.reportedTotalTokens ?? previousContextWindow?.usedTokens;
     const canRecoverOverflowEstimate =
-      effectiveReportedLastTotal !== undefined &&
-      (effectiveReportedTotal >= maxTokens ||
-        (previousReportedTotalTokens !== undefined &&
-          previousContextWindow !== null &&
-          previousReportedTotalTokens >= previousContextWindow.maxTokens));
+      effectiveReportedTotal >= maxTokens ||
+      (previousReportedTotalTokens !== undefined &&
+        previousContextWindow !== null &&
+        previousReportedTotalTokens >= previousContextWindow.maxTokens);
 
     if (canRecoverOverflowEstimate) {
       const recoveredAnchorUsedTokens = resolveCompactionResetTokens(maxTokens);
       const recoveredAnchorNonCachedTokens = Math.max(
         0,
-        effectiveReportedTotal - effectiveReportedLastTotal,
+        effectiveReportedTotal - (effectiveReportedLastTotal ?? 0),
       );
       return {
-        usedTokens: normalizeUsedTokens(recoveredAnchorUsedTokens + effectiveReportedLastTotal),
+        usedTokens: normalizeUsedTokens(
+          recoveredAnchorUsedTokens + (effectiveReportedLastTotal ?? 0),
+        ),
         compactionAnchorNonCachedTokens: recoveredAnchorNonCachedTokens,
         compactionAnchorUsedTokens: recoveredAnchorUsedTokens,
       };
