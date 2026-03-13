@@ -19,6 +19,16 @@ export interface PendingUserInputProgress {
   canAdvance: boolean;
 }
 
+export function pendingUserInputComposerSeedKey(input: {
+  requestId: string;
+  questionIndex: number;
+  questionId?: string | null;
+}): string {
+  return input.questionId
+    ? `${input.requestId}:${input.questionId}`
+    : `${input.requestId}:${input.questionIndex}`;
+}
+
 function normalizeDraftAnswer(value: string | undefined): string | null {
   if (typeof value !== "string") {
     return null;

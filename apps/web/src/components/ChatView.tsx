@@ -93,6 +93,7 @@ import { AUTO_SCROLL_BOTTOM_THRESHOLD_PX, isScrollContainerNearBottom } from "..
 import {
   buildPendingUserInputAnswers,
   derivePendingUserInputProgress,
+  pendingUserInputComposerSeedKey,
   setPendingUserInputCustomAnswer,
   type PendingUserInputDraftAnswer,
 } from "../pendingUserInput";
@@ -728,6 +729,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   } | null>(null);
   const pendingInteractionAnchorFrameRef = useRef<number | null>(null);
   const composerEditorRef = useRef<ComposerPromptEditorHandle>(null);
+  const pendingUserInputComposerSeedRef = useRef<string | null>(null);
   const composerImageInputRef = useRef<HTMLInputElement>(null);
   const composerFormRef = useRef<HTMLFormElement>(null);
   const composerFormHeightRef = useRef(0);
@@ -1023,6 +1025,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
     ? respondingUserInputRequestIds.includes(activePendingUserInput.requestId)
     : false;
   const hasActivePendingUserInput = activePendingProgress !== null;
+  const activePendingQuestionId = activePendingProgress?.activeQuestion?.id ?? null;
+  const activePendingCustomAnswer = activePendingProgress?.customAnswer ?? "";
+  const activePendingQuestionIndexForComposer = activePendingProgress?.questionIndex ?? 0;
   const activeProposedPlan = useMemo(() => {
     if (!latestTurnSettled) {
       return null;
@@ -1078,22 +1083,38 @@ export default function ChatView({ threadId }: ChatViewProps) {
     pendingUserInputs.length > 0 ||
     (showPlanFollowUpPrompt && activeProposedPlan !== null);
   useEffect(() => {
-    if (!activePendingProgress) {
+    if (!hasActivePendingUserInput || !activePendingUserInput) {
+      pendingUserInputComposerSeedRef.current = null;
       return;
     }
-    promptRef.current = activePendingProgress.customAnswer;
-    setComposerCursor(activePendingProgress.customAnswer.length);
+
+    const pendingComposerSeedKey = pendingUserInputComposerSeedKey({
+      requestId: activePendingUserInput.requestId,
+      questionIndex: activePendingQuestionIndexForComposer,
+      questionId: activePendingQuestionId,
+    });
+
+    promptRef.current = activePendingCustomAnswer;
+    if (pendingUserInputComposerSeedRef.current === pendingComposerSeedKey) {
+      return;
+    }
+
+    pendingUserInputComposerSeedRef.current = pendingComposerSeedKey;
+    setComposerCursor(activePendingCustomAnswer.length);
     setComposerTrigger(
       detectComposerTrigger(
-        activePendingProgress.customAnswer,
-        expandCollapsedComposerCursor(
-          activePendingProgress.customAnswer,
-          activePendingProgress.customAnswer.length,
-        ),
+        activePendingCustomAnswer,
+        expandCollapsedComposerCursor(activePendingCustomAnswer, activePendingCustomAnswer.length),
       ),
     );
     setComposerHighlightedItemId(null);
-  }, [activePendingProgress, activePendingUserInput?.requestId]);
+  }, [
+    activePendingCustomAnswer,
+    activePendingQuestionId,
+    activePendingQuestionIndexForComposer,
+    activePendingUserInput,
+    hasActivePendingUserInput,
+  ]);
   useEffect(() => {
     attachmentPreviewHandoffByMessageIdRef.current = attachmentPreviewHandoffByMessageId;
   }, [attachmentPreviewHandoffByMessageId]);

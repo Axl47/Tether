@@ -5,6 +5,7 @@ import {
   countAnsweredPendingUserInputQuestions,
   derivePendingUserInputProgress,
   findFirstUnansweredPendingUserInputQuestionIndex,
+  pendingUserInputComposerSeedKey,
   resolvePendingUserInputAnswer,
   setPendingUserInputCustomAnswer,
 } from "./pendingUserInput";
@@ -188,5 +189,21 @@ describe("pending user input question progress", () => {
       isComplete: false,
       canAdvance: true,
     });
+  });
+
+  it("keeps the same composer seed while editing the same question", () => {
+    const previousSeedKey = pendingUserInputComposerSeedKey({
+      requestId: "req-1",
+      questionIndex: 0,
+      questionId: "scope",
+    });
+
+    expect(
+      pendingUserInputComposerSeedKey({
+        requestId: "req-1",
+        questionIndex: 0,
+        questionId: "scope",
+      }),
+    ).toBe(previousSeedKey);
   });
 });
