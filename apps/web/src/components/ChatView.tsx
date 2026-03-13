@@ -32,6 +32,7 @@ import {
 import {
   type DragEvent,
   memo,
+  startTransition,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -3339,22 +3340,24 @@ export default function ChatView({ threadId }: ChatViewProps) {
         return;
       }
       promptRef.current = value;
-      setPendingUserInputAnswersByRequestId((existing) => ({
-        ...existing,
-        [activePendingUserInput.requestId]: {
-          ...existing[activePendingUserInput.requestId],
-          [questionId]: setPendingUserInputCustomAnswer(
-            existing[activePendingUserInput.requestId]?.[questionId],
-            value,
-          ),
-        },
-      }));
-      setComposerCursor(nextCursor);
-      setComposerTrigger(
-        cursorAdjacentToMention
-          ? null
-          : detectComposerTrigger(value, expandCollapsedComposerCursor(value, nextCursor)),
-      );
+      startTransition(() => {
+        setPendingUserInputAnswersByRequestId((existing) => ({
+          ...existing,
+          [activePendingUserInput.requestId]: {
+            ...existing[activePendingUserInput.requestId],
+            [questionId]: setPendingUserInputCustomAnswer(
+              existing[activePendingUserInput.requestId]?.[questionId],
+              value,
+            ),
+          },
+        }));
+        setComposerCursor(nextCursor);
+        setComposerTrigger(
+          cursorAdjacentToMention
+            ? null
+            : detectComposerTrigger(value, expandCollapsedComposerCursor(value, nextCursor)),
+        );
+      });
     },
     [activePendingUserInput],
   );
@@ -3858,16 +3861,18 @@ export default function ChatView({ threadId }: ChatViewProps) {
         return;
       }
       promptRef.current = nextPrompt;
-      setPrompt(nextPrompt);
-      setComposerCursor(nextCursor);
-      setComposerTrigger(
-        cursorAdjacentToMention
-          ? null
-          : detectComposerTrigger(
-              nextPrompt,
-              expandCollapsedComposerCursor(nextPrompt, nextCursor),
-            ),
-      );
+      startTransition(() => {
+        setPrompt(nextPrompt);
+        setComposerCursor(nextCursor);
+        setComposerTrigger(
+          cursorAdjacentToMention
+            ? null
+            : detectComposerTrigger(
+                nextPrompt,
+                expandCollapsedComposerCursor(nextPrompt, nextCursor),
+              ),
+        );
+      });
     },
     [
       activePendingProgress?.activeQuestion,
