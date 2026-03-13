@@ -2,7 +2,9 @@ import {
   type ChatAttachment,
   CommandId,
   EventId,
+  MessageId,
   type OrchestrationEvent,
+  type OrchestrationThreadActivity,
   type ProviderModelOptions,
   type ProviderKind,
   type ProviderStartOptions,
@@ -124,6 +126,99 @@ function isUnknownPendingApprovalRequestError(cause: Cause.Cause<ProviderService
     message.includes("unknown pending approval request") ||
     message.includes("unknown pending permission request")
   );
+}
+
+function isUnknownPendingUserInputRequestError(cause: Cause.Cause<ProviderServiceError>): boolean {
+  const error = Cause.squash(cause);
+  if (Schema.is(ProviderAdapterRequestError)(error)) {
+    return error.detail.toLowerCase().includes("unknown pending user input request");
+  }
+  return Cause.pretty(cause).toLowerCase().includes("unknown pending user input request");
+}
+
+function activityPayloadRecord(
+  activity: OrchestrationThreadActivity,
+): Record<string, unknown> | undefined {
+  return activity.payload && typeof activity.payload === "object"
+    ? (activity.payload as Record<string, unknown>)
+    : undefined;
+}
+
+function questionTextByIdForRequest(input: {
+  readonly activities: ReadonlyArray<OrchestrationThreadActivity>;
+  readonly requestId: string;
+}): ReadonlyMap<string, string> {
+  const activity = input.activities.toReversed().find((entry) => {
+    if (entry.kind !== "user-input.requested") {
+      return false;
+    }
+    const payload = activityPayloadRecord(entry);
+    return payload?.requestId === input.requestId;
+  });
+  const payload = activity ? activityPayloadRecord(activity) : undefined;
+  const questions = payload?.questions;
+  if (!Array.isArray(questions)) {
+    return new Map();
+  }
+
+  const questionLabels = new Map<string, string>();
+  for (const entry of questions) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+    const question = entry as Record<string, unknown>;
+    if (typeof question.id !== "string") {
+      continue;
+    }
+    const label =
+      typeof question.question === "string"
+        ? question.question
+        : typeof question.header === "string"
+          ? question.header
+          : question.id;
+    questionLabels.set(question.id, label);
+  }
+  return questionLabels;
+}
+
+function formatUserInputAnswerValue(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value.map((entry) => formatUserInputAnswerValue(entry)).join(", ");
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (value === null || value === undefined) {
+    return "blank";
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function buildUserInputFallbackMessage(input: {
+  readonly activities: ReadonlyArray<OrchestrationThreadActivity>;
+  readonly requestId: string;
+  readonly answers: Record<string, unknown>;
+}): string {
+  const labels = questionTextByIdForRequest({
+    activities: input.activities,
+    requestId: input.requestId,
+  });
+  const lines = Object.entries(input.answers).map(([questionId, value]) => {
+    const label = labels.get(questionId) ?? questionId.replaceAll("_", " ");
+    return `- ${label}: ${formatUserInputAnswerValue(value)}`;
+  });
+
+  return [
+    "Continuing after the previous run was interrupted while waiting for structured input.",
+    ...lines,
+  ].join("\n");
 }
 
 function isTemporaryWorktreeBranch(branch: string): boolean {
@@ -632,14 +727,72 @@ const make = Effect.gen(function* () {
       })
       .pipe(
         Effect.catchCause((cause) =>
-          appendProviderFailureActivity({
-            threadId: event.payload.threadId,
-            kind: "provider.user-input.respond.failed",
-            summary: "Provider user input response failed",
-            detail: Cause.pretty(cause),
-            turnId: null,
-            createdAt: event.payload.createdAt,
-            requestId: event.payload.requestId,
+          Effect.gen(function* () {
+            if (isUnknownPendingUserInputRequestError(cause)) {
+              yield* orchestrationEngine.dispatch({
+                type: "thread.activity.append",
+                commandId: serverCommandId("user-input-fallback-resolved"),
+                threadId: event.payload.threadId,
+                activity: {
+                  id: EventId.makeUnsafe(crypto.randomUUID()),
+                  tone: "info",
+                  kind: "user-input.resolved",
+                  summary: "User input submitted",
+                  payload: {
+                    requestId: event.payload.requestId,
+                    answers: event.payload.answers,
+                  },
+                  turnId: null,
+                  createdAt: event.payload.createdAt,
+                },
+                createdAt: event.payload.createdAt,
+              });
+
+              yield* orchestrationEngine
+                .dispatch({
+                  type: "thread.turn.start",
+                  commandId: serverCommandId("user-input-fallback-turn-start"),
+                  threadId: event.payload.threadId,
+                  message: {
+                    messageId: MessageId.makeUnsafe(`user-input-fallback:${crypto.randomUUID()}`),
+                    role: "user",
+                    text: buildUserInputFallbackMessage({
+                      activities: thread.activities,
+                      requestId: event.payload.requestId,
+                      answers: event.payload.answers,
+                    }),
+                    attachments: [],
+                  },
+                  model: thread.model,
+                  runtimeMode: thread.runtimeMode,
+                  interactionMode: thread.interactionMode,
+                  createdAt: event.payload.createdAt,
+                })
+                .pipe(
+                  Effect.catchCause((fallbackCause) =>
+                    appendProviderFailureActivity({
+                      threadId: event.payload.threadId,
+                      kind: "provider.user-input.respond.failed",
+                      summary: "Provider user input response failed",
+                      detail: `${Cause.pretty(cause)}\n\nFallback follow-up turn also failed:\n${Cause.pretty(fallbackCause)}`,
+                      turnId: null,
+                      createdAt: event.payload.createdAt,
+                      requestId: event.payload.requestId,
+                    }),
+                  ),
+                );
+              return;
+            }
+
+            yield* appendProviderFailureActivity({
+              threadId: event.payload.threadId,
+              kind: "provider.user-input.respond.failed",
+              summary: "Provider user input response failed",
+              detail: Cause.pretty(cause),
+              turnId: null,
+              createdAt: event.payload.createdAt,
+              requestId: event.payload.requestId,
+            });
           }),
         ),
       );
