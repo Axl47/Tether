@@ -135,6 +135,49 @@ function createPendingUserInputHarness() {
   return { manager, context, requireSession, writeMessage, emitEvent };
 }
 
+function createPendingApprovalHarness() {
+  const manager = new CodexAppServerManager();
+  const context = {
+    session: {
+      provider: "codex",
+      status: "ready",
+      threadId: "thread_1",
+      runtimeMode: "full-access",
+      model: "gpt-5.3-codex",
+      resumeCursor: { threadId: "thread_1" },
+      createdAt: "2026-02-10T00:00:00.000Z",
+      updatedAt: "2026-02-10T00:00:00.000Z",
+    },
+    pendingApprovals: new Map([
+      [
+        ApprovalRequestId.makeUnsafe("req-approval-live"),
+        {
+          requestId: ApprovalRequestId.makeUnsafe("req-approval-live"),
+          jsonRpcId: 42,
+          method: "item/commandExecution/requestApproval" as const,
+          requestKind: "command" as const,
+          threadId: asThreadId("thread_1"),
+        },
+      ],
+    ]),
+  };
+
+  const requireSession = vi
+    .spyOn(
+      manager as unknown as { requireSession: (sessionId: string) => unknown },
+      "requireSession",
+    )
+    .mockReturnValue(context);
+  const writeMessage = vi
+    .spyOn(manager as unknown as { writeMessage: (...args: unknown[]) => void }, "writeMessage")
+    .mockImplementation(() => {});
+  const emitEvent = vi
+    .spyOn(manager as unknown as { emitEvent: (...args: unknown[]) => void }, "emitEvent")
+    .mockImplementation(() => {});
+
+  return { manager, context, requireSession, writeMessage, emitEvent };
+}
+
 describe("classifyCodexStderrLine", () => {
   it("ignores empty lines", () => {
     expect(classifyCodexStderrLine("   ")).toBeNull();
@@ -707,6 +750,56 @@ describe("respondToUserInput", () => {
     );
   });
 
+  it("falls back to the lone live prompt when a reopened thread submits a stale user input request id", async () => {
+    const { manager, context, requireSession, writeMessage, emitEvent } =
+      createPendingUserInputHarness();
+
+    await manager.respondToUserInput(
+      asThreadId("thread_1"),
+      ApprovalRequestId.makeUnsafe("req-user-input-stale"),
+      {
+        scope: "All request methods",
+      },
+    );
+
+    expect(requireSession).toHaveBeenCalledWith("thread_1");
+    expect(writeMessage).toHaveBeenCalledWith(context, {
+      id: 42,
+      result: {
+        answers: {
+          scope: { answers: ["All request methods"] },
+        },
+      },
+    });
+    expect(emitEvent).toHaveBeenCalledTimes(2);
+    expect(emitEvent).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        method: "item/tool/requestUserInput/answered",
+        requestId: "req-user-input-1",
+        payload: {
+          requestId: "req-user-input-1",
+          answers: {
+            scope: { answers: ["All request methods"] },
+          },
+        },
+      }),
+    );
+    expect(emitEvent).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        method: "item/tool/requestUserInput/answered",
+        requestId: "req-user-input-stale",
+        payload: {
+          requestId: "req-user-input-stale",
+          answers: {
+            scope: { answers: ["All request methods"] },
+          },
+        },
+      }),
+    );
+  });
+
   it("tracks file-read approval requests with the correct method", () => {
     const manager = new CodexAppServerManager();
     const context = {
@@ -745,6 +838,141 @@ describe("respondToUserInput", () => {
     const request = Array.from(context.pendingApprovals.values())[0];
     expect(request?.requestKind).toBe("file-read");
     expect(request?.method).toBe("item/fileRead/requestApproval");
+  });
+
+  it("uses the provider request id for approval requests when Codex includes one", () => {
+    const manager = new CodexAppServerManager();
+    const context = {
+      session: {
+        sessionId: "sess_1",
+        provider: "codex",
+        status: "ready",
+        threadId: asThreadId("thread_1"),
+        resumeCursor: { threadId: "thread_1" },
+        createdAt: "2026-02-10T00:00:00.000Z",
+        updatedAt: "2026-02-10T00:00:00.000Z",
+      },
+      pendingApprovals: new Map(),
+      pendingUserInputs: new Map(),
+    };
+    type ApprovalRequestContext = {
+      session: typeof context.session;
+      pendingApprovals: typeof context.pendingApprovals;
+      pendingUserInputs: typeof context.pendingUserInputs;
+    };
+
+    (
+      manager as unknown as {
+        handleServerRequest: (
+          context: ApprovalRequestContext,
+          request: Record<string, unknown>,
+        ) => void;
+      }
+    ).handleServerRequest(context, {
+      jsonrpc: "2.0",
+      id: 42,
+      method: "item/fileRead/requestApproval",
+      params: {
+        msg: {
+          request_id: "req-provider-file-read-1",
+        },
+      },
+    });
+
+    const request = context.pendingApprovals.get(
+      ApprovalRequestId.makeUnsafe("req-provider-file-read-1"),
+    );
+    expect(request?.requestId).toBe("req-provider-file-read-1");
+    expect(request?.requestKind).toBe("file-read");
+  });
+
+  it("uses the provider request id for user input requests when Codex includes one", () => {
+    const manager = new CodexAppServerManager();
+    const context = {
+      session: {
+        sessionId: "sess_1",
+        provider: "codex",
+        status: "ready",
+        threadId: asThreadId("thread_1"),
+        resumeCursor: { threadId: "thread_1" },
+        createdAt: "2026-02-10T00:00:00.000Z",
+        updatedAt: "2026-02-10T00:00:00.000Z",
+      },
+      pendingApprovals: new Map(),
+      pendingUserInputs: new Map(),
+    };
+    type UserInputRequestContext = {
+      session: typeof context.session;
+      pendingApprovals: typeof context.pendingApprovals;
+      pendingUserInputs: typeof context.pendingUserInputs;
+    };
+
+    (
+      manager as unknown as {
+        handleServerRequest: (
+          context: UserInputRequestContext,
+          request: Record<string, unknown>,
+        ) => void;
+      }
+    ).handleServerRequest(context, {
+      jsonrpc: "2.0",
+      id: 42,
+      method: "item/tool/requestUserInput",
+      params: {
+        request_id: "req-provider-user-input-1",
+      },
+    });
+
+    const request = context.pendingUserInputs.get(
+      ApprovalRequestId.makeUnsafe("req-provider-user-input-1"),
+    );
+    expect(request?.requestId).toBe("req-provider-user-input-1");
+  });
+});
+
+describe("respondToRequest", () => {
+  it("falls back to the lone live approval request when a reopened thread submits a stale request id", async () => {
+    const { manager, context, requireSession, writeMessage, emitEvent } =
+      createPendingApprovalHarness();
+
+    await manager.respondToRequest(
+      asThreadId("thread_1"),
+      ApprovalRequestId.makeUnsafe("req-approval-stale"),
+      "accept",
+    );
+
+    expect(requireSession).toHaveBeenCalledWith("thread_1");
+    expect(writeMessage).toHaveBeenCalledWith(context, {
+      id: 42,
+      result: {
+        decision: "accept",
+      },
+    });
+    expect(emitEvent).toHaveBeenCalledTimes(2);
+    expect(emitEvent).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        method: "item/requestApproval/decision",
+        requestId: "req-approval-live",
+        payload: {
+          requestId: "req-approval-live",
+          requestKind: "command",
+          decision: "accept",
+        },
+      }),
+    );
+    expect(emitEvent).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        method: "item/requestApproval/decision",
+        requestId: "req-approval-stale",
+        payload: {
+          requestId: "req-approval-stale",
+          requestKind: "command",
+          decision: "accept",
+        },
+      }),
+    );
   });
 });
 

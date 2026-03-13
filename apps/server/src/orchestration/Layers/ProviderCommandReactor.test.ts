@@ -692,6 +692,47 @@ describe("ProviderCommandReactor", () => {
     });
   });
 
+  it("allows approval responses to recover after reopen when the persisted session is stopped", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe("cmd-session-set-for-stopped-approval"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        session: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          status: "stopped",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.approval.respond",
+        commandId: CommandId.makeUnsafe("cmd-approval-respond-after-reopen"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        requestId: asApprovalRequestId("approval-request-1"),
+        decision: "accept",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.respondToRequest.mock.calls.length === 1);
+    expect(harness.respondToRequest.mock.calls[0]?.[0]).toEqual({
+      threadId: "thread-1",
+      requestId: "approval-request-1",
+      decision: "accept",
+    });
+  });
+
   it("reacts to thread.user-input.respond by forwarding structured user input answers", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();
@@ -718,6 +759,51 @@ describe("ProviderCommandReactor", () => {
       harness.engine.dispatch({
         type: "thread.user-input.respond",
         commandId: CommandId.makeUnsafe("cmd-user-input-respond"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        requestId: asApprovalRequestId("user-input-request-1"),
+        answers: {
+          sandbox_mode: "workspace-write",
+        },
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.respondToUserInput.mock.calls.length === 1);
+    expect(harness.respondToUserInput.mock.calls[0]?.[0]).toEqual({
+      threadId: "thread-1",
+      requestId: "user-input-request-1",
+      answers: {
+        sandbox_mode: "workspace-write",
+      },
+    });
+  });
+
+  it("allows user input responses to recover after reopen when the persisted session is stopped", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe("cmd-session-set-for-stopped-user-input"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        session: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          status: "stopped",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.user-input.respond",
+        commandId: CommandId.makeUnsafe("cmd-user-input-respond-after-reopen"),
         threadId: ThreadId.makeUnsafe("thread-1"),
         requestId: asApprovalRequestId("user-input-request-1"),
         answers: {
