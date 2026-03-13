@@ -62,6 +62,42 @@ function mapProviderSessionStatusToOrchestrationStatus(
   }
 }
 
+function toOrchestrationSessionFromProviderSession(session: ProviderSession): OrchestrationSession {
+  return {
+    threadId: session.threadId,
+    status: mapProviderSessionStatusToOrchestrationStatus(session.status),
+    providerName: session.provider,
+    runtimeMode: session.runtimeMode,
+    activeTurnId: null,
+    lastError: session.lastError ?? null,
+    updatedAt: session.updatedAt,
+  };
+}
+
+function sessionsMatch(
+  left: OrchestrationSession | null | undefined,
+  right: OrchestrationSession,
+): boolean {
+  if (!left) {
+    return false;
+  }
+  return (
+    left.threadId === right.threadId &&
+    left.status === right.status &&
+    left.providerName === right.providerName &&
+    left.runtimeMode === right.runtimeMode &&
+    left.activeTurnId === right.activeTurnId &&
+    left.lastError === right.lastError &&
+    left.updatedAt === right.updatedAt
+  );
+}
+
+function shouldReconcileStaleStartupSession(
+  status: OrchestrationSession["status"] | null | undefined,
+): boolean {
+  return status === "starting" || status === "running";
+}
+
 const turnStartKeyForEvent = (event: ProviderIntentEvent): string =>
   event.commandId !== null ? `command:${event.commandId}` : `event:${event.eventId}`;
 
@@ -182,6 +218,52 @@ const make = Effect.gen(function* () {
       session: input.session,
       createdAt: input.createdAt,
     });
+
+  const reconcileSessionsOnStartup = Effect.fnUntraced(function* () {
+    const readModel = yield* orchestrationEngine.getReadModel();
+    const liveSessions = yield* providerService.listSessions();
+    const liveSessionByThreadId = new Map(
+      liveSessions.map((session) => [session.threadId, session] as const),
+    );
+    const reconciledAt = new Date().toISOString();
+
+    yield* Effect.forEach(
+      readModel.threads,
+      (thread) => {
+        const liveSession = liveSessionByThreadId.get(thread.id);
+        if (liveSession) {
+          const nextSession = toOrchestrationSessionFromProviderSession(liveSession);
+          if (sessionsMatch(thread.session, nextSession)) {
+            return Effect.void;
+          }
+          return setThreadSession({
+            threadId: thread.id,
+            session: nextSession,
+            createdAt: nextSession.updatedAt,
+          });
+        }
+
+        if (!thread.session || !shouldReconcileStaleStartupSession(thread.session.status)) {
+          return Effect.void;
+        }
+
+        return setThreadSession({
+          threadId: thread.id,
+          session: {
+            threadId: thread.id,
+            status: "stopped",
+            providerName: thread.session.providerName,
+            runtimeMode: thread.session.runtimeMode,
+            activeTurnId: null,
+            lastError: thread.session.lastError,
+            updatedAt: reconciledAt,
+          },
+          createdAt: reconciledAt,
+        });
+      },
+      { concurrency: 1 },
+    ).pipe(Effect.asVoid);
+  });
 
   const resolveThread = Effect.fnUntraced(function* (threadId: ThreadId) {
     const readModel = yield* orchestrationEngine.getReadModel();
@@ -666,22 +748,31 @@ const make = Effect.gen(function* () {
 
   const worker = yield* makeDrainableWorker(processDomainEventSafely);
 
-  const start: ProviderCommandReactorShape["start"] = Effect.forkScoped(
-    Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
-      if (
-        event.type !== "thread.runtime-mode-set" &&
-        event.type !== "thread.turn-start-requested" &&
-        event.type !== "thread.turn-interrupt-requested" &&
-        event.type !== "thread.approval-response-requested" &&
-        event.type !== "thread.user-input-response-requested" &&
-        event.type !== "thread.session-stop-requested"
-      ) {
-        return Effect.void;
-      }
+  const start: ProviderCommandReactorShape["start"] = Effect.gen(function* () {
+    yield* reconcileSessionsOnStartup().pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("provider command reactor failed to reconcile sessions on startup", {
+          cause: Cause.pretty(cause),
+        }),
+      ),
+    );
+    yield* Effect.forkScoped(
+      Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
+        if (
+          event.type !== "thread.runtime-mode-set" &&
+          event.type !== "thread.turn-start-requested" &&
+          event.type !== "thread.turn-interrupt-requested" &&
+          event.type !== "thread.approval-response-requested" &&
+          event.type !== "thread.user-input-response-requested" &&
+          event.type !== "thread.session-stop-requested"
+        ) {
+          return Effect.void;
+        }
 
-      return worker.enqueue(event);
-    }),
-  ).pipe(Effect.asVoid);
+        return worker.enqueue(event);
+      }),
+    );
+  }).pipe(Effect.asVoid);
 
   return {
     start,

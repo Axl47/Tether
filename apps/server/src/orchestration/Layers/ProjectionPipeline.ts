@@ -821,6 +821,38 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
         case "thread.session-set": {
           const turnId = event.payload.session.activeTurnId;
           if (turnId === null || event.payload.session.status !== "running") {
+            if (
+              event.payload.session.status === "stopped" ||
+              event.payload.session.status === "interrupted" ||
+              event.payload.session.status === "error"
+            ) {
+              const existingTurns = yield* projectionTurnRepository.listByThreadId({
+                threadId: event.payload.threadId,
+              });
+              const runningTurn = existingTurns
+                .toReversed()
+                .find((row) => row.turnId !== null && row.state === "running");
+              if (runningTurn?.turnId) {
+                yield* projectionTurnRepository.upsertByTurnId({
+                  threadId: runningTurn.threadId,
+                  turnId: runningTurn.turnId,
+                  pendingMessageId: runningTurn.pendingMessageId,
+                  assistantMessageId: runningTurn.assistantMessageId,
+                  state: event.payload.session.status === "error" ? "error" : "interrupted",
+                  requestedAt: runningTurn.requestedAt,
+                  startedAt: runningTurn.startedAt ?? event.payload.session.updatedAt,
+                  completedAt: runningTurn.completedAt ?? event.payload.session.updatedAt,
+                  checkpointTurnCount: runningTurn.checkpointTurnCount,
+                  checkpointRef: runningTurn.checkpointRef,
+                  checkpointStatus: runningTurn.checkpointStatus,
+                  checkpointFiles: [...runningTurn.checkpointFiles],
+                });
+              }
+
+              yield* projectionTurnRepository.deletePendingTurnStartByThreadId({
+                threadId: event.payload.threadId,
+              });
+            }
             return;
           }
 

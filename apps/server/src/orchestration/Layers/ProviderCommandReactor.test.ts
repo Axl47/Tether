@@ -83,7 +83,10 @@ describe("ProviderCommandReactor", () => {
     createdStateDirs.clear();
   });
 
-  async function createHarness(input?: { readonly stateDir?: string }) {
+  async function createHarness(input?: {
+    readonly stateDir?: string;
+    readonly autoStart?: boolean;
+  }) {
     const now = new Date().toISOString();
     const stateDir = input?.stateDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "tether-reactor-"));
     createdStateDirs.add(stateDir);
@@ -229,8 +232,16 @@ describe("ProviderCommandReactor", () => {
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
     const reactor = await runtime.runPromise(Effect.service(ProviderCommandReactor));
     scope = await Effect.runPromise(Scope.make("sequential"));
-    await Effect.runPromise(reactor.start.pipe(Scope.provide(scope)));
-    const drain = () => Effect.runPromise(reactor.drain);
+    let started = false;
+    const startReactor = async () => {
+      if (started) return;
+      await Effect.runPromise(reactor.start.pipe(Scope.provide(scope!)));
+      started = true;
+    };
+    if (input?.autoStart !== false) {
+      await startReactor();
+    }
+    const drain = () => (started ? Effect.runPromise(reactor.drain) : Promise.resolve());
 
     await Effect.runPromise(
       engine.dispatch({
@@ -261,6 +272,7 @@ describe("ProviderCommandReactor", () => {
 
     return {
       engine,
+      startReactor,
       startSession,
       sendTurn,
       interruptTurn,
@@ -859,5 +871,51 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.status).toBe("stopped");
     expect(thread?.session?.threadId).toBe("thread-1");
     expect(thread?.session?.activeTurnId).toBeNull();
+  });
+
+  it("reconciles stale running sessions on startup when no live provider session exists", async () => {
+    const harness = await createHarness({ autoStart: false });
+    const runningAt = "2026-03-12T14:00:00.000Z";
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe("cmd-session-set-stale-running"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        session: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          status: "running",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: asTurnId("turn-stale"),
+          lastError: null,
+          updatedAt: runningAt,
+        },
+        createdAt: runningAt,
+      }),
+    );
+
+    await harness.startReactor();
+
+    await waitFor(async () => {
+      const readModel = await Effect.runPromise(harness.engine.getReadModel());
+      const thread = readModel.threads.find(
+        (entry) => entry.id === ThreadId.makeUnsafe("thread-1"),
+      );
+      return thread?.session?.status === "stopped";
+    });
+
+    expect(harness.startSession).not.toHaveBeenCalled();
+    expect(harness.sendTurn).not.toHaveBeenCalled();
+
+    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
+    expect(thread?.session?.status).toBe("stopped");
+    expect(thread?.session?.activeTurnId).toBeNull();
+    expect(thread?.latestTurn).toMatchObject({
+      turnId: "turn-stale",
+      state: "interrupted",
+    });
+    expect(thread?.latestTurn?.completedAt).not.toBeNull();
   });
 });
