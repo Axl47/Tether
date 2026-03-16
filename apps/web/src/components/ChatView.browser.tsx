@@ -797,6 +797,29 @@ async function waitForComposerEditor(): Promise<HTMLElement> {
   );
 }
 
+async function waitForThreadSearchInput(): Promise<HTMLInputElement> {
+  return waitForElement(
+    () => document.querySelector<HTMLInputElement>("[data-thread-search-input='true']"),
+    "Unable to find thread search input.",
+  );
+}
+
+async function waitForActiveThreadSearchMatch(messageId: MessageId): Promise<HTMLElement> {
+  return waitForElement(
+    () =>
+      document.querySelector<HTMLElement>(
+        `[data-message-id="${messageId}"][data-thread-search-active-match="true"]`,
+      ),
+    `Unable to find active thread search match for ${messageId}.`,
+  );
+}
+
+function setNativeInputValue(input: HTMLInputElement, value: string): void {
+  const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+  descriptor?.set?.call(input, value);
+  input.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
+}
+
 async function waitForMessageScrollContainer(
   scope: ParentNode = document,
 ): Promise<HTMLDivElement> {
@@ -2218,6 +2241,78 @@ describe("ChatView timeline estimator parity (full app)", () => {
         },
         { timeout: 8_000, interval: 16 },
       );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("opens thread search with Mod+F and navigates matching messages", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-target-thread-search" as MessageId,
+        targetText: "thread search target",
+      }),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          keybindings: [
+            {
+              command: "thread.find",
+              shortcut: {
+                key: "f",
+                metaKey: false,
+                ctrlKey: false,
+                shiftKey: false,
+                altKey: false,
+                modKey: true,
+              },
+            },
+          ],
+        };
+      },
+    });
+
+    try {
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "f",
+          metaKey: navigator.platform.includes("Mac"),
+          ctrlKey: !navigator.platform.includes("Mac"),
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+
+      const searchInput = await waitForThreadSearchInput();
+      await vi.waitFor(
+        () => {
+          expect(document.activeElement).toBe(searchInput);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      setNativeInputValue(searchInput, "filler user message");
+
+      await waitForActiveThreadSearchMatch("msg-user-0" as MessageId);
+      await vi.waitFor(
+        () => {
+          expect(
+            document.querySelector<HTMLElement>("[data-thread-search-results='true']")?.textContent,
+          ).toContain("1/");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      searchInput.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Enter",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+
+      await waitForActiveThreadSearchMatch("msg-user-1" as MessageId);
     } finally {
       await mounted.cleanup();
     }

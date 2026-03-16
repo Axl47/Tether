@@ -31,6 +31,8 @@ import {
 } from "@t3tools/shared/model";
 import {
   type DragEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type Ref,
   memo,
   useCallback,
   useEffect,
@@ -150,6 +152,7 @@ import {
   ListTodoIcon,
   ImagePlusIcon,
   MessageSquareIcon,
+  SearchIcon,
   Undo2Icon,
   XIcon,
   CopyIcon,
@@ -213,6 +216,7 @@ import { Toggle } from "./ui/toggle";
 import { SidebarTrigger } from "./ui/sidebar";
 import { newCommandId, newMessageId, newThreadId, randomUuid } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
+import { findThreadSearchMatchMessageIds } from "~/threadSearch";
 import {
   getAppModelOptions,
   getCustomModelsForProvider,
@@ -1256,10 +1260,93 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const threadContextMessage =
     threadContextMode === "last" ? latestThreadContextMessage : originalThreadContextMessage;
   const hasFloatingThreadCards = threadContextMessage !== null || activePlan !== null;
+  const threadSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const threadSearchFocusModeRef = useRef<"all" | "end">("all");
+  const lastThreadSearchResetKeyRef = useRef<string | null>(null);
+  const [threadSearchOpen, setThreadSearchOpen] = useState(false);
+  const [threadSearchQuery, setThreadSearchQuery] = useState("");
+  const [threadSearchFocusRequestKey, setThreadSearchFocusRequestKey] = useState(0);
+  const [threadSearchActiveResultIndex, setThreadSearchActiveResultIndex] = useState(0);
+  const [threadSearchJumpRequest, setThreadSearchJumpRequest] = useState<{
+    messageId: MessageId;
+    key: number;
+  } | null>(null);
   const [threadContextJumpRequest, setThreadContextJumpRequest] = useState<{
     messageId: MessageId;
     key: number;
   } | null>(null);
+  const threadSearchResultIds = useMemo(
+    () =>
+      findThreadSearchMatchMessageIds(
+        timelineMessages.map((message) => ({
+          id: message.id,
+          text: message.text,
+        })),
+        threadSearchQuery,
+      ),
+    [threadSearchQuery, timelineMessages],
+  );
+  const threadSearchResultCount = threadSearchResultIds.length;
+  const activeThreadSearchMessageId =
+    threadSearchResultCount > 0
+      ? (threadSearchResultIds[
+          clamp(threadSearchActiveResultIndex, {
+            minimum: 0,
+            maximum: threadSearchResultCount - 1,
+          })
+        ] ?? null)
+      : null;
+  const activeThreadSearchResultDisplayIndex = activeThreadSearchMessageId
+    ? threadSearchResultIds.indexOf(activeThreadSearchMessageId) + 1
+    : 0;
+  const threadSearchMatchedMessageIds = useMemo(
+    () => new Set(threadSearchResultIds),
+    [threadSearchResultIds],
+  );
+  const requestThreadSearchFocus = useCallback((mode: "all" | "end" = "all") => {
+    threadSearchFocusModeRef.current = mode;
+    setThreadSearchFocusRequestKey((current) => current + 1);
+  }, []);
+  const requestThreadSearchJump = useCallback((messageId: MessageId) => {
+    setThreadSearchJumpRequest((current) => ({
+      messageId,
+      key: (current?.key ?? 0) + 1,
+    }));
+  }, []);
+  const openThreadSearch = useCallback(
+    (mode: "all" | "end" = "all") => {
+      setThreadSearchOpen(true);
+      requestThreadSearchFocus(mode);
+    },
+    [requestThreadSearchFocus],
+  );
+  const closeThreadSearch = useCallback(() => {
+    setThreadSearchOpen(false);
+    setThreadSearchQuery("");
+    setThreadSearchActiveResultIndex(0);
+    setThreadSearchJumpRequest(null);
+  }, []);
+  const moveThreadSearchResult = useCallback(
+    (direction: 1 | -1) => {
+      if (threadSearchResultCount === 0) {
+        return;
+      }
+      const nextIndex =
+        (threadSearchActiveResultIndex + direction + threadSearchResultCount) %
+        threadSearchResultCount;
+      setThreadSearchActiveResultIndex(nextIndex);
+      const nextMessageId = threadSearchResultIds[nextIndex];
+      if (nextMessageId) {
+        requestThreadSearchJump(nextMessageId);
+      }
+    },
+    [
+      requestThreadSearchJump,
+      threadSearchActiveResultIndex,
+      threadSearchResultCount,
+      threadSearchResultIds,
+    ],
+  );
   const onJumpToThreadContext = useCallback(() => {
     if (!threadContextMessage) {
       return;
@@ -1271,7 +1358,78 @@ export default function ChatView({ threadId }: ChatViewProps) {
   }, [threadContextMessage]);
   useEffect(() => {
     setThreadContextJumpRequest(null);
-  }, [activeThread?.id]);
+    closeThreadSearch();
+  }, [activeThread?.id, closeThreadSearch]);
+  useEffect(() => {
+    if (!threadSearchOpen) {
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      const input =
+        threadSearchInputRef.current ??
+        document.querySelector<HTMLInputElement>("[data-thread-search-input='true']");
+      if (!input) {
+        return;
+      }
+      input.focus();
+      if (threadSearchFocusModeRef.current === "all") {
+        input.select();
+        return;
+      }
+      const selectionEnd = input.value.length;
+      input.setSelectionRange(selectionEnd, selectionEnd);
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [threadSearchFocusRequestKey, threadSearchOpen]);
+  useEffect(() => {
+    const resetKey = threadSearchOpen ? threadSearchQuery : "__closed__";
+    if (lastThreadSearchResetKeyRef.current === resetKey) {
+      return;
+    }
+    lastThreadSearchResetKeyRef.current = resetKey;
+    if (!threadSearchOpen) {
+      return;
+    }
+    if (threadSearchResultCount === 0) {
+      setThreadSearchActiveResultIndex(0);
+      return;
+    }
+    setThreadSearchActiveResultIndex(0);
+    const firstMessageId = threadSearchResultIds[0];
+    if (firstMessageId) {
+      requestThreadSearchJump(firstMessageId);
+    }
+  }, [
+    requestThreadSearchJump,
+    threadSearchOpen,
+    threadSearchQuery,
+    threadSearchResultIds,
+    threadSearchResultCount,
+  ]);
+  useEffect(() => {
+    if (threadSearchResultCount === 0) {
+      if (threadSearchActiveResultIndex !== 0) {
+        setThreadSearchActiveResultIndex(0);
+      }
+      return;
+    }
+    if (threadSearchActiveResultIndex < threadSearchResultCount) {
+      return;
+    }
+    const nextIndex = threadSearchResultCount - 1;
+    setThreadSearchActiveResultIndex(nextIndex);
+    const nextMessageId = threadSearchResultIds[nextIndex];
+    if (nextMessageId) {
+      requestThreadSearchJump(nextMessageId);
+    }
+  }, [
+    requestThreadSearchJump,
+    threadSearchActiveResultIndex,
+    threadSearchResultCount,
+    threadSearchResultIds,
+  ]);
   const timelineEntries = useMemo(
     () =>
       deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], workLogEntries),
@@ -1528,6 +1686,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
   const diffPanelShortcutLabel = useMemo(
     () => shortcutLabelForCommand(keybindings, "diff.toggle"),
+    [keybindings],
+  );
+  const threadFindShortcutLabel = useMemo(
+    () => shortcutLabelForCommand(keybindings, "thread.find"),
     [keybindings],
   );
   const onToggleDiff = useCallback(
@@ -2636,6 +2798,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
         return;
       }
 
+      if (command === "thread.find") {
+        event.preventDefault();
+        event.stopPropagation();
+        openThreadSearch("all");
+        return;
+      }
+
       const scriptId = projectScriptIdFromCommand(command);
       if (!scriptId || !activeProject) return;
       const script = activeProject.scripts.find((entry) => entry.id === scriptId);
@@ -2658,6 +2827,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     splitTerminal,
     keybindings,
     diffOpen,
+    openThreadSearch,
     onToggleDiff,
     toggleTerminalVisibility,
   ]);
@@ -4035,8 +4205,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
           terminalOpen={terminalState.terminalOpen}
           terminalToggleShortcutLabel={terminalToggleShortcutLabel}
           diffToggleShortcutLabel={diffPanelShortcutLabel}
+          threadFindShortcutLabel={threadFindShortcutLabel}
           gitCwd={gitCwd}
           diffOpen={diffOpen}
+          threadSearchOpen={threadSearchOpen}
           showPlanSidebarToggle={showPlanSidebarToggle}
           planSidebarOpen={planSidebarOpen}
           onRunProjectScript={(script) => {
@@ -4047,6 +4219,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
           onDeleteProjectScript={deleteProjectScript}
           onToggleTerminal={toggleTerminalVisibility}
           onToggleDiff={onToggleDiff}
+          onToggleThreadSearch={(open) => {
+            if (open) {
+              openThreadSearch("all");
+              return;
+            }
+            closeThreadSearch();
+          }}
           onTogglePlanSidebar={onTogglePlanSidebar}
         />
       </header>
@@ -4054,6 +4233,38 @@ export default function ChatView({ threadId }: ChatViewProps) {
       {/* Error banner */}
       <ProviderHealthBanner status={activeProviderStatus} />
       <ThreadErrorBanner error={activeThread.error} />
+      {threadSearchOpen ? (
+        <ThreadSearchBar
+          inputRef={threadSearchInputRef}
+          query={threadSearchQuery}
+          resultCount={threadSearchResultCount}
+          activeResultIndex={activeThreadSearchResultDisplayIndex}
+          shortcutLabel={threadFindShortcutLabel}
+          onQueryChange={setThreadSearchQuery}
+          onClose={closeThreadSearch}
+          onMovePrevious={() => moveThreadSearchResult(-1)}
+          onMoveNext={() => moveThreadSearchResult(1)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              if (threadSearchQuery.length > 0) {
+                setThreadSearchQuery("");
+                setThreadSearchActiveResultIndex(0);
+                return;
+              }
+              closeThreadSearch();
+              return;
+            }
+            if (event.key !== "Enter") {
+              return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            moveThreadSearchResult(event.shiftKey ? -1 : 1);
+          }}
+        />
+      ) : null}
       <div className="flex min-h-0 flex-1">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="relative flex min-h-0 flex-1 flex-col">
@@ -4111,6 +4322,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
                 timelineEntries={timelineEntries}
                 jumpToMessageId={threadContextJumpRequest?.messageId ?? null}
                 jumpToMessageRequestKey={threadContextJumpRequest?.key ?? 0}
+                searchJumpToMessageId={threadSearchJumpRequest?.messageId ?? null}
+                searchJumpToMessageRequestKey={threadSearchJumpRequest?.key ?? 0}
+                searchMatchedMessageIds={threadSearchMatchedMessageIds}
+                activeSearchMessageId={activeThreadSearchMessageId}
                 completionDividerBeforeEntryId={completionDividerBeforeEntryId}
                 completionSummary={completionSummary}
                 animatedAssistantMessageId={animatedAssistantMessageId}
@@ -5022,8 +5237,10 @@ interface ChatHeaderProps {
   terminalOpen: boolean;
   terminalToggleShortcutLabel: string | null;
   diffToggleShortcutLabel: string | null;
+  threadFindShortcutLabel: string | null;
   gitCwd: string | null;
   diffOpen: boolean;
+  threadSearchOpen: boolean;
   showPlanSidebarToggle: boolean;
   planSidebarOpen: boolean;
   onRunProjectScript: (script: ProjectScript) => void;
@@ -5032,6 +5249,7 @@ interface ChatHeaderProps {
   onDeleteProjectScript: (scriptId: string) => Promise<void>;
   onToggleTerminal: () => void;
   onToggleDiff: (open: boolean) => void;
+  onToggleThreadSearch: (open: boolean) => void;
   onTogglePlanSidebar: (open: boolean) => void;
 }
 
@@ -5048,8 +5266,10 @@ const ChatHeader = memo(function ChatHeader({
   terminalOpen,
   terminalToggleShortcutLabel,
   diffToggleShortcutLabel,
+  threadFindShortcutLabel,
   gitCwd,
   diffOpen,
+  threadSearchOpen,
   showPlanSidebarToggle,
   planSidebarOpen,
   onRunProjectScript,
@@ -5058,6 +5278,7 @@ const ChatHeader = memo(function ChatHeader({
   onDeleteProjectScript,
   onToggleTerminal,
   onToggleDiff,
+  onToggleThreadSearch,
   onTogglePlanSidebar,
 }: ChatHeaderProps) {
   return (
@@ -5137,6 +5358,27 @@ const ChatHeader = memo(function ChatHeader({
                 : "Toggle diff panel"}
           </TooltipPopup>
         </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Toggle
+                className="shrink-0"
+                pressed={threadSearchOpen}
+                onPressedChange={onToggleThreadSearch}
+                aria-label="Toggle thread search"
+                variant="outline"
+                size="xs"
+              >
+                <SearchIcon className="size-3" />
+              </Toggle>
+            }
+          />
+          <TooltipPopup side="bottom">
+            {threadFindShortcutLabel
+              ? `Search this thread (${threadFindShortcutLabel})`
+              : "Search this thread"}
+          </TooltipPopup>
+        </Tooltip>
         {showPlanSidebarToggle ? (
           <Tooltip>
             <TooltipTrigger
@@ -5158,6 +5400,101 @@ const ChatHeader = memo(function ChatHeader({
             </TooltipPopup>
           </Tooltip>
         ) : null}
+      </div>
+    </div>
+  );
+});
+
+const ThreadSearchBar = memo(function ThreadSearchBar(props: {
+  inputRef: Ref<HTMLInputElement>;
+  query: string;
+  resultCount: number;
+  activeResultIndex: number;
+  shortcutLabel: string | null;
+  onQueryChange: (value: string) => void;
+  onClose: () => void;
+  onMovePrevious: () => void;
+  onMoveNext: () => void;
+  onKeyDown: (event: ReactKeyboardEvent<HTMLInputElement>) => void;
+}) {
+  const {
+    inputRef,
+    query,
+    resultCount,
+    activeResultIndex,
+    shortcutLabel,
+    onQueryChange,
+    onClose,
+    onMovePrevious,
+    onMoveNext,
+    onKeyDown,
+  } = props;
+  const resultLabel =
+    query.trim().length === 0
+      ? shortcutLabel
+        ? `Ready • ${shortcutLabel}`
+        : "Ready"
+      : resultCount > 0
+        ? `${activeResultIndex}/${resultCount}`
+        : "0 results";
+
+  return (
+    <div className="border-b border-border/70 bg-background/80 px-3 py-2 backdrop-blur-sm sm:px-5">
+      <div className="mx-auto flex max-w-3xl items-center gap-2">
+        <div className="relative min-w-0 flex-1">
+          <SearchIcon
+            aria-hidden="true"
+            className="pointer-events-none absolute top-1/2 left-3 z-10 size-4 -translate-y-1/2 text-muted-foreground/60"
+          />
+          <Input
+            ref={inputRef}
+            nativeInput
+            size="sm"
+            type="search"
+            value={query}
+            placeholder="Search this thread"
+            aria-label="Search this thread"
+            data-thread-search-input="true"
+            className="[&_input]:pl-9"
+            onChange={(event) => onQueryChange(event.target.value)}
+            onKeyDown={onKeyDown}
+          />
+        </div>
+        <div
+          className="min-w-[4.5rem] shrink-0 text-right text-[11px] text-muted-foreground/65 tabular-nums"
+          data-thread-search-results="true"
+        >
+          {resultLabel}
+        </div>
+        <Button
+          type="button"
+          size="xs"
+          variant="outline"
+          aria-label="Previous thread search result"
+          disabled={resultCount === 0}
+          onClick={onMovePrevious}
+        >
+          <ChevronLeftIcon className="size-3" />
+        </Button>
+        <Button
+          type="button"
+          size="xs"
+          variant="outline"
+          aria-label="Next thread search result"
+          disabled={resultCount === 0}
+          onClick={onMoveNext}
+        >
+          <ChevronRightIcon className="size-3" />
+        </Button>
+        <Button
+          type="button"
+          size="xs"
+          variant="ghost"
+          aria-label="Close thread search"
+          onClick={onClose}
+        >
+          <XIcon className="size-3" />
+        </Button>
       </div>
     </div>
   );
@@ -5848,6 +6185,10 @@ interface MessagesTimelineProps {
   timelineEntries: ReturnType<typeof deriveTimelineEntries>;
   jumpToMessageId: MessageId | null;
   jumpToMessageRequestKey: number;
+  searchJumpToMessageId: MessageId | null;
+  searchJumpToMessageRequestKey: number;
+  searchMatchedMessageIds: ReadonlySet<MessageId>;
+  activeSearchMessageId: MessageId | null;
   completionDividerBeforeEntryId: string | null;
   completionSummary: string | null;
   animatedAssistantMessageId: MessageId | null;
@@ -6313,6 +6654,10 @@ const MessagesTimeline = memo(function MessagesTimeline({
   timelineEntries,
   jumpToMessageId,
   jumpToMessageRequestKey,
+  searchJumpToMessageId,
+  searchJumpToMessageRequestKey,
+  searchMatchedMessageIds,
+  activeSearchMessageId,
   completionDividerBeforeEntryId,
   completionSummary,
   animatedAssistantMessageId,
@@ -6694,6 +7039,12 @@ const MessagesTimeline = memo(function MessagesTimeline({
     lastHandledJumpRequestKeyRef.current = jumpToMessageRequestKey;
     scrollToMessage(jumpToMessageId);
   }, [jumpToMessageId, jumpToMessageRequestKey, messageRowIndexById, scrollToMessage]);
+  useEffect(() => {
+    if (!searchJumpToMessageId || searchJumpToMessageRequestKey < 1) {
+      return;
+    }
+    scrollToMessage(searchJumpToMessageId);
+  }, [scrollToMessage, searchJumpToMessageId, searchJumpToMessageRequestKey]);
 
   const virtualRows = rowVirtualizer.getVirtualItems();
   const nonVirtualizedRows = rows.slice(virtualizedRowCount);
@@ -6771,58 +7122,173 @@ const MessagesTimeline = memo(function MessagesTimeline({
   );
   const flaggerRailPortalTarget = scrollContainer?.parentElement ?? null;
 
-  const renderRowContent = (row: TimelineRow) => (
-    <div
-      className={cn(
-        "pb-4 transition-colors duration-500",
-        row.kind === "message" &&
-          highlightedMessageId === row.message.id &&
-          "rounded-2xl bg-accent/25 ring-1 ring-border/80",
-      )}
-      data-timeline-row-kind={row.kind}
-      data-message-id={row.kind === "message" ? row.message.id : undefined}
-      data-message-role={row.kind === "message" ? row.message.role : undefined}
-    >
-      {row.kind === "work" &&
-        (() => {
-          const groupId = row.id;
-          const groupedEntries = row.groupedEntries;
-          const isExpanded = expandedWorkGroups[groupId] ?? false;
-          const latestEntry = groupedEntries.at(-1) ?? null;
-          const status = latestEntry?.tone === "error" ? "Attention" : "Live";
-          const elapsed = row.createdAt !== null ? formatWorkingTimer(row.createdAt, nowIso) : null;
+  const renderRowContent = (row: TimelineRow) => {
+    const isSearchMatch = row.kind === "message" && searchMatchedMessageIds.has(row.message.id);
+    const isActiveSearchMatch = row.kind === "message" && activeSearchMessageId === row.message.id;
+    const isJumpHighlighted = row.kind === "message" && highlightedMessageId === row.message.id;
 
-          return (
-            <CompactActivityStrip
-              assistantLabel={activeAssistantLabel}
-              title={latestEntry?.label ?? activeWorkSummary.title}
-              detail={
-                latestEntry?.command ??
-                latestEntry?.detail ??
-                latestEntry?.changedFiles?.slice(0, 2).join(", ") ??
-                activeWorkSummary.detail
-              }
-              statusLabel={status}
-              elapsed={elapsed ? `Working for ${elapsed}` : null}
-              entries={groupedEntries}
-              expanded={isExpanded}
-              onToggleExpanded={() => onToggleWorkGroup(groupId)}
-            />
-          );
-        })()}
+    return (
+      <div
+        className={cn(
+          "pb-4 transition-colors duration-500",
+          isSearchMatch && "rounded-2xl bg-sky-500/6 ring-1 ring-sky-500/18",
+          isActiveSearchMatch && "bg-sky-500/12 ring-sky-500/40",
+          isJumpHighlighted && "bg-accent/25 ring-1 ring-border/80",
+        )}
+        data-timeline-row-kind={row.kind}
+        data-message-id={row.kind === "message" ? row.message.id : undefined}
+        data-message-role={row.kind === "message" ? row.message.role : undefined}
+        data-thread-search-match={isSearchMatch ? "true" : undefined}
+        data-thread-search-active-match={isActiveSearchMatch ? "true" : undefined}
+      >
+        {row.kind === "work" &&
+          (() => {
+            const groupId = row.id;
+            const groupedEntries = row.groupedEntries;
+            const isExpanded = expandedWorkGroups[groupId] ?? false;
+            const latestEntry = groupedEntries.at(-1) ?? null;
+            const status = latestEntry?.tone === "error" ? "Attention" : "Live";
+            const elapsed =
+              row.createdAt !== null ? formatWorkingTimer(row.createdAt, nowIso) : null;
 
-      {row.kind === "message" &&
-        row.message.role === "user" &&
-        (() => {
-          const userImages = row.message.attachments ?? [];
-          const canRevertAgentWork = revertTurnCountByUserMessageId.has(row.message.id);
-          return (
-            <div className="flex justify-end">
-              <div className="group relative max-w-[80%] rounded-2xl rounded-br-sm border border-border bg-secondary px-4 py-3">
-                {userImages.length > 0 && (
-                  <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
-                    {userImages.map(
-                      (image: NonNullable<TimelineMessage["attachments"]>[number]) => (
+            return (
+              <CompactActivityStrip
+                assistantLabel={activeAssistantLabel}
+                title={latestEntry?.label ?? activeWorkSummary.title}
+                detail={
+                  latestEntry?.command ??
+                  latestEntry?.detail ??
+                  latestEntry?.changedFiles?.slice(0, 2).join(", ") ??
+                  activeWorkSummary.detail
+                }
+                statusLabel={status}
+                elapsed={elapsed ? `Working for ${elapsed}` : null}
+                entries={groupedEntries}
+                expanded={isExpanded}
+                onToggleExpanded={() => onToggleWorkGroup(groupId)}
+              />
+            );
+          })()}
+
+        {row.kind === "message" &&
+          row.message.role === "user" &&
+          (() => {
+            const userImages = row.message.attachments ?? [];
+            const canRevertAgentWork = revertTurnCountByUserMessageId.has(row.message.id);
+            return (
+              <div className="flex justify-end">
+                <div className="group relative max-w-[80%] rounded-2xl rounded-br-sm border border-border bg-secondary px-4 py-3">
+                  {userImages.length > 0 && (
+                    <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
+                      {userImages.map(
+                        (image: NonNullable<TimelineMessage["attachments"]>[number]) => (
+                          <div
+                            key={image.id}
+                            className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
+                          >
+                            {image.previewUrl ? (
+                              <button
+                                type="button"
+                                className="h-full w-full cursor-zoom-in"
+                                aria-label={`Preview ${image.name}`}
+                                onClick={() => {
+                                  const preview = buildExpandedImagePreview(userImages, image.id);
+                                  if (!preview) return;
+                                  onImageExpand(preview);
+                                }}
+                              >
+                                <img
+                                  src={image.previewUrl}
+                                  alt={image.name}
+                                  className="h-full max-h-[220px] w-full object-cover"
+                                  onLoad={onTimelineImageLoad}
+                                  onError={onTimelineImageLoad}
+                                />
+                              </button>
+                            ) : (
+                              <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
+                                {image.name}
+                              </div>
+                            )}
+                          </div>
+                        ),
+                      )}
+                    </div>
+                  )}
+                  {row.message.text && (
+                    <pre className="whitespace-pre-wrap wrap-break-word font-mono text-sm leading-relaxed text-foreground">
+                      {row.message.text}
+                    </pre>
+                  )}
+                  <div className="mt-1.5 flex items-center justify-end gap-2">
+                    <div className="flex items-center gap-1.5 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
+                      {row.message.text && <MessageCopyButton text={row.message.text} />}
+                      {canRevertAgentWork && (
+                        <Button
+                          type="button"
+                          size="xs"
+                          variant="outline"
+                          disabled={isRevertingCheckpoint || isWorking}
+                          onClick={() => onRevertUserMessage(row.message.id)}
+                          title="Revert to this message"
+                        >
+                          <Undo2Icon className="size-3" />
+                        </Button>
+                      )}
+                    </div>
+                    <p className="text-right text-[10px] text-muted-foreground/30">
+                      {formatTimestamp(row.message.createdAt)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+        {row.kind === "message" &&
+          row.message.role === "assistant" &&
+          (() => {
+            const assistantImages = row.message.attachments ?? [];
+            const inlineAssistantImage =
+              assistantImages.length === 0 ? extractInlineAssistantImage(row.message.text) : null;
+            const renderableAssistantImages =
+              assistantImages.length > 0
+                ? assistantImages
+                : inlineAssistantImage
+                  ? [
+                      {
+                        id: `${row.message.id}:inline-svg`,
+                        name: inlineAssistantImage.name,
+                        previewUrl: inlineAssistantImage.previewUrl,
+                      },
+                    ]
+                  : [];
+            const messageText =
+              (inlineAssistantImage ? "" : row.message.text) ||
+              (row.message.streaming || renderableAssistantImages.length > 0
+                ? ""
+                : "(empty response)");
+            return (
+              <>
+                {row.showCompletionDivider && (
+                  <div className="my-3 flex items-center gap-3">
+                    <span className="h-px flex-1 bg-success/25" />
+                    <span className="rounded-full border border-success/25 bg-success/8 px-2.5 py-1 text-[10px] uppercase tracking-[0.14em] text-success-foreground/65">
+                      {completionSummary ? `Response • ${completionSummary}` : "Response"}
+                    </span>
+                    <span className="h-px flex-1 bg-success/25" />
+                  </div>
+                )}
+                <div
+                  className={cn(
+                    "min-w-0 px-1 py-0.5",
+                    row.showCompletionDivider &&
+                      "rounded-xl bg-success/[0.04] ring-1 ring-success/10 px-3 py-2",
+                  )}
+                >
+                  {renderableAssistantImages.length > 0 && (
+                    <div className="mb-3 grid max-w-[520px] grid-cols-2 gap-2">
+                      {renderableAssistantImages.map((image) => (
                         <div
                           key={image.id}
                           className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
@@ -6833,7 +7299,10 @@ const MessagesTimeline = memo(function MessagesTimeline({
                               className="h-full w-full cursor-zoom-in"
                               aria-label={`Preview ${image.name}`}
                               onClick={() => {
-                                const preview = buildExpandedImagePreview(userImages, image.id);
+                                const preview = buildExpandedImagePreview(
+                                  renderableAssistantImages,
+                                  image.id,
+                                );
                                 if (!preview) return;
                                 onImageExpand(preview);
                               }}
@@ -6852,186 +7321,77 @@ const MessagesTimeline = memo(function MessagesTimeline({
                             </div>
                           )}
                         </div>
-                      ),
+                      ))}
+                    </div>
+                  )}
+                  <AnimatedAssistantMessage
+                    message={{ ...row.message, text: messageText }}
+                    cwd={markdownCwd}
+                    animate={
+                      !row.message.streaming &&
+                      animatedAssistantMessageId === row.message.id &&
+                      messageText.length > 0
+                    }
+                    onComplete={onAnimatedAssistantMessageComplete}
+                  />
+                  {row.changedFilesSummary && row.changedFilesSummary.files.length > 0 ? (
+                    <CompactChangedFilesSummary
+                      turnSummary={row.changedFilesSummary}
+                      expanded={
+                        expandedWorkGroups[`changed:${row.changedFilesSummary.turnId}`] ?? false
+                      }
+                      onToggleExpanded={() =>
+                        onToggleWorkGroup(
+                          `changed:${row.changedFilesSummary?.turnId ?? row.message.id}`,
+                        )
+                      }
+                      onOpenTurnDiff={onOpenTurnDiff}
+                    />
+                  ) : null}
+                  <p className="mt-1.5 text-[10px] text-muted-foreground/30">
+                    {formatMessageMeta(
+                      row.message.createdAt,
+                      row.message.streaming
+                        ? formatElapsed(row.message.createdAt, nowIso)
+                        : formatElapsed(row.message.createdAt, row.message.completedAt),
                     )}
-                  </div>
-                )}
-                {row.message.text && (
-                  <pre className="whitespace-pre-wrap wrap-break-word font-mono text-sm leading-relaxed text-foreground">
-                    {row.message.text}
-                  </pre>
-                )}
-                <div className="mt-1.5 flex items-center justify-end gap-2">
-                  <div className="flex items-center gap-1.5 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
-                    {row.message.text && <MessageCopyButton text={row.message.text} />}
-                    {canRevertAgentWork && (
-                      <Button
-                        type="button"
-                        size="xs"
-                        variant="outline"
-                        disabled={isRevertingCheckpoint || isWorking}
-                        onClick={() => onRevertUserMessage(row.message.id)}
-                        title="Revert to this message"
-                      >
-                        <Undo2Icon className="size-3" />
-                      </Button>
-                    )}
-                  </div>
-                  <p className="text-right text-[10px] text-muted-foreground/30">
-                    {formatTimestamp(row.message.createdAt)}
                   </p>
                 </div>
-              </div>
-            </div>
-          );
-        })()}
+              </>
+            );
+          })()}
 
-      {row.kind === "message" &&
-        row.message.role === "assistant" &&
-        (() => {
-          const assistantImages = row.message.attachments ?? [];
-          const inlineAssistantImage =
-            assistantImages.length === 0 ? extractInlineAssistantImage(row.message.text) : null;
-          const renderableAssistantImages =
-            assistantImages.length > 0
-              ? assistantImages
-              : inlineAssistantImage
-                ? [
-                    {
-                      id: `${row.message.id}:inline-svg`,
-                      name: inlineAssistantImage.name,
-                      previewUrl: inlineAssistantImage.previewUrl,
-                    },
-                  ]
-                : [];
-          const messageText =
-            (inlineAssistantImage ? "" : row.message.text) ||
-            (row.message.streaming || renderableAssistantImages.length > 0
-              ? ""
-              : "(empty response)");
-          return (
-            <>
-              {row.showCompletionDivider && (
-                <div className="my-3 flex items-center gap-3">
-                  <span className="h-px flex-1 bg-success/25" />
-                  <span className="rounded-full border border-success/25 bg-success/8 px-2.5 py-1 text-[10px] uppercase tracking-[0.14em] text-success-foreground/65">
-                    {completionSummary ? `Response • ${completionSummary}` : "Response"}
-                  </span>
-                  <span className="h-px flex-1 bg-success/25" />
-                </div>
-              )}
-              <div
-                className={cn(
-                  "min-w-0 px-1 py-0.5",
-                  row.showCompletionDivider &&
-                    "rounded-xl bg-success/[0.04] ring-1 ring-success/10 px-3 py-2",
-                )}
-              >
-                {renderableAssistantImages.length > 0 && (
-                  <div className="mb-3 grid max-w-[520px] grid-cols-2 gap-2">
-                    {renderableAssistantImages.map((image) => (
-                      <div
-                        key={image.id}
-                        className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
-                      >
-                        {image.previewUrl ? (
-                          <button
-                            type="button"
-                            className="h-full w-full cursor-zoom-in"
-                            aria-label={`Preview ${image.name}`}
-                            onClick={() => {
-                              const preview = buildExpandedImagePreview(
-                                renderableAssistantImages,
-                                image.id,
-                              );
-                              if (!preview) return;
-                              onImageExpand(preview);
-                            }}
-                          >
-                            <img
-                              src={image.previewUrl}
-                              alt={image.name}
-                              className="h-full max-h-[220px] w-full object-cover"
-                              onLoad={onTimelineImageLoad}
-                              onError={onTimelineImageLoad}
-                            />
-                          </button>
-                        ) : (
-                          <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
-                            {image.name}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <AnimatedAssistantMessage
-                  message={{ ...row.message, text: messageText }}
-                  cwd={markdownCwd}
-                  animate={
-                    !row.message.streaming &&
-                    animatedAssistantMessageId === row.message.id &&
-                    messageText.length > 0
-                  }
-                  onComplete={onAnimatedAssistantMessageComplete}
-                />
-                {row.changedFilesSummary && row.changedFilesSummary.files.length > 0 ? (
-                  <CompactChangedFilesSummary
-                    turnSummary={row.changedFilesSummary}
-                    expanded={
-                      expandedWorkGroups[`changed:${row.changedFilesSummary.turnId}`] ?? false
-                    }
-                    onToggleExpanded={() =>
-                      onToggleWorkGroup(
-                        `changed:${row.changedFilesSummary?.turnId ?? row.message.id}`,
-                      )
-                    }
-                    onOpenTurnDiff={onOpenTurnDiff}
-                  />
-                ) : null}
-                <p className="mt-1.5 text-[10px] text-muted-foreground/30">
-                  {formatMessageMeta(
-                    row.message.createdAt,
-                    row.message.streaming
-                      ? formatElapsed(row.message.createdAt, nowIso)
-                      : formatElapsed(row.message.createdAt, row.message.completedAt),
-                  )}
-                </p>
-              </div>
-            </>
-          );
-        })()}
+        {row.kind === "proposed-plan" && (
+          <div className="min-w-0 px-1 py-0.5">
+            <ProposedPlanCard
+              planMarkdown={row.proposedPlan.planMarkdown}
+              cwd={markdownCwd}
+              workspaceRoot={workspaceRoot}
+            />
+          </div>
+        )}
 
-      {row.kind === "proposed-plan" && (
-        <div className="min-w-0 px-1 py-0.5">
-          <ProposedPlanCard
-            planMarkdown={row.proposedPlan.planMarkdown}
-            cwd={markdownCwd}
-            workspaceRoot={workspaceRoot}
-          />
-        </div>
-      )}
-
-      {row.kind === "working" && (
-        <div className="min-w-0 px-1 py-0.5">
-          <CompactActivityStrip
-            assistantLabel={activeAssistantLabel}
-            title={activeWorkSummary.title}
-            detail={activeWorkSummary.detail ?? "Thinking"}
-            statusLabel={optimisticRunPhase === "preparing-worktree" ? "Preparing" : "Thinking"}
-            elapsed={
-              row.createdAt
-                ? `Working for ${formatWorkingTimer(row.createdAt, nowIso) ?? "0s"}`
-                : null
-            }
-            entries={[]}
-            expanded={false}
-            onToggleExpanded={() => {}}
-          />
-        </div>
-      )}
-    </div>
-  );
+        {row.kind === "working" && (
+          <div className="min-w-0 px-1 py-0.5">
+            <CompactActivityStrip
+              assistantLabel={activeAssistantLabel}
+              title={activeWorkSummary.title}
+              detail={activeWorkSummary.detail ?? "Thinking"}
+              statusLabel={optimisticRunPhase === "preparing-worktree" ? "Preparing" : "Thinking"}
+              elapsed={
+                row.createdAt
+                  ? `Working for ${formatWorkingTimer(row.createdAt, nowIso) ?? "0s"}`
+                  : null
+              }
+              entries={[]}
+              expanded={false}
+              onToggleExpanded={() => {}}
+            />
+          </div>
+        )}
+      </div>
+    );
+  };
 
   if (!hasMessages && !isWorking) {
     return (
