@@ -1,31 +1,48 @@
 import { describe, expect, it } from "vitest";
 
 import type { MessageId } from "@t3tools/contracts";
-import { findThreadSearchMatchMessageIds, normalizeThreadSearchText } from "./threadSearch";
+import {
+  buildThreadSearchOccurrenceId,
+  countThreadSearchOccurrences,
+  findThreadSearchMatchRanges,
+  normalizeThreadSearchText,
+  threadSearchMessageIdFromOccurrenceId,
+} from "./threadSearch";
 
 describe("normalizeThreadSearchText", () => {
-  it("trims, collapses whitespace, and lowercases", () => {
-    expect(normalizeThreadSearchText("  Fix   Thread\tSearch  ")).toBe("fix thread search");
+  it("trims and lowercases", () => {
+    expect(normalizeThreadSearchText("  Fix Thread Search  ")).toBe("fix thread search");
   });
 });
 
-describe("findThreadSearchMatchMessageIds", () => {
-  it("returns message ids in timeline order for case-insensitive matches", () => {
+describe("findThreadSearchMatchRanges", () => {
+  it("returns case-insensitive non-overlapping ranges", () => {
     expect(
-      findThreadSearchMatchMessageIds(
-        [
-          { id: "message-1" as MessageId, text: "First fix thread search result" },
-          { id: "message-2" as MessageId, text: "Unrelated" },
-          { id: "message-3" as MessageId, text: "Second FIX   thread  search result" },
-        ],
-        " fix thread search ",
+      findThreadSearchMatchRanges(
+        "First fix thread search, second FIX thread search",
+        "fix thread search",
       ),
-    ).toEqual(["message-1", "message-3"]);
+    ).toEqual([
+      { start: 6, end: 23 },
+      { start: 32, end: 49 },
+    ]);
   });
 
   it("returns an empty list when the query is blank", () => {
-    expect(
-      findThreadSearchMatchMessageIds([{ id: "message-1" as MessageId, text: "Anything" }], "   "),
-    ).toEqual([]);
+    expect(findThreadSearchMatchRanges("Anything", "   ")).toEqual([]);
+  });
+});
+
+describe("countThreadSearchOccurrences", () => {
+  it("counts occurrences in a message", () => {
+    expect(countThreadSearchOccurrences("Fix it, then fix it again", "fix it")).toBe(2);
+  });
+});
+
+describe("threadSearch occurrence ids", () => {
+  it("builds and parses occurrence ids", () => {
+    const occurrenceId = buildThreadSearchOccurrenceId("message-1" as MessageId, 2);
+    expect(occurrenceId).toBe("message-1:2");
+    expect(threadSearchMessageIdFromOccurrenceId(occurrenceId)).toBe("message-1");
   });
 });

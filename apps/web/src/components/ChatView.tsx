@@ -216,7 +216,12 @@ import { Toggle } from "./ui/toggle";
 import { SidebarTrigger } from "./ui/sidebar";
 import { newCommandId, newMessageId, newThreadId, randomUuid } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
-import { findThreadSearchMatchMessageIds } from "~/threadSearch";
+import {
+  buildThreadSearchOccurrenceId,
+  countThreadSearchOccurrences,
+  findThreadSearchMatchRanges,
+  threadSearchMessageIdFromOccurrenceId,
+} from "~/threadSearch";
 import {
   getAppModelOptions,
   getCustomModelsForProvider,
@@ -1268,26 +1273,25 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const [threadSearchFocusRequestKey, setThreadSearchFocusRequestKey] = useState(0);
   const [threadSearchActiveResultIndex, setThreadSearchActiveResultIndex] = useState(0);
   const [threadSearchJumpRequest, setThreadSearchJumpRequest] = useState<{
-    messageId: MessageId;
+    occurrenceId: string;
     key: number;
   } | null>(null);
   const [threadContextJumpRequest, setThreadContextJumpRequest] = useState<{
     messageId: MessageId;
     key: number;
   } | null>(null);
-  const threadSearchResultIds = useMemo(
-    () =>
-      findThreadSearchMatchMessageIds(
-        timelineMessages.map((message) => ({
-          id: message.id,
-          text: message.text,
-        })),
-        threadSearchQuery,
-      ),
-    [threadSearchQuery, timelineMessages],
-  );
+  const threadSearchResultIds = useMemo(() => {
+    const occurrenceIds: string[] = [];
+    for (const message of timelineMessages) {
+      const matchCount = countThreadSearchOccurrences(message.text, threadSearchQuery);
+      for (let occurrenceIndex = 0; occurrenceIndex < matchCount; occurrenceIndex += 1) {
+        occurrenceIds.push(buildThreadSearchOccurrenceId(message.id, occurrenceIndex));
+      }
+    }
+    return occurrenceIds;
+  }, [threadSearchQuery, timelineMessages]);
   const threadSearchResultCount = threadSearchResultIds.length;
-  const activeThreadSearchMessageId =
+  const activeThreadSearchOccurrenceId =
     threadSearchResultCount > 0
       ? (threadSearchResultIds[
           clamp(threadSearchActiveResultIndex, {
@@ -1296,20 +1300,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
           })
         ] ?? null)
       : null;
-  const activeThreadSearchResultDisplayIndex = activeThreadSearchMessageId
-    ? threadSearchResultIds.indexOf(activeThreadSearchMessageId) + 1
+  const activeThreadSearchResultDisplayIndex = activeThreadSearchOccurrenceId
+    ? threadSearchResultIds.indexOf(activeThreadSearchOccurrenceId) + 1
     : 0;
-  const threadSearchMatchedMessageIds = useMemo(
-    () => new Set(threadSearchResultIds),
-    [threadSearchResultIds],
-  );
   const requestThreadSearchFocus = useCallback((mode: "all" | "end" = "all") => {
     threadSearchFocusModeRef.current = mode;
     setThreadSearchFocusRequestKey((current) => current + 1);
   }, []);
-  const requestThreadSearchJump = useCallback((messageId: MessageId) => {
+  const requestThreadSearchJump = useCallback((occurrenceId: string) => {
     setThreadSearchJumpRequest((current) => ({
-      messageId,
+      occurrenceId,
       key: (current?.key ?? 0) + 1,
     }));
   }, []);
@@ -1335,9 +1335,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
         (threadSearchActiveResultIndex + direction + threadSearchResultCount) %
         threadSearchResultCount;
       setThreadSearchActiveResultIndex(nextIndex);
-      const nextMessageId = threadSearchResultIds[nextIndex];
-      if (nextMessageId) {
-        requestThreadSearchJump(nextMessageId);
+      const nextOccurrenceId = threadSearchResultIds[nextIndex];
+      if (nextOccurrenceId) {
+        requestThreadSearchJump(nextOccurrenceId);
       }
     },
     [
@@ -1397,9 +1397,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
       return;
     }
     setThreadSearchActiveResultIndex(0);
-    const firstMessageId = threadSearchResultIds[0];
-    if (firstMessageId) {
-      requestThreadSearchJump(firstMessageId);
+    const firstOccurrenceId = threadSearchResultIds[0];
+    if (firstOccurrenceId) {
+      requestThreadSearchJump(firstOccurrenceId);
     }
   }, [
     requestThreadSearchJump,
@@ -1420,9 +1420,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
     const nextIndex = threadSearchResultCount - 1;
     setThreadSearchActiveResultIndex(nextIndex);
-    const nextMessageId = threadSearchResultIds[nextIndex];
-    if (nextMessageId) {
-      requestThreadSearchJump(nextMessageId);
+    const nextOccurrenceId = threadSearchResultIds[nextIndex];
+    if (nextOccurrenceId) {
+      requestThreadSearchJump(nextOccurrenceId);
     }
   }, [
     requestThreadSearchJump,
@@ -4322,10 +4322,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
                 timelineEntries={timelineEntries}
                 jumpToMessageId={threadContextJumpRequest?.messageId ?? null}
                 jumpToMessageRequestKey={threadContextJumpRequest?.key ?? 0}
-                searchJumpToMessageId={threadSearchJumpRequest?.messageId ?? null}
-                searchJumpToMessageRequestKey={threadSearchJumpRequest?.key ?? 0}
-                searchMatchedMessageIds={threadSearchMatchedMessageIds}
-                activeSearchMessageId={activeThreadSearchMessageId}
+                searchJumpToOccurrenceId={threadSearchJumpRequest?.occurrenceId ?? null}
+                searchJumpToOccurrenceRequestKey={threadSearchJumpRequest?.key ?? 0}
+                searchQuery={threadSearchQuery}
+                activeSearchOccurrenceId={activeThreadSearchOccurrenceId}
                 completionDividerBeforeEntryId={completionDividerBeforeEntryId}
                 completionSummary={completionSummary}
                 animatedAssistantMessageId={animatedAssistantMessageId}
@@ -6185,10 +6185,10 @@ interface MessagesTimelineProps {
   timelineEntries: ReturnType<typeof deriveTimelineEntries>;
   jumpToMessageId: MessageId | null;
   jumpToMessageRequestKey: number;
-  searchJumpToMessageId: MessageId | null;
-  searchJumpToMessageRequestKey: number;
-  searchMatchedMessageIds: ReadonlySet<MessageId>;
-  activeSearchMessageId: MessageId | null;
+  searchJumpToOccurrenceId: string | null;
+  searchJumpToOccurrenceRequestKey: number;
+  searchQuery: string;
+  activeSearchOccurrenceId: string | null;
   completionDividerBeforeEntryId: string | null;
   completionSummary: string | null;
   animatedAssistantMessageId: MessageId | null;
@@ -6457,11 +6457,13 @@ const AnimatedAssistantMessage = memo(function AnimatedAssistantMessage({
   cwd,
   animate,
   onComplete,
+  searchContentId,
 }: {
   message: TimelineMessage;
   cwd: string | undefined;
   animate: boolean;
   onComplete: () => void;
+  searchContentId?: string;
 }) {
   const targetText = message.text || "(empty response)";
   const [visibleLength, setVisibleLength] = useState(
@@ -6502,6 +6504,7 @@ const AnimatedAssistantMessage = memo(function AnimatedAssistantMessage({
       text={animate ? targetText.slice(0, visibleLength) : targetText}
       cwd={cwd}
       isStreaming={Boolean(message.streaming) || (animate && visibleLength < targetText.length)}
+      searchContentId={searchContentId}
     />
   );
 });
@@ -6639,6 +6642,102 @@ const TimelineFlaggerRail = memo(function TimelineFlaggerRail(props: {
   );
 });
 
+function clearThreadSearchHighlights(root: ParentNode): void {
+  const highlights = root.querySelectorAll("mark[data-thread-search-occurrence-id]");
+  for (const highlight of highlights) {
+    const parent = highlight.parentNode;
+    if (!parent) {
+      continue;
+    }
+    parent.replaceChild(document.createTextNode(highlight.textContent ?? ""), highlight);
+    parent.normalize();
+  }
+}
+
+function applyThreadSearchHighlights(options: {
+  root: ParentNode;
+  query: string;
+  activeOccurrenceId: string | null;
+}): void {
+  const { root, query, activeOccurrenceId } = options;
+  const searchableElements = root.querySelectorAll<HTMLElement>("[data-thread-search-content]");
+
+  for (const element of searchableElements) {
+    const messageId = element.dataset.threadSearchContent as MessageId | undefined;
+    if (!messageId) {
+      continue;
+    }
+
+    let occurrenceIndex = 0;
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        const text = node.textContent ?? "";
+        if (text.length === 0) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        if (!(node.parentElement instanceof HTMLElement)) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        if (
+          node.parentElement.closest(
+            "button, textarea, input, select, option, mark[data-thread-search-occurrence-id], [data-thread-search-exclude='true']",
+          )
+        ) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
+
+    const textNodes: Text[] = [];
+    while (walker.nextNode()) {
+      const currentNode = walker.currentNode;
+      if (currentNode instanceof Text) {
+        textNodes.push(currentNode);
+      }
+    }
+
+    for (const textNode of textNodes) {
+      const text = textNode.textContent ?? "";
+      const ranges = findThreadSearchMatchRanges(text, query);
+      if (ranges.length === 0) {
+        continue;
+      }
+
+      const fragment = document.createDocumentFragment();
+      let lastIndex = 0;
+
+      for (const range of ranges) {
+        if (range.start > lastIndex) {
+          fragment.append(document.createTextNode(text.slice(lastIndex, range.start)));
+        }
+
+        const occurrenceId = buildThreadSearchOccurrenceId(messageId, occurrenceIndex);
+        const highlight = document.createElement("mark");
+        highlight.dataset.threadSearchOccurrenceId = occurrenceId;
+        if (activeOccurrenceId === occurrenceId) {
+          highlight.dataset.threadSearchActive = "true";
+        }
+        highlight.className =
+          activeOccurrenceId === occurrenceId
+            ? "rounded-[4px] bg-sky-400/40 px-0.5 py-px text-inherit ring-1 ring-sky-400/45"
+            : "rounded-[4px] bg-sky-400/18 px-0.5 py-px text-inherit";
+        highlight.textContent = text.slice(range.start, range.end);
+        fragment.append(highlight);
+
+        occurrenceIndex += 1;
+        lastIndex = range.end;
+      }
+
+      if (lastIndex < text.length) {
+        fragment.append(document.createTextNode(text.slice(lastIndex)));
+      }
+
+      textNode.replaceWith(fragment);
+    }
+  }
+}
+
 const MessagesTimeline = memo(function MessagesTimeline({
   hasMessages,
   isWorking,
@@ -6654,10 +6753,10 @@ const MessagesTimeline = memo(function MessagesTimeline({
   timelineEntries,
   jumpToMessageId,
   jumpToMessageRequestKey,
-  searchJumpToMessageId,
-  searchJumpToMessageRequestKey,
-  searchMatchedMessageIds,
-  activeSearchMessageId,
+  searchJumpToOccurrenceId,
+  searchJumpToOccurrenceRequestKey,
+  searchQuery,
+  activeSearchOccurrenceId,
   completionDividerBeforeEntryId,
   completionSummary,
   animatedAssistantMessageId,
@@ -7025,6 +7124,66 @@ const MessagesTimeline = memo(function MessagesTimeline({
       syncScrollMetrics,
     ],
   );
+  const scrollToOccurrence = useCallback(
+    (occurrenceId: string) => {
+      const messageId = threadSearchMessageIdFromOccurrenceId(occurrenceId);
+      if (!messageId) {
+        return;
+      }
+
+      const findOccurrenceElement = (): HTMLElement | null =>
+        timelineRootRef.current?.querySelector<HTMLElement>(
+          `[data-thread-search-occurrence-id="${occurrenceId}"]`,
+        ) ?? null;
+
+      if (pendingJumpFrameRef.current !== null) {
+        window.cancelAnimationFrame(pendingJumpFrameRef.current);
+        pendingJumpFrameRef.current = null;
+      }
+
+      const scrollOccurrenceIntoView = (): boolean => {
+        const element = findOccurrenceElement();
+        if (!element) {
+          return false;
+        }
+        element.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+        highlightMessage(messageId);
+        syncScrollMetrics();
+        return true;
+      };
+
+      if (scrollOccurrenceIntoView()) {
+        return;
+      }
+
+      const rowIndex = messageRowIndexById.get(messageId);
+      if (typeof rowIndex !== "number") {
+        return;
+      }
+
+      rowVirtualizer.scrollToIndex(rowIndex, { align: "start" });
+      if (rowIndex === 0) {
+        scrollContainer?.scrollTo({ top: 0 });
+      }
+      syncScrollMetrics();
+
+      let attemptsRemaining = 12;
+      const settleScroll = () => {
+        if (scrollOccurrenceIntoView()) {
+          pendingJumpFrameRef.current = null;
+          return;
+        }
+        if (attemptsRemaining <= 0) {
+          pendingJumpFrameRef.current = null;
+          return;
+        }
+        attemptsRemaining -= 1;
+        pendingJumpFrameRef.current = window.requestAnimationFrame(settleScroll);
+      };
+      pendingJumpFrameRef.current = window.requestAnimationFrame(settleScroll);
+    },
+    [highlightMessage, messageRowIndexById, rowVirtualizer, scrollContainer, syncScrollMetrics],
+  );
   useEffect(() => {
     if (!jumpToMessageId || jumpToMessageRequestKey < 1) {
       return;
@@ -7040,11 +7199,29 @@ const MessagesTimeline = memo(function MessagesTimeline({
     scrollToMessage(jumpToMessageId);
   }, [jumpToMessageId, jumpToMessageRequestKey, messageRowIndexById, scrollToMessage]);
   useEffect(() => {
-    if (!searchJumpToMessageId || searchJumpToMessageRequestKey < 1) {
+    if (!searchJumpToOccurrenceId || searchJumpToOccurrenceRequestKey < 1) {
       return;
     }
-    scrollToMessage(searchJumpToMessageId);
-  }, [scrollToMessage, searchJumpToMessageId, searchJumpToMessageRequestKey]);
+    scrollToOccurrence(searchJumpToOccurrenceId);
+  }, [scrollToOccurrence, searchJumpToOccurrenceId, searchJumpToOccurrenceRequestKey]);
+  useLayoutEffect(() => {
+    const timelineRoot = timelineRootRef.current;
+    if (!timelineRoot) {
+      return;
+    }
+    clearThreadSearchHighlights(timelineRoot);
+    if (searchQuery.trim().length === 0) {
+      return;
+    }
+    applyThreadSearchHighlights({
+      root: timelineRoot,
+      query: searchQuery,
+      activeOccurrenceId: activeSearchOccurrenceId,
+    });
+    return () => {
+      clearThreadSearchHighlights(timelineRoot);
+    };
+  }, [activeSearchOccurrenceId, rows, scrollMetrics.scrollTop, searchQuery, virtualizedRowCount]);
 
   const virtualRows = rowVirtualizer.getVirtualItems();
   const nonVirtualizedRows = rows.slice(virtualizedRowCount);
@@ -7123,23 +7300,17 @@ const MessagesTimeline = memo(function MessagesTimeline({
   const flaggerRailPortalTarget = scrollContainer?.parentElement ?? null;
 
   const renderRowContent = (row: TimelineRow) => {
-    const isSearchMatch = row.kind === "message" && searchMatchedMessageIds.has(row.message.id);
-    const isActiveSearchMatch = row.kind === "message" && activeSearchMessageId === row.message.id;
     const isJumpHighlighted = row.kind === "message" && highlightedMessageId === row.message.id;
 
     return (
       <div
         className={cn(
           "pb-4 transition-colors duration-500",
-          isSearchMatch && "rounded-2xl bg-sky-500/6 ring-1 ring-sky-500/18",
-          isActiveSearchMatch && "bg-sky-500/12 ring-sky-500/40",
           isJumpHighlighted && "bg-accent/25 ring-1 ring-border/80",
         )}
         data-timeline-row-kind={row.kind}
         data-message-id={row.kind === "message" ? row.message.id : undefined}
         data-message-role={row.kind === "message" ? row.message.role : undefined}
-        data-thread-search-match={isSearchMatch ? "true" : undefined}
-        data-thread-search-active-match={isActiveSearchMatch ? "true" : undefined}
       >
         {row.kind === "work" &&
           (() => {
@@ -7216,7 +7387,10 @@ const MessagesTimeline = memo(function MessagesTimeline({
                     </div>
                   )}
                   {row.message.text && (
-                    <pre className="whitespace-pre-wrap wrap-break-word font-mono text-sm leading-relaxed text-foreground">
+                    <pre
+                      className="whitespace-pre-wrap wrap-break-word font-mono text-sm leading-relaxed text-foreground"
+                      data-thread-search-content={row.message.id}
+                    >
                       {row.message.text}
                     </pre>
                   )}
@@ -7333,6 +7507,7 @@ const MessagesTimeline = memo(function MessagesTimeline({
                       messageText.length > 0
                     }
                     onComplete={onAnimatedAssistantMessageComplete}
+                    searchContentId={row.message.id}
                   />
                   {row.changedFilesSummary && row.changedFilesSummary.files.length > 0 ? (
                     <CompactChangedFilesSummary

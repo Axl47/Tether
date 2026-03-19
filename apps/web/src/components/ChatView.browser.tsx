@@ -804,13 +804,13 @@ async function waitForThreadSearchInput(): Promise<HTMLInputElement> {
   );
 }
 
-async function waitForActiveThreadSearchMatch(messageId: MessageId): Promise<HTMLElement> {
+async function waitForActiveThreadSearchMatch(occurrenceId: string): Promise<HTMLElement> {
   return waitForElement(
     () =>
       document.querySelector<HTMLElement>(
-        `[data-message-id="${messageId}"][data-thread-search-active-match="true"]`,
+        `[data-thread-search-occurrence-id="${occurrenceId}"][data-thread-search-active="true"]`,
       ),
-    `Unable to find active thread search match for ${messageId}.`,
+    `Unable to find active thread search match for ${occurrenceId}.`,
   );
 }
 
@@ -2294,7 +2294,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       setNativeInputValue(searchInput, "filler user message");
 
-      await waitForActiveThreadSearchMatch("msg-user-0" as MessageId);
+      await waitForActiveThreadSearchMatch("msg-user-0:0");
       await vi.waitFor(
         () => {
           expect(
@@ -2312,7 +2312,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
         }),
       );
 
-      await waitForActiveThreadSearchMatch("msg-user-1" as MessageId);
+      await waitForActiveThreadSearchMatch("msg-user-1:0");
     } finally {
       await mounted.cleanup();
     }
