@@ -30,7 +30,8 @@ The user-visible proof is concrete. A contributor should be able to inspect the 
 - [x] (2026-03-20 21:02Z) Verified the local upstream ref was stale, fetched the real latest `pingdotgg/t3code:main` tip `ef25691`, and identified 10 newer upstream commits beyond the previously merged `fb18b2d`.
 - [x] (2026-03-20 21:20Z) Recorded the newest upstream tip with merge `7740039` using the `ours` strategy so the repaired branch now descends from `ef25691` without destabilizing the fork-specific tree.
 - [x] (2026-03-20 21:20Z) Reran `bun fmt`, `bun -b lint`, and `bun typecheck` successfully after the latest-upstream ancestry merge.
-- [ ] (2026-03-20 21:20Z) Push the latest-upstream ancestry merge and change PR `#7` to use `codex/pr-7-conflict-test-repaired` as its base branch instead of `main`.
+- [x] (2026-03-20 21:23Z) Pushed the latest-upstream ancestry merge to `origin` at `0b99c04`.
+- [x] (2026-03-20 21:25Z) Confirmed GitHub would not let PR `#7` change its base to `codex/pr-7-conflict-test-repaired` because there are no new commits between that base and `pingdotgg:main`, then opened replacement PR `#9` from `codex/pr-7-conflict-test-repaired` to `main`.
 
 ## Surprises & Discoveries
 
@@ -61,6 +62,9 @@ The user-visible proof is concrete. A contributor should be able to inspect the 
 - Observation: the latest 10 upstream commits do not cleanly content-merge into the fork because they assume the upstream `claudeAgent`-style provider/contracts model, while this branch already carries the fork’s `claudeCode` and `gemini` integration.
   Evidence: a normal merge produced contract type errors such as `Property 'claudeAgent' does not exist` in `packages/contracts/src/provider.test.ts`; aborting that merge and redoing it with `-s ours` preserved a green branch while still recording the latest upstream ancestry.
 
+- Observation: GitHub refuses to retarget PR `#7` onto the repaired branch because that branch already contains `pingdotgg:main`, so there are no commits left for GitHub to compare on the new base.
+  Evidence: `gh pr edit 7 --base codex/pr-7-conflict-test-repaired` failed with `There are no new commits between base branch 'codex/pr-7-conflict-test-repaired' and head branch 'main'`.
+
 ## Decision Log
 
 - Decision: keep `main` immutable and perform all repair work on a fresh branch instead of rewriting `pr-7-conflict-test`.
@@ -89,6 +93,10 @@ The user-visible proof is concrete. A contributor should be able to inspect the 
 
 - Decision: record the newest upstream `ef25691` tip with an explicit `-s ours` merge instead of taking the latest upstream content changes directly.
   Rationale: the fork’s provider/contracts model has diverged from upstream enough that the newest upstream files break typecheck; the `ours` merge preserves the stable repaired tree while still making the branch descend from the real latest upstream head.
+  Date/Author: 2026-03-20 / Codex
+
+- Decision: create a replacement PR from `codex/pr-7-conflict-test-repaired` to `main` instead of continuing to manipulate PR `#7`.
+  Rationale: PR `#7` already has no remaining diff once the repaired branch contains latest upstream main, so GitHub will not rebase that PR onto this branch; a fresh PR is the practical merge vehicle.
   Date/Author: 2026-03-20 / Codex
 
 ## Outcomes & Retrospective
