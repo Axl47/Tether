@@ -50,11 +50,35 @@ export interface SqliteMemoryClientConfig extends Omit<
   "filename" | "readonly"
 > {}
 
+/**
+ * Verify that the current Node.js version includes the `node:sqlite` APIs
+ * used by `NodeSqliteClient` — specifically `StatementSync.columns()` (added
+ * in Node 22.16.0 / 23.11.0).
+ *
+ * @see https://github.com/nodejs/node/pull/57490
+ */
+const checkNodeSqliteCompat = () => {
+  const parts = process.versions.node.split(".").map(Number);
+  const major = parts[0] ?? 0;
+  const minor = parts[1] ?? 0;
+  const supported = (major === 22 && minor >= 16) || (major === 23 && minor >= 11) || major >= 24;
+
+  if (!supported) {
+    return Effect.die(
+      `Node.js ${process.versions.node} is missing required node:sqlite APIs ` +
+        `(StatementSync.columns). Upgrade to Node.js >=22.16, >=23.11, or >=24.`,
+    );
+  }
+  return Effect.void;
+};
+
 const makeWithDatabase = (
   options: SqliteClientConfig,
   openDatabase: () => DatabaseSync,
 ): Effect.Effect<Client.SqlClient, never, Scope.Scope | Reactivity.Reactivity> =>
   Effect.gen(function* () {
+    yield* checkNodeSqliteCompat();
+
     const compiler = Statement.makeCompilerSqlite(options.transformQueryNames);
     const transformRows = options.transformResultNames
       ? Statement.defaultTransforms(options.transformResultNames).array
@@ -67,17 +91,6 @@ const makeWithDatabase = (
         scope,
         Effect.sync(() => db.close()),
       );
-
-      const statementReaderCache = new WeakMap<StatementSync, boolean>();
-      const hasRows = (statement: StatementSync): boolean => {
-        const cached = statementReaderCache.get(statement);
-        if (cached !== undefined) {
-          return cached;
-        }
-        const value = statement.columns().length > 0;
-        statementReaderCache.set(statement, value);
-        return value;
-      };
 
       const prepareCache = yield* Cache.make({
         capacity: options.prepareCacheSize ?? 200,
@@ -97,11 +110,11 @@ const makeWithDatabase = (
         Effect.withFiber<ReadonlyArray<any>, SqlError>((fiber) => {
           statement.setReadBigInts(Boolean(ServiceMap.get(fiber.services, Client.SafeIntegers)));
           try {
-            if (hasRows(statement)) {
-              return Effect.succeed(statement.all(...(params as any)));
+            if (raw) {
+              const result = statement.run(...(params as any));
+              return Effect.succeed(result as unknown as ReadonlyArray<any>);
             }
-            const result = statement.run(...(params as any));
-            return Effect.succeed(raw ? (result as unknown as ReadonlyArray<any>) : []);
+            return Effect.succeed(statement.all(...(params as any)));
           } catch (cause) {
             return Effect.fail(new SqlError({ cause, message: "Failed to execute statement" }));
           }
@@ -116,23 +129,17 @@ const makeWithDatabase = (
           (statement) =>
             Effect.try({
               try: () => {
-                if (hasRows(statement)) {
-                  statement.setReturnArrays(true);
-                  // Safe to cast to array after we've setReturnArrays(true)
-                  return statement.all(...(params as any)) as unknown as ReadonlyArray<
-                    ReadonlyArray<unknown>
-                  >;
-                }
-                statement.run(...(params as any));
-                return [];
+                statement.setReturnArrays(true);
+                // Safe to cast to array after we've setReturnArrays(true)
+                return statement.all(...(params as any)) as unknown as ReadonlyArray<
+                  ReadonlyArray<unknown>
+                >;
               },
               catch: (cause) => new SqlError({ cause, message: "Failed to execute statement" }),
             }),
           (statement) =>
             Effect.sync(() => {
-              if (hasRows(statement)) {
-                statement.setReturnArrays(false);
-              }
+              statement.setReturnArrays(false);
             }),
         );
 

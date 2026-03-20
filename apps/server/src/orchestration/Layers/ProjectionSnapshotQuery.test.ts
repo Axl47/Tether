@@ -26,6 +26,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
 
       yield* sql`DELETE FROM projection_projects`;
       yield* sql`DELETE FROM projection_state`;
+      yield* sql`DELETE FROM projection_thread_proposed_plans`;
       yield* sql`DELETE FROM projection_turns`;
 
       yield* sql`
@@ -59,7 +60,9 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           model,
           branch,
           worktree_path,
+          context_window_json,
           latest_turn_id,
+          last_autorename_user_message_id,
           created_at,
           updated_at,
           deleted_at
@@ -71,7 +74,9 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           'gpt-5-codex',
           NULL,
           NULL,
+          '{"provider":"codex","estimationVersion":2,"estimationMode":"direct","usedTokens":119000,"effectiveTokens":119000,"reportedTotalTokens":119000,"maxTokens":258000,"remainingTokens":139000,"usedPercent":46,"updatedAt":"2026-02-24T00:00:03.000Z"}',
           'turn-1',
+          'message-autorename-1',
           '2026-02-24T00:00:02.000Z',
           '2026-02-24T00:00:03.000Z',
           NULL
@@ -98,6 +103,29 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           0,
           '2026-02-24T00:00:04.000Z',
           '2026-02-24T00:00:05.000Z'
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_thread_proposed_plans (
+          plan_id,
+          thread_id,
+          turn_id,
+          plan_markdown,
+          implemented_at,
+          implementation_thread_id,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          'plan-1',
+          'thread-1',
+          'turn-1',
+          '# Ship it',
+          '2026-02-24T00:00:05.500Z',
+          'thread-2',
+          '2026-02-24T00:00:05.000Z',
+          '2026-02-24T00:00:05.500Z'
         )
       `;
 
@@ -239,6 +267,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             completedAt: "2026-02-24T00:00:08.000Z",
             assistantMessageId: asMessageId("message-1"),
           },
+          lastAutoRenameUserMessageId: asMessageId("message-autorename-1"),
           createdAt: "2026-02-24T00:00:02.000Z",
           updatedAt: "2026-02-24T00:00:03.000Z",
           deletedAt: null,
@@ -253,7 +282,29 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
               updatedAt: "2026-02-24T00:00:05.000Z",
             },
           ],
-          proposedPlans: [],
+          proposedPlans: [
+            {
+              id: "plan-1",
+              turnId: asTurnId("turn-1"),
+              planMarkdown: "# Ship it",
+              implementedAt: "2026-02-24T00:00:05.500Z",
+              implementationThreadId: ThreadId.makeUnsafe("thread-2"),
+              createdAt: "2026-02-24T00:00:05.000Z",
+              updatedAt: "2026-02-24T00:00:05.500Z",
+            },
+          ],
+          contextWindow: {
+            provider: "codex",
+            estimationVersion: 2,
+            estimationMode: "direct",
+            usedTokens: 119000,
+            effectiveTokens: 119000,
+            reportedTotalTokens: 119000,
+            maxTokens: 258000,
+            remainingTokens: 139000,
+            usedPercent: 46,
+            updatedAt: "2026-02-24T00:00:03.000Z",
+          },
           activities: [
             {
               id: asEventId("activity-1"),
@@ -287,6 +338,92 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           },
         },
       ]);
+    }),
+  );
+
+  it.effect("drops legacy Codex context snapshots that are missing estimationVersion 2", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_state`;
+      yield* sql`DELETE FROM projection_turns`;
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          default_model,
+          scripts_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'project-1',
+          'Project 1',
+          '/tmp/project-1',
+          'gpt-5-codex',
+          '[]',
+          '2026-02-24T00:00:00.000Z',
+          '2026-02-24T00:00:01.000Z',
+          NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id,
+          project_id,
+          title,
+          model,
+          branch,
+          worktree_path,
+          context_window_json,
+          latest_turn_id,
+          last_autorename_user_message_id,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'thread-legacy',
+          'project-1',
+          'Legacy Thread',
+          'gpt-5-codex',
+          NULL,
+          NULL,
+          '{"provider":"codex","usedTokens":119000,"maxTokens":258000,"remainingTokens":139000,"usedPercent":46,"updatedAt":"2026-02-24T00:00:03.000Z"}',
+          NULL,
+          NULL,
+          '2026-02-24T00:00:02.000Z',
+          '2026-02-24T00:00:03.000Z',
+          NULL
+        )
+      `;
+
+      let sequence = 5;
+      for (const projector of Object.values(ORCHESTRATION_PROJECTOR_NAMES)) {
+        yield* sql`
+          INSERT INTO projection_state (
+            projector,
+            last_applied_sequence,
+            updated_at
+          )
+          VALUES (
+            ${projector},
+            ${sequence},
+            '2026-02-24T00:00:09.000Z'
+          )
+        `;
+        sequence += 1;
+      }
+
+      const snapshot = yield* snapshotQuery.getSnapshot();
+      assert.equal(snapshot.threads[0]?.contextWindow, null);
     }),
   );
 });

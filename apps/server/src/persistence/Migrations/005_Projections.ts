@@ -26,6 +26,7 @@ export default Effect.gen(function* () {
       branch TEXT,
       worktree_path TEXT,
       latest_turn_id TEXT,
+      last_autorename_user_message_id TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       deleted_at TEXT

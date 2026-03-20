@@ -28,6 +28,7 @@ function MenuPopup({
   alignOffset,
   side = "bottom",
   anchor,
+  keepMounted = false,
   ...props
 }: MenuPrimitive.Popup.Props & {
   align?: MenuPrimitive.Positioner.Props["align"];
@@ -35,9 +36,10 @@ function MenuPopup({
   alignOffset?: MenuPrimitive.Positioner.Props["alignOffset"];
   side?: MenuPrimitive.Positioner.Props["side"];
   anchor?: MenuPrimitive.Positioner.Props["anchor"];
+  keepMounted?: boolean;
 }) {
   return (
-    <MenuPrimitive.Portal>
+    <MenuPrimitive.Portal keepMounted={keepMounted}>
       <MenuPrimitive.Positioner
         align={align}
         alignOffset={alignOffset}
@@ -253,11 +255,15 @@ function MenuSubPopup({
   sideOffset = 0,
   alignOffset,
   align = "start",
+  side = "inline-end",
+  keepMounted = false,
   ...props
 }: MenuPrimitive.Popup.Props & {
   align?: MenuPrimitive.Positioner.Props["align"];
   sideOffset?: MenuPrimitive.Positioner.Props["sideOffset"];
   alignOffset?: MenuPrimitive.Positioner.Props["alignOffset"];
+  side?: MenuPrimitive.Positioner.Props["side"];
+  keepMounted?: boolean;
 }) {
   const defaultAlignOffset = align !== "center" ? -5 : undefined;
 
@@ -267,7 +273,8 @@ function MenuSubPopup({
       alignOffset={alignOffset ?? defaultAlignOffset}
       className={className}
       data-slot="menu-sub-content"
-      side="inline-end"
+      keepMounted={keepMounted}
+      side={side}
       sideOffset={sideOffset}
       {...props}
     />

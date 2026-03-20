@@ -19,7 +19,13 @@ import { ProviderSessionDirectoryPersistenceError } from "../Errors.ts";
 import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.ts";
 import { ProviderSessionDirectoryLive } from "./ProviderSessionDirectory.ts";
 
-function makeDirectoryLayer<E, R>(persistenceLayer: Layer.Layer<SqlClient.SqlClient, E, R>) {
+function makeDirectoryLayer<E, R>(
+  persistenceLayer: Layer.Layer<SqlClient.SqlClient, E, R>,
+): Layer.Layer<
+  ProviderSessionRuntimeRepository | ProviderSessionDirectory | NodeServices.NodeServices,
+  never,
+  never
+> {
   const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
     Layer.provide(persistenceLayer),
   );
@@ -27,7 +33,11 @@ function makeDirectoryLayer<E, R>(persistenceLayer: Layer.Layer<SqlClient.SqlCli
     runtimeRepositoryLayer,
     ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer)),
     NodeServices.layer,
-  );
+  ) as Layer.Layer<
+    ProviderSessionRuntimeRepository | ProviderSessionDirectory | NodeServices.NodeServices,
+    never,
+    never
+  >;
 }
 
 it.layer(makeDirectoryLayer(SqlitePersistenceMemory))("ProviderSessionDirectoryLive", (it) => {
@@ -203,5 +213,25 @@ it.layer(makeDirectoryLayer(SqlitePersistenceMemory))("ProviderSessionDirectoryL
       }).pipe(Effect.provide(directoryLayer));
 
       fs.rmSync(tempDir, { recursive: true, force: true });
+    }));
+
+  it("accepts persisted gemini provider bindings", () =>
+    Effect.gen(function* () {
+      const directory = yield* ProviderSessionDirectory;
+      const threadId = ThreadId.makeUnsafe("thread-gemini");
+
+      yield* directory.upsert({
+        provider: "gemini",
+        threadId,
+      });
+
+      const provider = yield* directory.getProvider(threadId);
+      assert.equal(provider, "gemini");
+
+      const binding = yield* directory.getBinding(threadId);
+      assertSome(binding, {
+        threadId,
+        provider: "gemini",
+      });
     }));
 });

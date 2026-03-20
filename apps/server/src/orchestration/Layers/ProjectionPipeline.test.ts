@@ -1508,6 +1508,160 @@ projectionLayer("OrchestrationProjectionPipeline", (it) => {
       }),
   );
 
+  it.effect("settles a running turn as interrupted when a session is stopped", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+        eventStore
+          .append(event)
+          .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+
+      const threadId = ThreadId.makeUnsafe("thread-stopped");
+      const projectId = ProjectId.makeUnsafe("project-stopped");
+      const turnId = TurnId.makeUnsafe("turn-stopped");
+      const messageId = MessageId.makeUnsafe("message-stopped");
+      const requestedAt = "2026-03-12T10:00:00.000Z";
+      const startedAt = "2026-03-12T10:00:05.000Z";
+      const stoppedAt = "2026-03-12T10:00:10.000Z";
+
+      yield* appendAndProject({
+        type: "project.created",
+        eventId: EventId.makeUnsafe("evt-stopped-1"),
+        aggregateKind: "project",
+        aggregateId: projectId,
+        occurredAt: requestedAt,
+        commandId: CommandId.makeUnsafe("cmd-stopped-1"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-stopped-1"),
+        metadata: {},
+        payload: {
+          projectId,
+          title: "Stopped Project",
+          workspaceRoot: "/tmp/project-stopped",
+          defaultModel: "gpt-5-codex",
+          scripts: [],
+          createdAt: requestedAt,
+          updatedAt: requestedAt,
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.created",
+        eventId: EventId.makeUnsafe("evt-stopped-2"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: requestedAt,
+        commandId: CommandId.makeUnsafe("cmd-stopped-2"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-stopped-2"),
+        metadata: {},
+        payload: {
+          threadId,
+          projectId,
+          title: "Stopped Thread",
+          model: "gpt-5-codex",
+          runtimeMode: "approval-required",
+          branch: null,
+          worktreePath: null,
+          createdAt: requestedAt,
+          updatedAt: requestedAt,
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.turn-start-requested",
+        eventId: EventId.makeUnsafe("evt-stopped-3"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: requestedAt,
+        commandId: CommandId.makeUnsafe("cmd-stopped-3"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-stopped-3"),
+        metadata: {},
+        payload: {
+          threadId,
+          messageId,
+          runtimeMode: "approval-required",
+          createdAt: requestedAt,
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.session-set",
+        eventId: EventId.makeUnsafe("evt-stopped-4"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: startedAt,
+        commandId: CommandId.makeUnsafe("cmd-stopped-4"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-stopped-4"),
+        metadata: {},
+        payload: {
+          threadId,
+          session: {
+            threadId,
+            status: "running",
+            providerName: "codex",
+            runtimeMode: "approval-required",
+            activeTurnId: turnId,
+            lastError: null,
+            updatedAt: startedAt,
+          },
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.session-set",
+        eventId: EventId.makeUnsafe("evt-stopped-5"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: stoppedAt,
+        commandId: CommandId.makeUnsafe("cmd-stopped-5"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-stopped-5"),
+        metadata: {},
+        payload: {
+          threadId,
+          session: {
+            threadId,
+            status: "stopped",
+            providerName: "codex",
+            runtimeMode: "approval-required",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: stoppedAt,
+          },
+        },
+      });
+
+      const turnRows = yield* sql<{
+        readonly turnId: string;
+        readonly pendingMessageId: string | null;
+        readonly state: string;
+        readonly completedAt: string | null;
+      }>`
+        SELECT
+          turn_id AS "turnId",
+          pending_message_id AS "pendingMessageId",
+          state,
+          completed_at AS "completedAt"
+        FROM projection_turns
+        WHERE thread_id = ${threadId}
+        ORDER BY requested_at ASC, turn_id ASC
+      `;
+      assert.deepEqual(turnRows, [
+        {
+          turnId: "turn-stopped",
+          pendingMessageId: "message-stopped",
+          state: "interrupted",
+          completedAt: stoppedAt,
+        },
+      ]);
+    }),
+  );
+
   it.effect("does not fallback-retain messages whose turnId is removed by revert", () =>
     Effect.gen(function* () {
       const projectionPipeline = yield* OrchestrationProjectionPipeline;

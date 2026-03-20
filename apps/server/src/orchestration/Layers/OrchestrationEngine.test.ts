@@ -43,7 +43,7 @@ async function createOrchestrationSystem() {
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
     Layer.provideMerge(NodeServices.layer),
   );
-  const runtime = ManagedRuntime.make(orchestrationLayer);
+  const runtime = ManagedRuntime.make(orchestrationLayer as any);
   const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
   return {
     engine,
@@ -325,7 +325,7 @@ describe("OrchestrationEngine", () => {
         Layer.provide(SqlitePersistenceMemory),
         Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
         Layer.provideMerge(NodeServices.layer),
-      ),
+      ) as any,
     );
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
     const createdAt = now();
@@ -409,7 +409,7 @@ describe("OrchestrationEngine", () => {
         Layer.provide(OrchestrationEventStoreLive),
         Layer.provide(OrchestrationCommandReceiptRepositoryLive),
         Layer.provide(SqlitePersistenceMemory),
-      ),
+      ) as any,
     );
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
     const createdAt = now();
@@ -544,7 +544,7 @@ describe("OrchestrationEngine", () => {
         Layer.provide(Layer.succeed(OrchestrationEventStore, nonTransactionalStore)),
         Layer.provide(OrchestrationCommandReceiptRepositoryLive),
         Layer.provide(SqlitePersistenceMemory),
-      ),
+      ) as any,
     );
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
     const createdAt = now();

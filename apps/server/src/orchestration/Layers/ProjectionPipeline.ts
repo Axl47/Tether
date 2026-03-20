@@ -425,7 +425,9 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             interactionMode: event.payload.interactionMode,
             branch: event.payload.branch,
             worktreePath: event.payload.worktreePath,
+            contextWindow: null,
             latestTurnId: null,
+            lastAutoRenameUserMessageId: null,
             createdAt: event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
             deletedAt: null,
@@ -446,6 +448,11 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             ...(event.payload.branch !== undefined ? { branch: event.payload.branch } : {}),
             ...(event.payload.worktreePath !== undefined
               ? { worktreePath: event.payload.worktreePath }
+              : {}),
+            ...(event.payload.lastAutoRenameUserMessageId !== undefined
+              ? {
+                  lastAutoRenameUserMessageId: event.payload.lastAutoRenameUserMessageId,
+                }
               : {}),
             updatedAt: event.payload.updatedAt,
           });
@@ -478,6 +485,36 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             ...existingRow.value,
             interactionMode: event.payload.interactionMode,
             updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
+        case "thread.context-window-set": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            contextWindow: event.payload.contextWindow,
+            updatedAt: event.occurredAt,
+          });
+          return;
+        }
+
+        case "thread.context-window-cleared": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            contextWindow: null,
+            updatedAt: event.occurredAt,
           });
           return;
         }
@@ -553,6 +590,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
           }
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
+            contextWindow: null,
             latestTurnId: null,
             updatedAt: event.occurredAt,
           });
@@ -653,6 +691,8 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             threadId: event.payload.threadId,
             turnId: event.payload.proposedPlan.turnId,
             planMarkdown: event.payload.proposedPlan.planMarkdown,
+            implementedAt: event.payload.proposedPlan.implementedAt,
+            implementationThreadId: event.payload.proposedPlan.implementationThreadId,
             createdAt: event.payload.proposedPlan.createdAt,
             updatedAt: event.payload.proposedPlan.updatedAt,
           });
@@ -775,6 +815,8 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
           yield* projectionTurnRepository.replacePendingTurnStart({
             threadId: event.payload.threadId,
             messageId: event.payload.messageId,
+            sourceProposedPlanThreadId: event.payload.sourceProposedPlan?.threadId ?? null,
+            sourceProposedPlanId: event.payload.sourceProposedPlan?.planId ?? null,
             requestedAt: event.payload.createdAt,
           });
           return;
@@ -783,6 +825,38 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
         case "thread.session-set": {
           const turnId = event.payload.session.activeTurnId;
           if (turnId === null || event.payload.session.status !== "running") {
+            if (
+              event.payload.session.status === "stopped" ||
+              event.payload.session.status === "interrupted" ||
+              event.payload.session.status === "error"
+            ) {
+              const existingTurns = yield* projectionTurnRepository.listByThreadId({
+                threadId: event.payload.threadId,
+              });
+              const runningTurn = existingTurns
+                .toReversed()
+                .find((row) => row.turnId !== null && row.state === "running");
+              if (runningTurn?.turnId) {
+                yield* projectionTurnRepository.upsertByTurnId({
+                  threadId: runningTurn.threadId,
+                  turnId: runningTurn.turnId,
+                  pendingMessageId: runningTurn.pendingMessageId,
+                  assistantMessageId: runningTurn.assistantMessageId,
+                  state: event.payload.session.status === "error" ? "error" : "interrupted",
+                  requestedAt: runningTurn.requestedAt,
+                  startedAt: runningTurn.startedAt ?? event.payload.session.updatedAt,
+                  completedAt: runningTurn.completedAt ?? event.payload.session.updatedAt,
+                  checkpointTurnCount: runningTurn.checkpointTurnCount,
+                  checkpointRef: runningTurn.checkpointRef,
+                  checkpointStatus: runningTurn.checkpointStatus,
+                  checkpointFiles: [...runningTurn.checkpointFiles],
+                });
+              }
+
+              yield* projectionTurnRepository.deletePendingTurnStartByThreadId({
+                threadId: event.payload.threadId,
+              });
+            }
             return;
           }
 

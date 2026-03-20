@@ -10,7 +10,7 @@ import {
   TrimmedNonEmptyString,
   TurnId,
 } from "./baseSchemas";
-import { ProviderKind } from "./orchestration";
+import { ChatAttachment, ProviderKind } from "./orchestration";
 
 const TrimmedNonEmptyStringSchema = TrimmedNonEmptyString;
 const UnknownRecordSchema = Schema.Record(Schema.String, Schema.Unknown);
@@ -19,6 +19,8 @@ const RuntimeEventRawSource = Schema.Literals([
   "codex.app-server.notification",
   "codex.app-server.request",
   "codex.eventmsg",
+  "claude.sdk.message",
+  "claude.sdk.permission",
   "codex.sdk.thread-event",
 ]);
 export type RuntimeEventRawSource = typeof RuntimeEventRawSource.Type;
@@ -72,6 +74,7 @@ export type RuntimeItemStatus = typeof RuntimeItemStatus.Type;
 
 const RuntimeContentStreamKind = Schema.Literals([
   "assistant_text",
+  "assistant_image",
   "reasoning_text",
   "reasoning_summary_text",
   "plan_text",
@@ -93,11 +96,7 @@ const RuntimeErrorClass = Schema.Literals([
 ]);
 export type RuntimeErrorClass = typeof RuntimeErrorClass.Type;
 
-export const CanonicalItemType = Schema.Literals([
-  "user_message",
-  "assistant_message",
-  "reasoning",
-  "plan",
+export const TOOL_LIFECYCLE_ITEM_TYPES = [
   "command_execution",
   "file_change",
   "mcp_tool_call",
@@ -105,6 +104,21 @@ export const CanonicalItemType = Schema.Literals([
   "collab_agent_tool_call",
   "web_search",
   "image_view",
+] as const;
+
+export const ToolLifecycleItemType = Schema.Literals(TOOL_LIFECYCLE_ITEM_TYPES);
+export type ToolLifecycleItemType = typeof ToolLifecycleItemType.Type;
+
+export function isToolLifecycleItemType(value: string): value is ToolLifecycleItemType {
+  return TOOL_LIFECYCLE_ITEM_TYPES.includes(value as ToolLifecycleItemType);
+}
+
+export const CanonicalItemType = Schema.Literals([
+  "user_message",
+  "assistant_message",
+  "reasoning",
+  "plan",
+  ...TOOL_LIFECYCLE_ITEM_TYPES,
   "review_entered",
   "review_exited",
   "context_compaction",
@@ -370,6 +384,7 @@ export type ItemLifecyclePayload = typeof ItemLifecyclePayload.Type;
 const ContentDeltaPayload = Schema.Struct({
   streamKind: RuntimeContentStreamKind,
   delta: Schema.String,
+  attachments: Schema.optional(Schema.Array(ChatAttachment)),
   contentIndex: Schema.optional(Schema.Int),
   summaryIndex: Schema.optional(Schema.Int),
 });

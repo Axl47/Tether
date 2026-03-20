@@ -53,6 +53,10 @@ import { GitCore } from "./git/Services/GitCore.ts";
 import { GitCommandError, GitManagerError } from "./git/Errors.ts";
 import { MigrationError } from "@effect/sql-sqlite-bun/SqliteMigrator";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
+import {
+  ThreadTitleManager,
+  type ThreadTitleManagerShape,
+} from "./orchestration/Services/ThreadTitleManager";
 
 const asEventId = (value: string): EventId => EventId.makeUnsafe(value);
 const asProviderItemId = (value: string): ProviderItemId => ProviderItemId.makeUnsafe(value);
@@ -476,12 +480,13 @@ describe("WebSocket Server", () => {
       authToken?: string;
       stateDir?: string;
       staticDir?: string;
-      providerLayer?: Layer.Layer<ProviderService, never>;
+      providerLayer?: Layer.Layer<ProviderService>;
       providerHealth?: ProviderHealthShape;
       open?: OpenShape;
       gitManager?: GitManagerShape;
       gitCore?: Pick<GitCoreShape, "listBranches" | "initRepo" | "pullCurrentBranch">;
       terminalManager?: TerminalManagerShape;
+      threadTitleManager?: ThreadTitleManagerShape;
     } = {},
   ): Promise<Http.Server> {
     if (serverScope) {
@@ -490,8 +495,13 @@ describe("WebSocket Server", () => {
 
     const stateDir = options.stateDir ?? makeTempDir("tether-ws-state-");
     const scope = await Effect.runPromise(Scope.make("sequential"));
-    const persistenceLayer = options.persistenceLayer ?? SqlitePersistenceMemory;
-    const providerLayer = options.providerLayer ?? makeServerProviderLayer();
+    const persistenceLayer = (options.persistenceLayer ?? SqlitePersistenceMemory) as Layer.Layer<
+      SqlClient.SqlClient,
+      SqlError.SqlError | MigrationError | PlatformError.PlatformError,
+      never
+    >;
+    const providerLayer = (options.providerLayer ??
+      makeServerProviderLayer()) as Layer.Layer<ProviderService>;
     const providerHealthLayer = Layer.succeed(
       ProviderHealth,
       options.providerHealth ?? defaultProviderHealthService,
@@ -520,6 +530,9 @@ describe("WebSocket Server", () => {
       options.terminalManager
         ? Layer.succeed(TerminalManager, options.terminalManager)
         : Layer.empty,
+      options.threadTitleManager
+        ? Layer.succeed(ThreadTitleManager, options.threadTitleManager)
+        : Layer.empty,
     );
 
     const runtimeLayer = Layer.merge(
@@ -538,12 +551,17 @@ describe("WebSocket Server", () => {
       Layer.provideMerge(NodeServices.layer),
     );
     const runtimeServices = await Effect.runPromise(
-      Layer.build(dependenciesLayer).pipe(Scope.provide(scope)),
+      Layer.build(dependenciesLayer as unknown as Layer.Layer<never>).pipe(
+        Scope.provide(scope),
+      ) as Effect.Effect<any, unknown, never>,
     );
 
     try {
       const runtime = await Effect.runPromise(
-        createServer().pipe(Effect.provide(runtimeServices), Scope.provide(scope)),
+        createServer().pipe(
+          Effect.provide(runtimeServices as never),
+          Scope.provide(scope),
+        ) as Effect.Effect<Http.Server, unknown, never>,
       );
       serverScope = scope;
       return runtime;
@@ -734,7 +752,11 @@ describe("WebSocket Server", () => {
     const stateDir = makeTempDir("tether-state-bootstrap-existing-");
     const persistenceLayer = makeSqlitePersistenceLive(path.join(stateDir, "state.sqlite")).pipe(
       Layer.provide(NodeServices.layer),
-    );
+    ) as Layer.Layer<
+      SqlClient.SqlClient,
+      SqlError.SqlError | MigrationError | PlatformError.PlatformError,
+      never
+    >;
     const cwd = "/test/bootstrap-existing";
 
     server = await createTestServer({
@@ -1596,6 +1618,45 @@ describe("WebSocket Server", () => {
     expect(fs.readFileSync(path.join(workspace, "plans", "effect-rpc.md"), "utf8")).toBe(
       "# Plan\n\n- step 1\n",
     );
+  });
+
+  it("routes orchestration.autorenameProjectThreads over websocket", async () => {
+    const autorenameProjectThreads = vi.fn(() =>
+      Effect.succeed({
+        renamed: [
+          {
+            threadId: ThreadId.makeUnsafe("thread-1"),
+            title: "Refresh sidebar thread titles",
+          },
+        ],
+        skipped: [{ threadId: ThreadId.makeUnsafe("thread-2"), reason: "unchanged" as const }],
+        failed: [],
+      }),
+    );
+
+    server = await createTestServer({
+      cwd: "/test",
+      threadTitleManager: {
+        autorenameProjectThreads,
+      },
+    });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const response = await sendRequest(ws, ORCHESTRATION_WS_METHODS.autorenameProjectThreads, {
+      projectId: "project-1",
+    });
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toEqual({
+      renamed: [{ threadId: "thread-1", title: "Refresh sidebar thread titles" }],
+      skipped: [{ threadId: "thread-2", reason: "unchanged" }],
+      failed: [],
+    });
+    expect(autorenameProjectThreads).toHaveBeenCalledWith("project-1");
   });
 
   it("rejects projects.writeFile paths outside the workspace root", async () => {

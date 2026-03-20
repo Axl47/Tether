@@ -1,10 +1,16 @@
 import tailwindcss from "@tailwindcss/vite";
-import react from "@vitejs/plugin-react";
+import react, { reactCompilerPreset } from "@vitejs/plugin-react";
+import babel from "@rolldown/plugin-babel";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import { defineConfig } from "vite";
-import packageJson from "./package.json" with { type: "json" };
+import pkg from "./package.json" with { type: "json" };
 
 const port = Number(process.env.PORT ?? 5733);
+const bindHost = process.env.TETHER_HOST ?? process.env.T3CODE_HOST ?? "localhost";
+const publicHost =
+  process.env.TETHER_PUBLIC_HOST ??
+  process.env.T3CODE_PUBLIC_HOST ??
+  (bindHost === "0.0.0.0" || bindHost === "::" || bindHost === "[::]" ? "localhost" : bindHost);
 const sourcemapEnv = (process.env.TETHER_WEB_SOURCEMAP ?? process.env.T3CODE_WEB_SOURCEMAP)
   ?.trim()
   .toLowerCase();
@@ -19,10 +25,14 @@ const buildSourcemap =
 export default defineConfig({
   plugins: [
     tanstackRouter(),
-    react({
-      babel: {
-        plugins: [["babel-plugin-react-compiler", { target: "19" }]],
-      },
+    react(),
+    babel({
+      // We need to be explicit about the parser options after moving to @vitejs/plugin-react v6.0.0
+      // This is because the babel plugin only automatically parses typescript and jsx based on relative paths (e.g. "**/*.ts")
+      // whereas the previous version of the plugin parsed all files with a .ts extension.
+      // This is causing our packages/ directory to fail to parse, as they are not relative to the CWD.
+      parserOpts: { plugins: ["typescript", "jsx"] },
+      presets: [reactCompilerPreset()],
     }),
     tailwindcss(),
   ],
@@ -32,12 +42,13 @@ export default defineConfig({
   define: {
     // In dev mode, tell the web app where the WebSocket server lives
     "import.meta.env.VITE_WS_URL": JSON.stringify(process.env.VITE_WS_URL ?? ""),
-    "import.meta.env.APP_VERSION": JSON.stringify(packageJson.version),
+    "import.meta.env.APP_VERSION": JSON.stringify(pkg.version),
   },
   resolve: {
     tsconfigPaths: true,
   },
   server: {
+    host: bindHost,
     port,
     strictPort: true,
     hmr: {
@@ -45,7 +56,7 @@ export default defineConfig({
       // inside Electron's BrowserWindow. Vite 8 uses console.debug for
       // connection logs — enable "Verbose" in DevTools to see them.
       protocol: "ws",
-      host: "localhost",
+      host: publicHost,
     },
   },
   build: {

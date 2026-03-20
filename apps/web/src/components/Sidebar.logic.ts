@@ -1,12 +1,22 @@
-import type { Thread } from "../types";
-import { findLatestProposedPlan, isLatestTurnSettled } from "../session-logic";
+import { cn } from "../lib/utils";
+import type { SidebarThreadSort } from "../sidebarThreadSort";
+import {
+  findLatestProposedPlan,
+  hasActionableProposedPlan,
+  isLatestTurnSettled,
+} from "../session-logic";
+import type { PendingThreadRunPhase } from "../threadRunStateStore";
+import { resolveLatestThreadContextMessage, resolveThreadContextMessage } from "../threadContext";
+import type { Project, Thread } from "../types";
 
 export const THREAD_SELECTION_SAFE_SELECTOR = "[data-thread-item], [data-thread-selection-safe]";
+export type SidebarNewThreadEnvMode = "local" | "worktree";
 
 export interface ThreadStatusPill {
   label:
     | "Working"
     | "Connecting"
+    | "Preparing"
     | "Completed"
     | "Pending Approval"
     | "Awaiting Input"
@@ -16,10 +26,26 @@ export interface ThreadStatusPill {
   pulse: boolean;
 }
 
-type ThreadStatusInput = Pick<
-  Thread,
-  "interactionMode" | "latestTurn" | "lastVisitedAt" | "proposedPlans" | "session"
->;
+export interface SortSidebarThreadsOptions {
+  readonly sortBy: SidebarThreadSort;
+  readonly hasPendingApprovalsByThreadId: ReadonlyMap<Thread["id"], boolean>;
+  readonly hasPendingUserInputByThreadId: ReadonlyMap<Thread["id"], boolean>;
+}
+
+interface SortableThreadEntry {
+  readonly thread: Thread;
+  readonly createdAtMs: number;
+  readonly latestActivityAtMs: number;
+  readonly statusRank: number;
+}
+
+type ThreadStatusInput = {
+  readonly interactionMode: Thread["interactionMode"];
+  readonly latestTurn: Thread["latestTurn"];
+  readonly lastVisitedAt?: Thread["lastVisitedAt"];
+  readonly proposedPlans: ReadonlyArray<Thread["proposedPlans"][number]>;
+  readonly session: Thread["session"];
+};
 
 export function hasUnseenCompletion(thread: ThreadStatusInput): boolean {
   if (!thread.latestTurn?.completedAt) return false;
@@ -32,9 +58,56 @@ export function hasUnseenCompletion(thread: ThreadStatusInput): boolean {
   return completedAt > lastVisitedAt;
 }
 
+function buildPlanReadyPill(): ThreadStatusPill {
+  return {
+    label: "Plan Ready",
+    colorClass: "text-orange-600 dark:text-orange-300/90",
+    dotClass: "bg-orange-500 dark:bg-orange-300/90",
+    pulse: false,
+  };
+}
+
 export function shouldClearThreadSelectionOnMouseDown(target: HTMLElement | null): boolean {
   if (target === null) return true;
   return !target.closest(THREAD_SELECTION_SAFE_SELECTOR);
+}
+
+export function resolveSidebarNewThreadEnvMode(input: {
+  requestedEnvMode?: SidebarNewThreadEnvMode;
+  defaultEnvMode: SidebarNewThreadEnvMode;
+}): SidebarNewThreadEnvMode {
+  return input.requestedEnvMode ?? input.defaultEnvMode;
+}
+
+export function resolveThreadRowClassName(input: {
+  isActive: boolean;
+  isSelected: boolean;
+}): string {
+  const baseClassName =
+    "h-7 w-full translate-x-0 cursor-pointer justify-start px-2 text-left select-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring";
+
+  if (input.isSelected && input.isActive) {
+    return cn(
+      baseClassName,
+      "bg-primary/22 text-foreground font-medium hover:bg-primary/26 hover:text-foreground dark:bg-primary/30 dark:hover:bg-primary/36",
+    );
+  }
+
+  if (input.isSelected) {
+    return cn(
+      baseClassName,
+      "bg-primary/15 text-foreground hover:bg-primary/19 hover:text-foreground dark:bg-primary/22 dark:hover:bg-primary/28",
+    );
+  }
+
+  if (input.isActive) {
+    return cn(
+      baseClassName,
+      "bg-accent/85 text-foreground font-medium hover:bg-accent hover:text-foreground dark:bg-accent/55 dark:hover:bg-accent/70",
+    );
+  }
+
+  return cn(baseClassName, "text-muted-foreground hover:bg-accent hover:text-foreground");
 }
 
 export function resolveThreadStatusPill(input: {
@@ -90,14 +163,11 @@ export function resolveThreadStatusPill(input: {
     !hasPendingUserInput &&
     thread.interactionMode === "plan" &&
     isLatestTurnSettled(thread.latestTurn, thread.session) &&
-    findLatestProposedPlan(thread.proposedPlans, thread.latestTurn?.turnId ?? null) !== null;
+    hasActionableProposedPlan(
+      findLatestProposedPlan(thread.proposedPlans, thread.latestTurn?.turnId ?? null),
+    );
   if (hasPlanReadyPrompt) {
-    return {
-      label: "Plan Ready",
-      colorClass: "text-violet-600 dark:text-violet-300/90",
-      dotClass: "bg-violet-500 dark:bg-violet-300/90",
-      pulse: false,
-    };
+    return buildPlanReadyPill();
   }
 
   if (hasUnseenCompletion(thread)) {
@@ -110,4 +180,271 @@ export function resolveThreadStatusPill(input: {
   }
 
   return null;
+}
+
+export function deriveThreadStatusPill(input: {
+  readonly thread: Thread;
+  readonly hasPendingApprovals: boolean;
+  readonly hasPendingUserInput: boolean;
+  readonly hasQueuedDispatchInFlight?: boolean;
+  readonly pendingRunPhase?: PendingThreadRunPhase | null;
+}): ThreadStatusPill | null {
+  const base = resolveThreadStatusPill({
+    thread: input.thread,
+    hasPendingApprovals: input.hasPendingApprovals,
+    hasPendingUserInput: input.hasPendingUserInput,
+    ...(input.hasQueuedDispatchInFlight !== undefined
+      ? { hasQueuedDispatchInFlight: input.hasQueuedDispatchInFlight }
+      : {}),
+  });
+  if (base) {
+    return base;
+  }
+
+  if (input.pendingRunPhase === "preparing-worktree") {
+    return {
+      label: "Preparing",
+      colorClass: "text-sky-600 dark:text-sky-300/80",
+      dotClass: "bg-sky-500 dark:bg-sky-300/80",
+      pulse: true,
+    };
+  }
+
+  if (input.pendingRunPhase === "sending-turn") {
+    return {
+      label: "Connecting",
+      colorClass: "text-sky-600 dark:text-sky-300/80",
+      dotClass: "bg-sky-500 dark:bg-sky-300/80",
+      pulse: true,
+    };
+  }
+
+  const hasPlanReadyPrompt =
+    input.thread.interactionMode === "plan" &&
+    isLatestTurnSettled(input.thread.latestTurn, input.thread.session) &&
+    hasActionableProposedPlan(
+      findLatestProposedPlan(input.thread.proposedPlans, input.thread.latestTurn?.turnId ?? null),
+    );
+  if (hasPlanReadyPrompt) {
+    return buildPlanReadyPill();
+  }
+
+  return null;
+}
+
+function parseIsoMs(value: string | null | undefined): number {
+  if (!value) return Number.NEGATIVE_INFINITY;
+  const timestamp = Date.parse(value);
+  return Number.isNaN(timestamp) ? Number.NEGATIVE_INFINITY : timestamp;
+}
+
+export function getThreadLatestActivityAt(thread: Thread): string {
+  let latestMs = parseIsoMs(thread.createdAt);
+  let latestIso = thread.createdAt;
+
+  const updateLatest = (candidate: string | null | undefined) => {
+    const candidateMs = parseIsoMs(candidate);
+    if (candidateMs <= latestMs) return;
+    latestMs = candidateMs;
+    latestIso = candidate!;
+  };
+
+  updateLatest(thread.session?.updatedAt);
+  updateLatest(thread.latestTurn?.requestedAt);
+  updateLatest(thread.latestTurn?.startedAt);
+  updateLatest(thread.latestTurn?.completedAt);
+
+  for (const message of thread.messages) {
+    updateLatest(message.completedAt);
+    updateLatest(message.createdAt);
+  }
+  for (const proposedPlan of thread.proposedPlans) {
+    updateLatest(proposedPlan.updatedAt);
+    updateLatest(proposedPlan.createdAt);
+  }
+  for (const activity of thread.activities) {
+    updateLatest(activity.createdAt);
+  }
+
+  return latestIso;
+}
+
+function getThreadStatusRank(input: {
+  readonly thread: Thread;
+  readonly hasPendingApprovals: boolean;
+  readonly hasPendingUserInput: boolean;
+}): number {
+  const pill = deriveThreadStatusPill(input);
+  switch (pill?.label) {
+    case "Pending Approval":
+      return 0;
+    case "Awaiting Input":
+      return 1;
+    case "Preparing":
+      return 2;
+    case "Working":
+      return 3;
+    case "Connecting":
+      return 4;
+    case "Plan Ready":
+      return 5;
+    case "Completed":
+      return 6;
+    default:
+      return 7;
+  }
+}
+
+function compareNames(left: Thread, right: Thread): number {
+  return left.title.localeCompare(right.title, undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
+function normalizeSidebarSearchText(value: string): string {
+  return value.replace(/\s+/g, " ").trim().toLocaleLowerCase();
+}
+
+function matchesNormalizedSidebarSearch(thread: Thread, normalizedQuery: string): boolean {
+  const originalContextMessage = resolveThreadContextMessage(thread.messages);
+  const latestContextMessage = resolveLatestThreadContextMessage(thread.messages);
+  const searchableFields = [
+    thread.title,
+    originalContextMessage?.text ?? "",
+    latestContextMessage?.text ?? "",
+  ];
+
+  return searchableFields.some((field) =>
+    normalizeSidebarSearchText(field).includes(normalizedQuery),
+  );
+}
+
+export function threadMatchesSidebarSearch(thread: Thread, query: string): boolean {
+  const normalizedQuery = normalizeSidebarSearchText(query);
+  if (normalizedQuery.length === 0) {
+    return true;
+  }
+
+  return matchesNormalizedSidebarSearch(thread, normalizedQuery);
+}
+
+export function filterSidebarThreads(threads: readonly Thread[], query: string): Thread[] {
+  const normalizedQuery = normalizeSidebarSearchText(query);
+  if (normalizedQuery.length === 0) {
+    return [...threads];
+  }
+
+  return threads.filter((thread) => matchesNormalizedSidebarSearch(thread, normalizedQuery));
+}
+
+function buildSortableThreadEntry(
+  thread: Thread,
+  options: SortSidebarThreadsOptions,
+): SortableThreadEntry {
+  return {
+    thread,
+    createdAtMs: parseIsoMs(thread.createdAt),
+    latestActivityAtMs: parseIsoMs(getThreadLatestActivityAt(thread)),
+    statusRank: getThreadStatusRank({
+      thread,
+      hasPendingApprovals: options.hasPendingApprovalsByThreadId.get(thread.id) === true,
+      hasPendingUserInput: options.hasPendingUserInputByThreadId.get(thread.id) === true,
+    }),
+  };
+}
+
+function compareSortableThreadEntries(
+  left: SortableThreadEntry,
+  right: SortableThreadEntry,
+  sortBy: SidebarThreadSort,
+): number {
+  if (sortBy === "name") {
+    const byName = compareNames(left.thread, right.thread);
+    if (byName !== 0) return byName;
+    const byActivity = right.latestActivityAtMs - left.latestActivityAtMs;
+    if (byActivity !== 0) return byActivity;
+    return left.thread.id.localeCompare(right.thread.id);
+  }
+
+  if (sortBy === "status") {
+    const byStatus = left.statusRank - right.statusRank;
+    if (byStatus !== 0) return byStatus;
+    const byActivity = right.latestActivityAtMs - left.latestActivityAtMs;
+    if (byActivity !== 0) return byActivity;
+    const byName = compareNames(left.thread, right.thread);
+    if (byName !== 0) return byName;
+    return left.thread.id.localeCompare(right.thread.id);
+  }
+
+  if (sortBy === "created") {
+    const byCreatedAt = right.createdAtMs - left.createdAtMs;
+    if (byCreatedAt !== 0) return byCreatedAt;
+    const byName = compareNames(left.thread, right.thread);
+    if (byName !== 0) return byName;
+    return left.thread.id.localeCompare(right.thread.id);
+  }
+
+  const byActivity = right.latestActivityAtMs - left.latestActivityAtMs;
+  if (byActivity !== 0) return byActivity;
+  const byCreatedAt = right.createdAtMs - left.createdAtMs;
+  if (byCreatedAt !== 0) return byCreatedAt;
+  const byName = compareNames(left.thread, right.thread);
+  if (byName !== 0) return byName;
+  return left.thread.id.localeCompare(right.thread.id);
+}
+
+export function sortSidebarThreads(
+  threads: readonly Thread[],
+  options: SortSidebarThreadsOptions,
+): Thread[] {
+  const entries = threads.map((thread) => buildSortableThreadEntry(thread, options));
+
+  entries.sort((left, right) => compareSortableThreadEntries(left, right, options.sortBy));
+
+  return entries.map((entry) => entry.thread);
+}
+
+export function sortSidebarProjects<P extends Pick<Project, "id">>(
+  projects: readonly P[],
+  threads: readonly Thread[],
+  options: SortSidebarThreadsOptions,
+): P[] {
+  const leadingThreadByProjectId = new Map<Project["id"], SortableThreadEntry>();
+
+  for (const thread of threads) {
+    const sortableThread = buildSortableThreadEntry(thread, options);
+    const current = leadingThreadByProjectId.get(thread.projectId);
+    if (
+      current === undefined ||
+      compareSortableThreadEntries(sortableThread, current, options.sortBy) < 0
+    ) {
+      leadingThreadByProjectId.set(thread.projectId, sortableThread);
+    }
+  }
+
+  const sortedProjects = projects.map((project, index) => ({
+    project,
+    index,
+    leadingThread: leadingThreadByProjectId.get(project.id) ?? null,
+  }));
+
+  sortedProjects.sort((left, right) => {
+    if (left.leadingThread && right.leadingThread) {
+      const byLeadingThread = compareSortableThreadEntries(
+        left.leadingThread,
+        right.leadingThread,
+        options.sortBy,
+      );
+      if (byLeadingThread !== 0) {
+        return byLeadingThread;
+      }
+    } else if (left.leadingThread || right.leadingThread) {
+      return left.leadingThread ? -1 : 1;
+    }
+
+    return left.index - right.index;
+  });
+
+  return sortedProjects.map(({ project }) => project);
 }

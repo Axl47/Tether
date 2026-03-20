@@ -53,7 +53,11 @@ const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
   }),
 );
 const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
-const ProjectionThreadDbRowSchema = ProjectionThread;
+const ProjectionThreadSnapshotDbRowSchema = ProjectionThread.mapFields(
+  Struct.assign({
+    contextWindow: Schema.NullOr(Schema.fromJsonString(ProjectionThread.fields.contextWindow)),
+  }),
+);
 const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
   Struct.assign({
     payload: Schema.fromJsonString(Schema.Unknown),
@@ -86,6 +90,16 @@ const REQUIRED_SNAPSHOT_PROJECTORS = [
   ORCHESTRATION_PROJECTOR_NAMES.threadSessions,
   ORCHESTRATION_PROJECTOR_NAMES.checkpoints,
 ] as const;
+
+function sanitizeContextWindowForSnapshot(
+  contextWindow: OrchestrationThread["contextWindow"],
+): OrchestrationThread["contextWindow"] {
+  if (contextWindow?.provider !== "codex") {
+    return contextWindow;
+  }
+
+  return contextWindow.estimationVersion === 2 ? contextWindow : null;
+}
 
 function maxIso(left: string | null, right: string): string {
   if (left === null) {
@@ -149,7 +163,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
 
   const listThreadRows = SqlSchema.findAll({
     Request: Schema.Void,
-    Result: ProjectionThreadDbRowSchema,
+    Result: ProjectionThreadSnapshotDbRowSchema,
     execute: () =>
       sql`
         SELECT
@@ -161,7 +175,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           interaction_mode AS "interactionMode",
           branch,
           worktree_path AS "worktreePath",
+          context_window_json AS "contextWindow",
           latest_turn_id AS "latestTurnId",
+          last_autorename_user_message_id AS "lastAutoRenameUserMessageId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -200,6 +216,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           thread_id AS "threadId",
           turn_id AS "turnId",
           plan_markdown AS "planMarkdown",
+          implemented_at AS "implementedAt",
+          implementation_thread_id AS "implementationThreadId",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM projection_thread_proposed_plans
@@ -435,6 +453,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               id: row.planId,
               turnId: row.turnId,
               planMarkdown: row.planMarkdown,
+              implementedAt: row.implementedAt,
+              implementationThreadId: row.implementationThreadId,
               createdAt: row.createdAt,
               updatedAt: row.updatedAt,
             });
@@ -534,11 +554,13 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             branch: row.branch,
             worktreePath: row.worktreePath,
             latestTurn: latestTurnByThread.get(row.threadId) ?? null,
+            lastAutoRenameUserMessageId: row.lastAutoRenameUserMessageId,
             createdAt: row.createdAt,
             updatedAt: row.updatedAt,
             deletedAt: row.deletedAt,
             messages: messagesByThread.get(row.threadId) ?? [],
             proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
+            contextWindow: sanitizeContextWindowForSnapshot(row.contextWindow),
             activities: activitiesByThread.get(row.threadId) ?? [],
             checkpoints: checkpointsByThread.get(row.threadId) ?? [],
             session: sessionsByThread.get(row.threadId) ?? null,

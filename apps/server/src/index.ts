@@ -20,4 +20,8 @@ const RuntimeLayer = Layer.empty.pipe(
   Layer.provideMerge(FetchHttpClient.layer),
 );
 
-Command.run(t3Cli, { version }).pipe(Effect.provide(RuntimeLayer), NodeRuntime.runMain);
+const program = Command.run(t3Cli, { version }).pipe(
+  Effect.provide(RuntimeLayer as unknown as Layer.Layer<never>),
+) as Effect.Effect<void, unknown, never>;
+
+NodeRuntime.runMain(program);

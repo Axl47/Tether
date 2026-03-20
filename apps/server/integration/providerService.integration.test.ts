@@ -38,7 +38,7 @@ const makeWorkspaceDirectory = Effect.gen(function* () {
 interface IntegrationFixture {
   readonly cwd: string;
   readonly harness: TestProviderAdapterHarness;
-  readonly layer: Layer.Layer<ProviderService, unknown, never>;
+  readonly layer: Layer.Layer<ProviderService>;
 }
 
 const makeIntegrationFixture = Effect.gen(function* () {
@@ -63,7 +63,9 @@ const makeIntegrationFixture = Effect.gen(function* () {
     AnalyticsService.layerTest,
   ).pipe(Layer.provide(SqlitePersistenceMemory));
 
-  const layer = makeProviderServiceLive().pipe(Layer.provide(shared));
+  const layer = makeProviderServiceLive().pipe(
+    Layer.provide(shared),
+  ) as Layer.Layer<ProviderService>;
 
   return {
     cwd,

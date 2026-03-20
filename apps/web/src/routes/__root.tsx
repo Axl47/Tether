@@ -14,17 +14,19 @@ import { APP_DISPLAY_NAME } from "../branding";
 import { QueuedTurnDispatcher } from "../components/QueuedTurnDispatcher";
 import { Button } from "../components/ui/button";
 import { AnchoredToastProvider, ToastProvider, toastManager } from "../components/ui/toast";
+import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { serverConfigQueryOptions, serverQueryKeys } from "../lib/serverReactQuery";
 import { readNativeApi } from "../nativeApi";
 import { clearPromotedDraftThreads, useComposerDraftStore } from "../composerDraftStore";
 import { useStore } from "../store";
 import { useTerminalStateStore } from "../terminalStateStore";
-import { preferredTerminalEditor } from "../terminal-links";
+import { useThreadRunStateStore } from "../threadRunStateStore";
 import { terminalRunningSubprocessFromEvent } from "../terminalActivity";
 import { onServerConfigUpdated, onServerWelcome } from "../wsNativeApi";
 import { providerQueryKeys } from "../lib/providerReactQuery";
 import { projectQueryKeys } from "../lib/projectReactQuery";
 import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
+import { useAppViewportHeight } from "../hooks/useAppViewportHeight";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -37,9 +39,11 @@ export const Route = createRootRouteWithContext<{
 });
 
 function RootRouteView() {
+  useAppViewportHeight();
+
   if (!readNativeApi()) {
     return (
-      <div className="flex h-screen flex-col bg-background text-foreground">
+      <div className="flex h-[var(--app-viewport-height)] flex-col bg-background text-foreground">
         <div className="flex flex-1 items-center justify-center">
           <p className="text-sm text-muted-foreground">
             Connecting to {APP_DISPLAY_NAME} server...
@@ -62,11 +66,13 @@ function RootRouteView() {
 }
 
 function RootRouteErrorView({ error, reset }: ErrorComponentProps) {
+  useAppViewportHeight();
+
   const message = errorMessage(error);
   const details = errorDetails(error);
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10 text-foreground sm:px-6">
+    <div className="relative flex min-h-[var(--app-viewport-height)] items-center justify-center overflow-hidden bg-background px-4 py-10 text-foreground sm:px-6">
       <div className="pointer-events-none absolute inset-0 opacity-80">
         <div className="absolute inset-x-0 top-0 h-44 bg-[radial-gradient(44rem_16rem_at_top,color-mix(in_srgb,var(--color-red-500)_16%,transparent),transparent)]" />
         <div className="absolute inset-0 bg-[linear-gradient(145deg,color-mix(in_srgb,var(--background)_90%,var(--color-black))_0%,var(--background)_55%)]" />
@@ -138,6 +144,10 @@ function EventRouter() {
   const removeOrphanedTerminalStates = useTerminalStateStore(
     (store) => store.removeOrphanedTerminalStates,
   );
+  const syncPendingRuns = useThreadRunStateStore((store) => store.syncPendingRuns);
+  const removeOrphanedPendingRuns = useThreadRunStateStore(
+    (store) => store.removeOrphanedPendingRuns,
+  );
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
@@ -161,6 +171,7 @@ function EventRouter() {
       latestSequence = Math.max(latestSequence, snapshot.snapshotSequence);
       syncServerReadModel(snapshot);
       clearPromotedDraftThreads(new Set(snapshot.threads.map((t) => t.id)));
+      syncPendingRuns(snapshot);
       const draftThreadIds = Object.keys(
         useComposerDraftStore.getState().draftThreadsByThreadId,
       ) as ThreadId[];
@@ -169,6 +180,7 @@ function EventRouter() {
         draftThreadIds,
       });
       removeOrphanedTerminalStates(activeThreadIds);
+      removeOrphanedPendingRuns(activeThreadIds);
       if (pending) {
         pending = false;
         await flushSnapshotSync();
@@ -283,9 +295,13 @@ function EventRouter() {
           onClick: () => {
             void queryClient
               .ensureQueryData(serverConfigQueryOptions())
-              .then((config) =>
-                api.shell.openInEditor(config.keybindingsConfigPath, preferredTerminalEditor()),
-              )
+              .then((config) => {
+                const editor = resolveAndPersistPreferredEditor(config.availableEditors);
+                if (!editor) {
+                  throw new Error("No available editors found.");
+                }
+                return api.shell.openInEditor(config.keybindingsConfigPath, editor);
+              })
               .catch((error) => {
                 toastManager.add({
                   type: "error",
@@ -312,7 +328,9 @@ function EventRouter() {
     navigate,
     queryClient,
     removeOrphanedTerminalStates,
+    removeOrphanedPendingRuns,
     setProjectExpanded,
+    syncPendingRuns,
     syncServerReadModel,
   ]);
 

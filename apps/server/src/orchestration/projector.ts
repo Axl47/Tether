@@ -14,6 +14,8 @@ import {
   ProjectDeletedPayload,
   ProjectMetaUpdatedPayload,
   ThreadActivityAppendedPayload,
+  ThreadContextWindowClearedPayload,
+  ThreadContextWindowSetPayload,
   ThreadCreatedPayload,
   ThreadDeletedPayload,
   ThreadInteractionModeSetPayload,
@@ -33,6 +35,14 @@ function checkpointStatusToLatestTurnState(status: "ready" | "missing" | "error"
   if (status === "error") return "error" as const;
   if (status === "missing") return "interrupted" as const;
   return "completed" as const;
+}
+
+function sessionStatusToAbandonedLatestTurnState(
+  status: OrchestrationSession["status"],
+): "error" | "interrupted" | null {
+  if (status === "error") return "error";
+  if (status === "interrupted" || status === "stopped") return "interrupted";
+  return null;
 }
 
 function updateThread(
@@ -258,10 +268,13 @@ export function projectEvent(
             branch: payload.branch,
             worktreePath: payload.worktreePath,
             latestTurn: null,
+            lastAutoRenameUserMessageId: null,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
             deletedAt: null,
             messages: [],
+            proposedPlans: [],
+            contextWindow: null,
             activities: [],
             checkpoints: [],
             session: null,
@@ -298,6 +311,9 @@ export function projectEvent(
             ...(payload.model !== undefined ? { model: payload.model } : {}),
             ...(payload.branch !== undefined ? { branch: payload.branch } : {}),
             ...(payload.worktreePath !== undefined ? { worktreePath: payload.worktreePath } : {}),
+            ...(payload.lastAutoRenameUserMessageId !== undefined
+              ? { lastAutoRenameUserMessageId: payload.lastAutoRenameUserMessageId }
+              : {}),
             updatedAt: payload.updatedAt,
           }),
         })),
@@ -410,6 +426,14 @@ export function projectEvent(
           event.type,
           "session",
         );
+        const previousActiveTurnId = thread.session?.activeTurnId ?? null;
+        const abandonedLatestTurnState = sessionStatusToAbandonedLatestTurnState(session.status);
+        const shouldSettleLatestTurn =
+          abandonedLatestTurnState !== null &&
+          previousActiveTurnId !== null &&
+          session.activeTurnId === null &&
+          thread.latestTurn?.turnId === previousActiveTurnId &&
+          thread.latestTurn.completedAt === null;
 
         return {
           ...nextBase,
@@ -434,7 +458,13 @@ export function projectEvent(
                         ? thread.latestTurn.assistantMessageId
                         : null,
                   }
-                : thread.latestTurn,
+                : shouldSettleLatestTurn
+                  ? {
+                      ...thread.latestTurn,
+                      state: abandonedLatestTurnState,
+                      completedAt: session.updatedAt,
+                    }
+                  : thread.latestTurn,
             updatedAt: event.occurredAt,
           }),
         };
@@ -471,6 +501,38 @@ export function projectEvent(
           }),
         };
       });
+
+    case "thread.context-window-set":
+      return decodeForEvent(
+        ThreadContextWindowSetPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            contextWindow: payload.contextWindow,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.context-window-cleared":
+      return decodeForEvent(
+        ThreadContextWindowClearedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            contextWindow: null,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
 
     case "thread.turn-diff-completed":
       return Effect.gen(function* () {
@@ -584,6 +646,7 @@ export function projectEvent(
               messages,
               proposedPlans,
               activities,
+              contextWindow: null,
               latestTurn,
               updatedAt: event.occurredAt,
             }),

@@ -5,9 +5,12 @@ import { Effect, Schema } from "effect";
 import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
+  OrchestrationContextWindow,
   OrchestrationGetTurnDiffInput,
+  OrchestrationProposedPlan,
   OrchestrationSession,
   ProjectScript,
+  OrchestrationThread,
   ProjectCreateCommand,
   ThreadTurnStartCommand,
   ThreadCreatedPayload,
@@ -23,7 +26,10 @@ const decodeThreadTurnStartCommand = Schema.decodeUnknownEffect(ThreadTurnStartC
 const decodeThreadTurnStartRequestedPayload = Schema.decodeUnknownEffect(
   ThreadTurnStartRequestedPayload,
 );
+const decodeOrchestrationProposedPlan = Schema.decodeUnknownEffect(OrchestrationProposedPlan);
 const decodeOrchestrationSession = Schema.decodeUnknownEffect(OrchestrationSession);
+const decodeOrchestrationContextWindow = Schema.decodeUnknownSync(OrchestrationContextWindow);
+const decodeOrchestrationThread = Schema.decodeUnknownSync(OrchestrationThread);
 const decodeThreadCreatedPayload = Schema.decodeUnknownEffect(ThreadCreatedPayload);
 
 it.effect("parses turn diff input when fromTurnCount <= toTurnCount", () =>
@@ -188,6 +194,31 @@ it.effect("accepts provider-scoped model options in thread.turn.start", () =>
   }),
 );
 
+it.effect("accepts a source proposed plan reference in thread.turn.start", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeThreadTurnStartCommand({
+      type: "thread.turn.start",
+      commandId: "cmd-turn-source-plan",
+      threadId: "thread-2",
+      message: {
+        messageId: "msg-source-plan",
+        role: "user",
+        text: "implement this",
+        attachments: [],
+      },
+      sourceProposedPlan: {
+        threadId: "thread-1",
+        planId: "plan-1",
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.deepStrictEqual(parsed.sourceProposedPlan, {
+      threadId: "thread-1",
+      planId: "plan-1",
+    });
+  }),
+);
+
 it.effect(
   "decodes thread.turn-start-requested defaults for provider, runtime mode, and interaction mode",
   () =>
@@ -200,7 +231,26 @@ it.effect(
       assert.strictEqual(parsed.provider, undefined);
       assert.strictEqual(parsed.runtimeMode, DEFAULT_RUNTIME_MODE);
       assert.strictEqual(parsed.interactionMode, DEFAULT_PROVIDER_INTERACTION_MODE);
+      assert.strictEqual(parsed.sourceProposedPlan, undefined);
     }),
+);
+
+it.effect("decodes thread.turn-start-requested source proposed plan metadata when present", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeThreadTurnStartRequestedPayload({
+      threadId: "thread-2",
+      messageId: "msg-2",
+      sourceProposedPlan: {
+        threadId: "thread-1",
+        planId: "plan-1",
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.deepStrictEqual(parsed.sourceProposedPlan, {
+      threadId: "thread-1",
+      planId: "plan-1",
+    });
+  }),
 );
 
 it.effect("decodes orchestration session runtime mode defaults", () =>
@@ -252,5 +302,109 @@ it.effect("rejects project scripts with fewer than two explicit steps", () =>
     );
 
     assert.strictEqual(result._tag, "Failure");
+  }),
+);
+
+it.effect("defaults proposed plan implementation metadata for historical rows", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeOrchestrationProposedPlan({
+      id: "plan-1",
+      turnId: "turn-1",
+      planMarkdown: "# Plan",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.strictEqual(parsed.implementedAt, null);
+    assert.strictEqual(parsed.implementationThreadId, null);
+  }),
+);
+
+it.effect("preserves proposed plan implementation metadata when present", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeOrchestrationProposedPlan({
+      id: "plan-2",
+      turnId: "turn-2",
+      planMarkdown: "# Plan",
+      implementedAt: "2026-01-02T00:00:00.000Z",
+      implementationThreadId: "thread-2",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-02T00:00:00.000Z",
+    });
+    assert.strictEqual(parsed.implementedAt, "2026-01-02T00:00:00.000Z");
+    assert.strictEqual(parsed.implementationThreadId, "thread-2");
+  }),
+);
+
+it.effect("decodes normalized orchestration context-window snapshots", () =>
+  Effect.sync(() => {
+    const parsed = decodeOrchestrationContextWindow({
+      provider: "codex",
+      estimationVersion: 2,
+      estimationMode: "direct",
+      usedTokens: 119000,
+      effectiveTokens: 119000,
+      maxTokens: 258000,
+      remainingTokens: 139000,
+      usedPercent: 46,
+      inputTokens: 110000,
+      cachedInputTokens: 65000,
+      outputTokens: 9000,
+      reasoningOutputTokens: 320,
+      updatedAt: "2026-03-07T00:00:00.000Z",
+    });
+    assert.strictEqual(parsed.usedPercent, 46);
+    assert.strictEqual(parsed.maxTokens, 258000);
+  }),
+);
+
+it.effect("accepts orchestration threads with null or populated context windows", () =>
+  Effect.sync(() => {
+    const baseThread = {
+      id: "thread-1",
+      projectId: "project-1",
+      title: "Thread",
+      model: "gpt-5-codex",
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      latestTurn: null,
+      createdAt: "2026-03-07T00:00:00.000Z",
+      updatedAt: "2026-03-07T00:00:00.000Z",
+      deletedAt: null,
+      messages: [],
+      proposedPlans: [],
+      activities: [],
+      checkpoints: [],
+      session: null,
+    };
+
+    const withoutContextWindow = decodeOrchestrationThread({
+      ...baseThread,
+      contextWindow: null,
+    });
+    const withContextWindow = decodeOrchestrationThread({
+      ...baseThread,
+      contextWindow: {
+        provider: "codex",
+        estimationVersion: 2,
+        estimationMode: "anchored",
+        usedTokens: 59000,
+        effectiveTokens: 65000,
+        reportedTotalTokens: 119000,
+        reportedLastTokens: 8500,
+        lastEffectiveTokens: 6000,
+        maxTokens: 258000,
+        anchorEffectiveTokens: 45000,
+        anchorEstimatedTokens: 38700,
+        anchorSource: "overflow-last-delta",
+        remainingTokens: 199000,
+        usedPercent: 23,
+        updatedAt: "2026-03-07T00:00:00.000Z",
+      },
+    });
+
+    assert.strictEqual(withoutContextWindow.contextWindow, null);
+    assert.strictEqual(withContextWindow.contextWindow?.usedPercent, 23);
   }),
 );

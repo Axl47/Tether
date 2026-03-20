@@ -13,11 +13,13 @@ import {
   type BranchNameGenerationResult,
   type CommitMessageGenerationResult,
   type PrContentGenerationResult,
+  type ThreadTitleGenerationResult,
   type TextGenerationShape,
   TextGeneration,
 } from "../Services/TextGeneration.ts";
 
 const CODEX_MODEL = "gpt-5.3-codex";
+const CODEX_FAST_MODEL = "gpt-5.3-codex-spark";
 const CODEX_REASONING_EFFORT = "low";
 const CODEX_TIMEOUT_MS = 180_000;
 
@@ -95,6 +97,22 @@ function sanitizePrTitle(raw: string): string {
   return "Update project changes";
 }
 
+function sanitizeThreadTitle(raw: string): string {
+  const singleLine = raw.trim().split(/\r?\n/g)[0]?.trim() ?? "";
+  const normalized = singleLine
+    .replace(/^["'`]+|["'`]+$/g, "")
+    .replace(/[.?!:;]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (normalized.length === 0) {
+    return "Update thread title";
+  }
+
+  const words = normalized.split(" ").filter((word) => word.length > 0);
+  return words.slice(0, 5).join(" ");
+}
+
 const makeCodexTextGeneration = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -148,7 +166,11 @@ const makeCodexTextGeneration = Effect.gen(function* () {
     fileSystem.remove(filePath).pipe(Effect.catch(() => Effect.void));
 
   const materializeImageAttachments = (
-    _operation: "generateCommitMessage" | "generatePrContent" | "generateBranchName",
+    _operation:
+      | "generateCommitMessage"
+      | "generatePrContent"
+      | "generateBranchName"
+      | "generateThreadTitle",
     attachments: BranchNameGenerationInput["attachments"],
   ): Effect.Effect<MaterializedImageAttachments, TextGenerationError> =>
     Effect.gen(function* () {
@@ -185,13 +207,19 @@ const makeCodexTextGeneration = Effect.gen(function* () {
     cwd,
     prompt,
     outputSchemaJson,
+    model = CODEX_MODEL,
     imagePaths = [],
     cleanupPaths = [],
   }: {
-    operation: "generateCommitMessage" | "generatePrContent" | "generateBranchName";
+    operation:
+      | "generateCommitMessage"
+      | "generatePrContent"
+      | "generateBranchName"
+      | "generateThreadTitle";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
+    model?: string;
     imagePaths?: ReadonlyArray<string>;
     cleanupPaths?: ReadonlyArray<string>;
   }): Effect.Effect<S["Type"], TextGenerationError, S["DecodingServices"]> =>
@@ -212,7 +240,7 @@ const makeCodexTextGeneration = Effect.gen(function* () {
             "-s",
             "read-only",
             "--model",
-            CODEX_MODEL,
+            model,
             "--config",
             `model_reasoning_effort="${CODEX_REASONING_EFFORT}"`,
             "--output-schema",
@@ -460,10 +488,71 @@ const makeCodexTextGeneration = Effect.gen(function* () {
     });
   };
 
+  const generateThreadTitle: TextGenerationShape["generateThreadTitle"] = (input) => {
+    const allMessages = input.recentMessages
+      .map((message) => message.trim())
+      .filter((message) => message.length > 0)
+      .slice(-10);
+    const recentMessages = allMessages.slice(-4);
+
+    const promptSections = [
+      "You rename software engineering chat threads.",
+      "Return a JSON object with key: title.",
+      "Rules:",
+      "- Title must be short and concise, ideally 3 to 5 words.",
+      "- Read like a concise git commit subject fragment.",
+      "- The first user message is the primary source of intent and should strongly guide the title.",
+      "- Use the overall user message trail to refine wording and preserve the full scope.",
+      "- Recent user messages can adjust specifics, but should not dominate unless they clearly replace the original intent.",
+      "- Use only the user's sent messages as source material.",
+      "- Prefer concrete verbs and nouns that are easy to scan in a sidebar.",
+      "- Avoid filler like 'help with', 'thread about', 'please', 'need to', or vague words like 'magic'.",
+      "- No quotes and no trailing punctuation.",
+      ...(input.currentTitle ? ["", "Current title:", limitSection(input.currentTitle, 200)] : []),
+      "",
+      "Original user message (highest priority):",
+      limitSection(input.originalMessage, 6_000),
+      "",
+      "Overall user message context:",
+      allMessages.length > 0
+        ? limitSection(
+            allMessages.map((message, index) => `${index + 1}. ${message}`).join("\n"),
+            20_000,
+          )
+        : "None",
+      "",
+      "Most recent user messages (secondary refinement):",
+      recentMessages.length > 0
+        ? limitSection(
+            recentMessages.map((message, index) => `${index + 1}. ${message}`).join("\n"),
+            10_000,
+          )
+        : "None",
+    ];
+
+    return runCodexJson({
+      operation: "generateThreadTitle",
+      cwd: input.cwd,
+      prompt: promptSections.join("\n"),
+      outputSchemaJson: Schema.Struct({
+        title: Schema.String,
+      }),
+      model: CODEX_FAST_MODEL,
+    }).pipe(
+      Effect.map(
+        (generated) =>
+          ({
+            title: sanitizeThreadTitle(generated.title),
+          }) satisfies ThreadTitleGenerationResult,
+      ),
+    );
+  };
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
+    generateThreadTitle,
   } satisfies TextGenerationShape;
 });
 

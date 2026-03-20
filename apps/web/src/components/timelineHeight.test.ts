@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { appendTerminalContextsToPrompt } from "../lib/terminalContext";
+import { buildInlineTerminalContextText } from "./chat/userMessageTerminalContexts";
 import { estimateTimelineMessageHeight } from "./timelineHeight";
 
 describe("estimateTimelineMessageHeight", () => {
@@ -10,6 +12,25 @@ describe("estimateTimelineMessageHeight", () => {
         text: "a".repeat(144),
       }),
     ).toBe(122);
+  });
+
+  it("adds attachment rows for assistant image messages", () => {
+    expect(
+      estimateTimelineMessageHeight({
+        role: "assistant",
+        text: "",
+        attachments: [{ id: "1" }],
+      }),
+    ).toBe(328);
+  });
+
+  it("treats standalone assistant SVG replies like image rows", () => {
+    expect(
+      estimateTimelineMessageHeight({
+        role: "assistant",
+        text: '```svg\n<svg xmlns="http://www.w3.org/2000/svg"><rect width="4" height="4"/></svg>\n```',
+      }),
+    ).toBe(328);
   });
 
   it("uses assistant sizing rules for system messages", () => {
@@ -73,6 +94,35 @@ describe("estimateTimelineMessageHeight", () => {
         text: "first\nsecond\nthird",
       }),
     ).toBe(162);
+  });
+
+  it("adds terminal context chrome without counting the hidden block as message text", () => {
+    const prompt = appendTerminalContextsToPrompt("Investigate this", [
+      {
+        terminalId: "default",
+        terminalLabel: "Terminal 1",
+        lineStart: 40,
+        lineEnd: 43,
+        text: [
+          "git status",
+          "M apps/web/src/components/chat/MessagesTimeline.tsx",
+          "?? tmp",
+          "",
+        ].join("\n"),
+      },
+    ]);
+
+    expect(
+      estimateTimelineMessageHeight({
+        role: "user",
+        text: prompt,
+      }),
+    ).toBe(
+      estimateTimelineMessageHeight({
+        role: "user",
+        text: `${buildInlineTerminalContextText([{ header: "Terminal 1 lines 40-43" }])} Investigate this`,
+      }),
+    );
   });
 
   it("uses narrower width to increase user line wrapping", () => {

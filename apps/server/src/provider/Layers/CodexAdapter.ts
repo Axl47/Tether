@@ -35,8 +35,8 @@ import {
   CodexAppServerManager,
   type CodexAppServerStartSessionInput,
 } from "../../codexAppServerManager.ts";
-import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { readPromptImageAttachment } from "../promptImageAttachment.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
 const PROVIDER = "codex" as const;
@@ -164,7 +164,7 @@ function itemTitle(itemType: CanonicalItemType): string | undefined {
     case "plan":
       return "Plan";
     case "command_execution":
-      return "Command run";
+      return "Ran command";
     case "file_change":
       return "File change";
     case "mcp_tool_call":
@@ -1196,14 +1196,13 @@ function mapToRuntimeEvents(
   if (event.method === "error") {
     const message =
       asString(asObject(payload?.error)?.message) ?? event.message ?? "Provider runtime error";
-    const willRetry = payload?.willRetry === true;
     return [
       {
-        type: willRetry ? "runtime.warning" : "runtime.error",
+        type: payload?.willRetry === true ? "runtime.warning" : "runtime.error",
         ...runtimeEventBase(event, canonicalThreadId),
         payload: {
           message,
-          ...(!willRetry ? { class: "provider_error" as const } : {}),
+          ...(payload?.willRetry === true ? {} : { class: "provider_error" as const }),
           ...(event.payload !== undefined ? { detail: event.payload } : {}),
         },
       },
@@ -1327,31 +1326,16 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
           input.attachments ?? [],
           (attachment) =>
             Effect.gen(function* () {
-              const attachmentPath = resolveAttachmentPath({
-                stateDir: serverConfig.stateDir,
+              const promptAttachment = yield* readPromptImageAttachment({
                 attachment,
+                stateDir: serverConfig.stateDir,
+                provider: PROVIDER,
+                method: "turn/start",
+                fileSystem,
               });
-              if (!attachmentPath) {
-                return yield* toRequestError(
-                  input.threadId,
-                  "turn/start",
-                  new Error(`Invalid attachment id '${attachment.id}'.`),
-                );
-              }
-              const bytes = yield* fileSystem.readFile(attachmentPath).pipe(
-                Effect.mapError(
-                  (cause) =>
-                    new ProviderAdapterRequestError({
-                      provider: PROVIDER,
-                      method: "turn/start",
-                      detail: toMessage(cause, "Failed to read attachment file."),
-                      cause,
-                    }),
-                ),
-              );
               return {
                 type: "image" as const,
-                url: `data:${attachment.mimeType};base64,${Buffer.from(bytes).toString("base64")}`,
+                url: `data:${attachment.mimeType};base64,${promptAttachment.base64}`,
               };
             }),
           { concurrency: 1 },

@@ -19,6 +19,8 @@ export interface CommitMessageGenerationInput {
   stagedPatch: string;
   /** When true, the model also returns a semantic branch name for the change. */
   includeBranch?: boolean;
+  /** Model to use for generation. Defaults to gpt-5.4-mini if not specified. */
+  model?: string;
 }
 
 export interface CommitMessageGenerationResult {
@@ -35,6 +37,8 @@ export interface PrContentGenerationInput {
   commitSummary: string;
   diffSummary: string;
   diffPatch: string;
+  /** Model to use for generation. Defaults to gpt-5.4-mini if not specified. */
+  model?: string;
 }
 
 export interface PrContentGenerationResult {
@@ -46,10 +50,23 @@ export interface BranchNameGenerationInput {
   cwd: string;
   message: string;
   attachments?: ReadonlyArray<ChatAttachment> | undefined;
+  /** Model to use for generation. Defaults to gpt-5.4-mini if not specified. */
+  model?: string;
 }
 
 export interface BranchNameGenerationResult {
   branch: string;
+}
+
+export interface ThreadTitleGenerationInput {
+  cwd: string;
+  originalMessage: string;
+  recentMessages: ReadonlyArray<string>;
+  currentTitle?: string | undefined;
+}
+
+export interface ThreadTitleGenerationResult {
+  title: string;
 }
 
 export interface TextGenerationService {
@@ -58,6 +75,7 @@ export interface TextGenerationService {
   ): Promise<CommitMessageGenerationResult>;
   generatePrContent(input: PrContentGenerationInput): Promise<PrContentGenerationResult>;
   generateBranchName(input: BranchNameGenerationInput): Promise<BranchNameGenerationResult>;
+  generateThreadTitle(input: ThreadTitleGenerationInput): Promise<ThreadTitleGenerationResult>;
 }
 
 /**
@@ -84,6 +102,13 @@ export interface TextGenerationShape {
   readonly generateBranchName: (
     input: BranchNameGenerationInput,
   ) => Effect.Effect<BranchNameGenerationResult, TextGenerationError>;
+
+  /**
+   * Generate a short thread title from user message context.
+   */
+  readonly generateThreadTitle: (
+    input: ThreadTitleGenerationInput,
+  ) => Effect.Effect<ThreadTitleGenerationResult, TextGenerationError>;
 }
 
 /**

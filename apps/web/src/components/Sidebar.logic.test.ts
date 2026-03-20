@@ -1,15 +1,53 @@
 import { describe, expect, it } from "vitest";
 
+import type { Thread } from "../types";
 import {
+  deriveThreadStatusPill,
   hasUnseenCompletion,
+  resolveSidebarNewThreadEnvMode,
+  resolveThreadRowClassName,
   resolveThreadStatusPill,
   shouldClearThreadSelectionOnMouseDown,
 } from "./Sidebar.logic";
 
+const baseThread = {
+  interactionMode: "default" as const,
+  session: null,
+  latestTurn: null,
+  lastVisitedAt: undefined,
+  proposedPlans: [],
+} as const;
+
+function makeThread(overrides: Partial<Thread> = {}): Thread {
+  return {
+    id: "thread-1" as Thread["id"],
+    codexThreadId: null,
+    projectId: "project-1" as Thread["projectId"],
+    title: "Thread",
+    model: "gpt-5.4",
+    runtimeMode: "full-access",
+    interactionMode: "default",
+    session: null,
+    messages: [],
+    proposedPlans: [],
+    error: null,
+    createdAt: "2026-03-07T10:00:00.000Z",
+    updatedAt: "2026-03-07T10:00:00.000Z",
+    latestTurn: null,
+    lastVisitedAt: undefined,
+    branch: null,
+    worktreePath: null,
+    contextWindow: null,
+    turnDiffSummaries: [],
+    activities: [],
+    ...overrides,
+  };
+}
+
 function makeLatestTurn(overrides?: {
   completedAt?: string | null;
   startedAt?: string | null;
-}): Parameters<typeof hasUnseenCompletion>[0]["latestTurn"] {
+}): NonNullable<Thread["latestTurn"]> {
   return {
     turnId: "turn-1" as never,
     state: "completed",
@@ -24,11 +62,9 @@ describe("hasUnseenCompletion", () => {
   it("returns true when a thread completed after its last visit", () => {
     expect(
       hasUnseenCompletion({
-        interactionMode: "default",
+        ...baseThread,
         latestTurn: makeLatestTurn(),
         lastVisitedAt: "2026-03-09T10:04:00.000Z",
-        proposedPlans: [],
-        session: null,
       }),
     ).toBe(true);
   });
@@ -62,12 +98,29 @@ describe("shouldClearThreadSelectionOnMouseDown", () => {
   });
 });
 
+describe("resolveSidebarNewThreadEnvMode", () => {
+  it("uses the app default when the caller does not request a specific mode", () => {
+    expect(
+      resolveSidebarNewThreadEnvMode({
+        defaultEnvMode: "worktree",
+      }),
+    ).toBe("worktree");
+  });
+
+  it("preserves an explicit requested mode over the app default", () => {
+    expect(
+      resolveSidebarNewThreadEnvMode({
+        requestedEnvMode: "local",
+        defaultEnvMode: "worktree",
+      }),
+    ).toBe("local");
+  });
+});
+
 describe("resolveThreadStatusPill", () => {
-  const baseThread = {
+  const planThread = {
+    ...baseThread,
     interactionMode: "plan" as const,
-    latestTurn: null,
-    lastVisitedAt: undefined,
-    proposedPlans: [],
     session: {
       provider: "codex" as const,
       status: "running" as const,
@@ -80,7 +133,7 @@ describe("resolveThreadStatusPill", () => {
   it("shows pending approval before all other statuses", () => {
     expect(
       resolveThreadStatusPill({
-        thread: baseThread,
+        thread: planThread,
         hasPendingApprovals: true,
         hasPendingUserInput: true,
       }),
@@ -90,7 +143,7 @@ describe("resolveThreadStatusPill", () => {
   it("shows awaiting input when plan mode is blocked on user answers", () => {
     expect(
       resolveThreadStatusPill({
-        thread: baseThread,
+        thread: planThread,
         hasPendingApprovals: false,
         hasPendingUserInput: true,
       }),
@@ -105,7 +158,16 @@ describe("resolveThreadStatusPill", () => {
   it("falls back to working when the thread is actively running without blockers", () => {
     expect(
       resolveThreadStatusPill({
-        thread: baseThread,
+        thread: {
+          ...baseThread,
+          session: {
+            provider: "codex",
+            status: "running",
+            orchestrationStatus: "running",
+            createdAt: "2026-03-09T10:00:00.000Z",
+            updatedAt: "2026-03-09T10:00:00.000Z",
+          },
+        },
         hasPendingApprovals: false,
         hasPendingUserInput: false,
       }),
@@ -118,9 +180,11 @@ describe("resolveThreadStatusPill", () => {
         thread: {
           ...baseThread,
           session: {
-            ...baseThread.session,
+            provider: "codex",
             status: "ready",
             orchestrationStatus: "ready",
+            createdAt: "2026-03-09T10:00:00.000Z",
+            updatedAt: "2026-03-09T10:00:00.000Z",
           },
         },
         hasPendingApprovals: false,
@@ -129,8 +193,41 @@ describe("resolveThreadStatusPill", () => {
       }),
     ).toMatchObject({ label: "Working", pulse: true });
   });
-
   it("shows plan ready when a settled plan turn has a proposed plan ready for follow-up", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...planThread,
+          latestTurn: makeLatestTurn(),
+          proposedPlans: [
+            {
+              id: "plan-1" as never,
+              turnId: "turn-1" as never,
+              createdAt: "2026-03-09T10:00:00.000Z",
+              updatedAt: "2026-03-09T10:05:00.000Z",
+              planMarkdown: "# Plan",
+              implementedAt: null,
+              implementationThreadId: null,
+            },
+          ],
+          session: {
+            ...planThread.session,
+            status: "ready",
+            orchestrationStatus: "ready",
+          },
+        },
+        hasPendingApprovals: false,
+        hasPendingUserInput: false,
+      }),
+    ).toMatchObject({
+      label: "Plan Ready",
+      colorClass: "text-orange-600 dark:text-orange-300/90",
+      dotClass: "bg-orange-500 dark:bg-orange-300/90",
+      pulse: false,
+    });
+  });
+
+  it("does not show plan ready after the proposed plan was implemented elsewhere", () => {
     expect(
       resolveThreadStatusPill({
         thread: {
@@ -143,18 +240,22 @@ describe("resolveThreadStatusPill", () => {
               createdAt: "2026-03-09T10:00:00.000Z",
               updatedAt: "2026-03-09T10:05:00.000Z",
               planMarkdown: "# Plan",
+              implementedAt: "2026-03-09T10:06:00.000Z",
+              implementationThreadId: "thread-implement" as never,
             },
           ],
           session: {
-            ...baseThread.session,
+            provider: "codex",
             status: "ready",
             orchestrationStatus: "ready",
+            createdAt: "2026-03-09T10:00:00.000Z",
+            updatedAt: "2026-03-09T10:05:00.000Z",
           },
         },
         hasPendingApprovals: false,
         hasPendingUserInput: false,
       }),
-    ).toMatchObject({ label: "Plan Ready", pulse: false });
+    ).toMatchObject({ label: "Completed", pulse: false });
   });
 
   it("shows completed when there is an unseen completion and no active blocker", () => {
@@ -166,14 +267,112 @@ describe("resolveThreadStatusPill", () => {
           latestTurn: makeLatestTurn(),
           lastVisitedAt: "2026-03-09T10:04:00.000Z",
           session: {
-            ...baseThread.session,
+            provider: "codex",
             status: "ready",
             orchestrationStatus: "ready",
+            createdAt: "2026-03-09T10:00:00.000Z",
+            updatedAt: "2026-03-09T10:05:00.000Z",
           },
         },
         hasPendingApprovals: false,
         hasPendingUserInput: false,
       }),
     ).toMatchObject({ label: "Completed", pulse: false });
+  });
+});
+
+describe("deriveThreadStatusPill", () => {
+  it("shows optimistic worktree setup before the session connects", () => {
+    expect(
+      deriveThreadStatusPill({
+        thread: makeThread(),
+        hasPendingApprovals: false,
+        hasPendingUserInput: false,
+        pendingRunPhase: "preparing-worktree",
+      }),
+    ).toMatchObject({ label: "Preparing", pulse: true });
+  });
+
+  it("uses running status when there are no blockers", () => {
+    expect(
+      deriveThreadStatusPill({
+        thread: makeThread({
+          session: {
+            provider: "codex",
+            status: "running",
+            orchestrationStatus: "running",
+            createdAt: "2026-03-07T10:00:00.000Z",
+            updatedAt: "2026-03-07T10:00:00.000Z",
+          },
+        }),
+        hasPendingApprovals: false,
+        hasPendingUserInput: false,
+        pendingRunPhase: null,
+      }),
+    ).toMatchObject({ label: "Working", pulse: true });
+  });
+
+  it("treats queued dispatch as working before the session starts running", () => {
+    expect(
+      deriveThreadStatusPill({
+        thread: makeThread({
+          session: {
+            provider: "codex",
+            status: "ready",
+            orchestrationStatus: "ready",
+            createdAt: "2026-03-07T10:00:00.000Z",
+            updatedAt: "2026-03-07T10:00:00.000Z",
+          },
+        }),
+        hasPendingApprovals: false,
+        hasPendingUserInput: false,
+        hasQueuedDispatchInFlight: true,
+        pendingRunPhase: null,
+      }),
+    ).toMatchObject({ label: "Working", pulse: true });
+  });
+
+  it("shows completed when there is an unseen completion and no active blocker", () => {
+    expect(
+      deriveThreadStatusPill({
+        thread: makeThread({
+          latestTurn: makeLatestTurn(),
+          lastVisitedAt: "2026-03-09T10:04:00.000Z",
+          session: {
+            provider: "codex",
+            status: "ready",
+            orchestrationStatus: "ready",
+            createdAt: "2026-03-09T10:00:00.000Z",
+            updatedAt: "2026-03-09T10:05:00.000Z",
+          },
+        }),
+        hasPendingApprovals: false,
+        hasPendingUserInput: false,
+      }),
+    ).toMatchObject({ label: "Completed", pulse: false });
+  });
+});
+
+describe("resolveThreadRowClassName", () => {
+  it("uses the darker selected palette when a thread is both selected and active", () => {
+    const className = resolveThreadRowClassName({ isActive: true, isSelected: true });
+    expect(className).toContain("bg-primary/22");
+    expect(className).toContain("hover:bg-primary/26");
+    expect(className).toContain("dark:bg-primary/30");
+    expect(className).not.toContain("bg-accent/85");
+  });
+
+  it("uses selected hover colors for selected threads", () => {
+    const className = resolveThreadRowClassName({ isActive: false, isSelected: true });
+    expect(className).toContain("bg-primary/15");
+    expect(className).toContain("hover:bg-primary/19");
+    expect(className).toContain("dark:bg-primary/22");
+    expect(className).not.toContain("hover:bg-accent");
+  });
+
+  it("keeps the accent palette for active-only threads", () => {
+    const className = resolveThreadRowClassName({ isActive: true, isSelected: false });
+    expect(className).toContain("bg-accent/85");
+    expect(className).toContain("hover:bg-accent");
   });
 });

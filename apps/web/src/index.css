@@ -62,6 +62,7 @@
 }
 
 :root {
+  --app-viewport-height: 100dvh;
   color-scheme: light;
   --radius: 0.625rem;
   --background: var(--color-white);
@@ -130,18 +131,21 @@ body {
     sans-serif;
   margin: 0;
   padding: 0;
-  min-height: 100vh;
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  min-height: var(--app-viewport-height);
+  height: var(--app-viewport-height);
 }
 
 html,
 body,
 #root {
-  height: 100%;
   width: 100%;
+  min-height: var(--app-viewport-height);
+  height: var(--app-viewport-height);
   max-width: 100%;
-  overflow-y: hidden;
-  overflow-x: hidden;
-  overflow-x: clip;
+  overflow: hidden;
   overscroll-behavior-y: none;
 }
 

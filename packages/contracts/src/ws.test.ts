@@ -58,6 +58,19 @@ it.effect("trims websocket request id and nested orchestration ids", () =>
   }),
 );
 
+it.effect("accepts autorenameProjectThreads requests", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeWebSocketRequest({
+      id: "req-autorename",
+      body: {
+        _tag: ORCHESTRATION_WS_METHODS.autorenameProjectThreads,
+        projectId: "project-1",
+      },
+    });
+    assert.strictEqual(parsed.body._tag, ORCHESTRATION_WS_METHODS.autorenameProjectThreads);
+  }),
+);
+
 it.effect("accepts git.preparePullRequestThread requests", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeWebSocketRequest({

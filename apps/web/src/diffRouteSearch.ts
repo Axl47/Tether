@@ -1,7 +1,7 @@
 import { TurnId } from "@t3tools/contracts";
 
 export interface DiffRouteSearch {
-  diff?: "1";
+  diff?: "1" | 0;
   diffTurnId?: TurnId;
   diffFilePath?: string;
 }

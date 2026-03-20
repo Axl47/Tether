@@ -1,8 +1,11 @@
 import {
   type ChatAttachment,
   CommandId,
+  DEFAULT_GIT_TEXT_GENERATION_MODEL,
   EventId,
+  MessageId,
   type OrchestrationEvent,
+  type OrchestrationThreadActivity,
   type ProviderModelOptions,
   type ProviderKind,
   type ProviderStartOptions,
@@ -62,6 +65,42 @@ function mapProviderSessionStatusToOrchestrationStatus(
   }
 }
 
+function toOrchestrationSessionFromProviderSession(session: ProviderSession): OrchestrationSession {
+  return {
+    threadId: session.threadId,
+    status: mapProviderSessionStatusToOrchestrationStatus(session.status),
+    providerName: session.provider,
+    runtimeMode: session.runtimeMode,
+    activeTurnId: null,
+    lastError: session.lastError ?? null,
+    updatedAt: session.updatedAt,
+  };
+}
+
+function sessionsMatch(
+  left: OrchestrationSession | null | undefined,
+  right: OrchestrationSession,
+): boolean {
+  if (!left) {
+    return false;
+  }
+  return (
+    left.threadId === right.threadId &&
+    left.status === right.status &&
+    left.providerName === right.providerName &&
+    left.runtimeMode === right.runtimeMode &&
+    left.activeTurnId === right.activeTurnId &&
+    left.lastError === right.lastError &&
+    left.updatedAt === right.updatedAt
+  );
+}
+
+function shouldReconcileStaleStartupSession(
+  status: OrchestrationSession["status"] | null | undefined,
+): boolean {
+  return status === "starting" || status === "running";
+}
+
 const turnStartKeyForEvent = (event: ProviderIntentEvent): string =>
   event.commandId !== null ? `command:${event.commandId}` : `event:${event.eventId}`;
 
@@ -88,6 +127,99 @@ function isUnknownPendingApprovalRequestError(cause: Cause.Cause<ProviderService
     message.includes("unknown pending approval request") ||
     message.includes("unknown pending permission request")
   );
+}
+
+function isUnknownPendingUserInputRequestError(cause: Cause.Cause<ProviderServiceError>): boolean {
+  const error = Cause.squash(cause);
+  if (Schema.is(ProviderAdapterRequestError)(error)) {
+    return error.detail.toLowerCase().includes("unknown pending user input request");
+  }
+  return Cause.pretty(cause).toLowerCase().includes("unknown pending user input request");
+}
+
+function activityPayloadRecord(
+  activity: OrchestrationThreadActivity,
+): Record<string, unknown> | undefined {
+  return activity.payload && typeof activity.payload === "object"
+    ? (activity.payload as Record<string, unknown>)
+    : undefined;
+}
+
+function questionTextByIdForRequest(input: {
+  readonly activities: ReadonlyArray<OrchestrationThreadActivity>;
+  readonly requestId: string;
+}): ReadonlyMap<string, string> {
+  const activity = input.activities.toReversed().find((entry) => {
+    if (entry.kind !== "user-input.requested") {
+      return false;
+    }
+    const payload = activityPayloadRecord(entry);
+    return payload?.requestId === input.requestId;
+  });
+  const payload = activity ? activityPayloadRecord(activity) : undefined;
+  const questions = payload?.questions;
+  if (!Array.isArray(questions)) {
+    return new Map();
+  }
+
+  const questionLabels = new Map<string, string>();
+  for (const entry of questions) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+    const question = entry as Record<string, unknown>;
+    if (typeof question.id !== "string") {
+      continue;
+    }
+    const label =
+      typeof question.question === "string"
+        ? question.question
+        : typeof question.header === "string"
+          ? question.header
+          : question.id;
+    questionLabels.set(question.id, label);
+  }
+  return questionLabels;
+}
+
+function formatUserInputAnswerValue(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value.map((entry) => formatUserInputAnswerValue(entry)).join(", ");
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (value === null || value === undefined) {
+    return "blank";
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function buildUserInputFallbackMessage(input: {
+  readonly activities: ReadonlyArray<OrchestrationThreadActivity>;
+  readonly requestId: string;
+  readonly answers: Record<string, unknown>;
+}): string {
+  const labels = questionTextByIdForRequest({
+    activities: input.activities,
+    requestId: input.requestId,
+  });
+  const lines = Object.entries(input.answers).map(([questionId, value]) => {
+    const label = labels.get(questionId) ?? questionId.replaceAll("_", " ");
+    return `- ${label}: ${formatUserInputAnswerValue(value)}`;
+  });
+
+  return [
+    "Continuing after the previous run was interrupted while waiting for structured input.",
+    ...lines,
+  ].join("\n");
 }
 
 function isTemporaryWorktreeBranch(branch: string): boolean {
@@ -183,6 +315,52 @@ const make = Effect.gen(function* () {
       createdAt: input.createdAt,
     });
 
+  const reconcileSessionsOnStartup = Effect.fnUntraced(function* () {
+    const readModel = yield* orchestrationEngine.getReadModel();
+    const liveSessions = yield* providerService.listSessions();
+    const liveSessionByThreadId = new Map(
+      liveSessions.map((session) => [session.threadId, session] as const),
+    );
+    const reconciledAt = new Date().toISOString();
+
+    yield* Effect.forEach(
+      readModel.threads,
+      (thread) => {
+        const liveSession = liveSessionByThreadId.get(thread.id);
+        if (liveSession) {
+          const nextSession = toOrchestrationSessionFromProviderSession(liveSession);
+          if (sessionsMatch(thread.session, nextSession)) {
+            return Effect.void;
+          }
+          return setThreadSession({
+            threadId: thread.id,
+            session: nextSession,
+            createdAt: nextSession.updatedAt,
+          });
+        }
+
+        if (!thread.session || !shouldReconcileStaleStartupSession(thread.session.status)) {
+          return Effect.void;
+        }
+
+        return setThreadSession({
+          threadId: thread.id,
+          session: {
+            threadId: thread.id,
+            status: "stopped",
+            providerName: thread.session.providerName,
+            runtimeMode: thread.session.runtimeMode,
+            activeTurnId: null,
+            lastError: thread.session.lastError,
+            updatedAt: reconciledAt,
+          },
+          createdAt: reconciledAt,
+        });
+      },
+      { concurrency: 1 },
+    ).pipe(Effect.asVoid);
+  });
+
   const resolveThread = Effect.fnUntraced(function* (threadId: ThreadId) {
     const readModel = yield* orchestrationEngine.getReadModel();
     return readModel.threads.find((entry) => entry.id === threadId);
@@ -206,7 +384,7 @@ const make = Effect.gen(function* () {
 
     const desiredRuntimeMode = thread.runtimeMode;
     const currentProvider: ProviderKind | undefined =
-      thread.session?.providerName === "codex" ? thread.session.providerName : undefined;
+      (thread.session?.providerName as ProviderKind | null) ?? undefined;
     const preferredProvider: ProviderKind | undefined = options?.provider ?? currentProvider;
     const desiredModel = options?.model ?? thread.model;
     const effectiveCwd = resolveThreadWorkspaceCwd({
@@ -391,6 +569,7 @@ const make = Effect.gen(function* () {
         cwd,
         message: input.messageText,
         ...(attachments.length > 0 ? { attachments } : {}),
+        model: DEFAULT_GIT_TEXT_GENERATION_MODEL,
       })
       .pipe(
         Effect.catch((error) =>
@@ -508,18 +687,6 @@ const make = Effect.gen(function* () {
     if (!thread) {
       return;
     }
-    const hasSession = thread.session && thread.session.status !== "stopped";
-    if (!hasSession) {
-      return yield* appendProviderFailureActivity({
-        threadId: event.payload.threadId,
-        kind: "provider.approval.respond.failed",
-        summary: "Provider approval response failed",
-        detail: "No active provider session is bound to this thread.",
-        turnId: null,
-        createdAt: event.payload.createdAt,
-        requestId: event.payload.requestId,
-      });
-    }
 
     yield* providerService
       .respondToRequest({
@@ -553,18 +720,6 @@ const make = Effect.gen(function* () {
     if (!thread) {
       return;
     }
-    const hasSession = thread.session && thread.session.status !== "stopped";
-    if (!hasSession) {
-      return yield* appendProviderFailureActivity({
-        threadId: event.payload.threadId,
-        kind: "provider.user-input.respond.failed",
-        summary: "Provider user input response failed",
-        detail: "No active provider session is bound to this thread.",
-        turnId: null,
-        createdAt: event.payload.createdAt,
-        requestId: event.payload.requestId,
-      });
-    }
 
     yield* providerService
       .respondToUserInput({
@@ -574,14 +729,72 @@ const make = Effect.gen(function* () {
       })
       .pipe(
         Effect.catchCause((cause) =>
-          appendProviderFailureActivity({
-            threadId: event.payload.threadId,
-            kind: "provider.user-input.respond.failed",
-            summary: "Provider user input response failed",
-            detail: Cause.pretty(cause),
-            turnId: null,
-            createdAt: event.payload.createdAt,
-            requestId: event.payload.requestId,
+          Effect.gen(function* () {
+            if (isUnknownPendingUserInputRequestError(cause)) {
+              yield* orchestrationEngine.dispatch({
+                type: "thread.activity.append",
+                commandId: serverCommandId("user-input-fallback-resolved"),
+                threadId: event.payload.threadId,
+                activity: {
+                  id: EventId.makeUnsafe(crypto.randomUUID()),
+                  tone: "info",
+                  kind: "user-input.resolved",
+                  summary: "User input submitted",
+                  payload: {
+                    requestId: event.payload.requestId,
+                    answers: event.payload.answers,
+                  },
+                  turnId: null,
+                  createdAt: event.payload.createdAt,
+                },
+                createdAt: event.payload.createdAt,
+              });
+
+              yield* orchestrationEngine
+                .dispatch({
+                  type: "thread.turn.start",
+                  commandId: serverCommandId("user-input-fallback-turn-start"),
+                  threadId: event.payload.threadId,
+                  message: {
+                    messageId: MessageId.makeUnsafe(`user-input-fallback:${crypto.randomUUID()}`),
+                    role: "user",
+                    text: buildUserInputFallbackMessage({
+                      activities: thread.activities,
+                      requestId: event.payload.requestId,
+                      answers: event.payload.answers,
+                    }),
+                    attachments: [],
+                  },
+                  model: thread.model,
+                  runtimeMode: thread.runtimeMode,
+                  interactionMode: thread.interactionMode,
+                  createdAt: event.payload.createdAt,
+                })
+                .pipe(
+                  Effect.catchCause((fallbackCause) =>
+                    appendProviderFailureActivity({
+                      threadId: event.payload.threadId,
+                      kind: "provider.user-input.respond.failed",
+                      summary: "Provider user input response failed",
+                      detail: `${Cause.pretty(cause)}\n\nFallback follow-up turn also failed:\n${Cause.pretty(fallbackCause)}`,
+                      turnId: null,
+                      createdAt: event.payload.createdAt,
+                      requestId: event.payload.requestId,
+                    }),
+                  ),
+                );
+              return;
+            }
+
+            yield* appendProviderFailureActivity({
+              threadId: event.payload.threadId,
+              kind: "provider.user-input.respond.failed",
+              summary: "Provider user input response failed",
+              detail: Cause.pretty(cause),
+              turnId: null,
+              createdAt: event.payload.createdAt,
+              requestId: event.payload.requestId,
+            });
           }),
         ),
       );
@@ -666,22 +879,31 @@ const make = Effect.gen(function* () {
 
   const worker = yield* makeDrainableWorker(processDomainEventSafely);
 
-  const start: ProviderCommandReactorShape["start"] = Effect.forkScoped(
-    Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
-      if (
-        event.type !== "thread.runtime-mode-set" &&
-        event.type !== "thread.turn-start-requested" &&
-        event.type !== "thread.turn-interrupt-requested" &&
-        event.type !== "thread.approval-response-requested" &&
-        event.type !== "thread.user-input-response-requested" &&
-        event.type !== "thread.session-stop-requested"
-      ) {
-        return Effect.void;
-      }
+  const start: ProviderCommandReactorShape["start"] = Effect.gen(function* () {
+    yield* reconcileSessionsOnStartup().pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("provider command reactor failed to reconcile sessions on startup", {
+          cause: Cause.pretty(cause),
+        }),
+      ),
+    );
+    yield* Effect.forkScoped(
+      Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
+        if (
+          event.type !== "thread.runtime-mode-set" &&
+          event.type !== "thread.turn-start-requested" &&
+          event.type !== "thread.turn-interrupt-requested" &&
+          event.type !== "thread.approval-response-requested" &&
+          event.type !== "thread.user-input-response-requested" &&
+          event.type !== "thread.session-stop-requested"
+        ) {
+          return Effect.void;
+        }
 
-      return worker.enqueue(event);
-    }),
-  ).pipe(Effect.asVoid);
+        return worker.enqueue(event);
+      }),
+    );
+  }).pipe(Effect.asVoid);
 
   return {
     start,

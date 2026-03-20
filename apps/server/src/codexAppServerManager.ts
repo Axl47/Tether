@@ -22,6 +22,7 @@ import {
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import { Effect, ServiceMap } from "effect";
 
+import { buildPopupSafeEnv } from "./cliEnvironment";
 import {
   formatCodexCliUpgradeMessage,
   isCodexCliVersionSupported,
@@ -144,8 +145,6 @@ export interface CodexThreadSnapshot {
   turns: CodexThreadTurnSnapshot[];
 }
 
-const CODEX_VERSION_CHECK_TIMEOUT_MS = 4_000;
-
 const ANSI_ESCAPE_CHAR = String.fromCharCode(27);
 const ANSI_ESCAPE_REGEX = new RegExp(`${ANSI_ESCAPE_CHAR}\\[[0-9;]*m`, "g");
 const CODEX_STDERR_LOG_REGEX =
@@ -164,6 +163,7 @@ const RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS = [
 const CODEX_DEFAULT_MODEL = "gpt-5.3-codex";
 const CODEX_SPARK_MODEL = "gpt-5.3-codex-spark";
 const CODEX_SPARK_DISABLED_PLAN_TYPES = new Set<CodexPlanType>(["free", "go", "plus"]);
+const CODEX_VERSION_CHECK_TIMEOUT_MS = 4_000;
 
 function asObject(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== "object") {
@@ -552,10 +552,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       });
       const child = spawn(codexBinaryPath, ["app-server"], {
         cwd: resolvedCwd,
-        env: {
-          ...process.env,
-          ...(codexHomePath ? { CODEX_HOME: codexHomePath } : {}),
-        },
+        env: buildPopupSafeEnv(process.env, codexHomePath ? { CODEX_HOME: codexHomePath } : {}),
         stdio: ["pipe", "pipe", "pipe"],
         shell: process.platform === "win32",
       });
@@ -585,24 +582,6 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       await this.sendRequest(context, "initialize", buildCodexInitializeParams());
 
       this.writeMessage(context, { method: "initialized" });
-      try {
-        const modelListResponse = await this.sendRequest(context, "model/list", {});
-        console.log("codex model/list response", modelListResponse);
-      } catch (error) {
-        console.log("codex model/list failed", error);
-      }
-      try {
-        const accountReadResponse = await this.sendRequest(context, "account/read", {});
-        console.log("codex account/read response", accountReadResponse);
-        context.account = readCodexAccountSnapshot(accountReadResponse);
-        console.log("codex subscription status", {
-          type: context.account.type,
-          planType: context.account.planType,
-          sparkEnabled: context.account.sparkEnabled,
-        });
-      } catch (error) {
-        console.log("codex account/read failed", error);
-      }
 
       const normalizedModel = resolveCodexModelForAccount(
         normalizeCodexModelSlug(input.model),
@@ -618,6 +597,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       const threadStartParams = {
         ...sessionOverrides,
         experimentalRawEvents: false,
+        persistExtendedHistory: true,
       };
       const resumeThreadId = readResumeThreadId(input);
       this.emitLifecycleEvent(
@@ -643,6 +623,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
           threadOpenResponse = await this.sendRequest(context, "thread/resume", {
             ...sessionOverrides,
             threadId: resumeThreadId,
+            persistExtendedHistory: true,
           });
         } catch (error) {
           if (!isRecoverableThreadResumeError(error)) {
@@ -904,12 +885,16 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     decision: ProviderApprovalDecision,
   ): Promise<void> {
     const context = this.requireSession(threadId);
-    const pendingRequest = context.pendingApprovals.get(requestId);
+    const pendingRequest =
+      context.pendingApprovals.get(requestId) ??
+      (context.pendingApprovals.size === 1
+        ? Array.from(context.pendingApprovals.values())[0]
+        : undefined);
     if (!pendingRequest) {
       throw new Error(`Unknown pending approval request: ${requestId}`);
     }
 
-    context.pendingApprovals.delete(requestId);
+    context.pendingApprovals.delete(pendingRequest.requestId);
     this.writeMessage(context, {
       id: pendingRequest.jsonRpcId,
       result: {
@@ -917,23 +902,26 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       },
     });
 
-    this.emitEvent({
-      id: EventId.makeUnsafe(randomUUID()),
-      kind: "notification",
-      provider: "codex",
-      threadId: context.session.threadId,
-      createdAt: new Date().toISOString(),
-      method: "item/requestApproval/decision",
-      turnId: pendingRequest.turnId,
-      itemId: pendingRequest.itemId,
-      requestId: pendingRequest.requestId,
-      requestKind: pendingRequest.requestKind,
-      payload: {
-        requestId: pendingRequest.requestId,
+    const resolvedRequestIds = new Set<ApprovalRequestId>([pendingRequest.requestId, requestId]);
+    for (const resolvedRequestId of resolvedRequestIds) {
+      this.emitEvent({
+        id: EventId.makeUnsafe(randomUUID()),
+        kind: "notification",
+        provider: "codex",
+        threadId: context.session.threadId,
+        createdAt: new Date().toISOString(),
+        method: "item/requestApproval/decision",
+        turnId: pendingRequest.turnId,
+        itemId: pendingRequest.itemId,
+        requestId: resolvedRequestId,
         requestKind: pendingRequest.requestKind,
-        decision,
-      },
-    });
+        payload: {
+          requestId: resolvedRequestId,
+          requestKind: pendingRequest.requestKind,
+          decision,
+        },
+      });
+    }
   }
 
   async respondToUserInput(
@@ -942,12 +930,16 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     answers: ProviderUserInputAnswers,
   ): Promise<void> {
     const context = this.requireSession(threadId);
-    const pendingRequest = context.pendingUserInputs.get(requestId);
+    const pendingRequest =
+      context.pendingUserInputs.get(requestId) ??
+      (context.pendingUserInputs.size === 1
+        ? Array.from(context.pendingUserInputs.values())[0]
+        : undefined);
     if (!pendingRequest) {
       throw new Error(`Unknown pending user input request: ${requestId}`);
     }
 
-    context.pendingUserInputs.delete(requestId);
+    context.pendingUserInputs.delete(pendingRequest.requestId);
     const codexAnswers = toCodexUserInputAnswers(answers);
     this.writeMessage(context, {
       id: pendingRequest.jsonRpcId,
@@ -956,21 +948,24 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       },
     });
 
-    this.emitEvent({
-      id: EventId.makeUnsafe(randomUUID()),
-      kind: "notification",
-      provider: "codex",
-      threadId: context.session.threadId,
-      createdAt: new Date().toISOString(),
-      method: "item/tool/requestUserInput/answered",
-      turnId: pendingRequest.turnId,
-      itemId: pendingRequest.itemId,
-      requestId: pendingRequest.requestId,
-      payload: {
-        requestId: pendingRequest.requestId,
-        answers: codexAnswers,
-      },
-    });
+    const resolvedRequestIds = new Set<ApprovalRequestId>([pendingRequest.requestId, requestId]);
+    for (const resolvedRequestId of resolvedRequestIds) {
+      this.emitEvent({
+        id: EventId.makeUnsafe(randomUUID()),
+        kind: "notification",
+        provider: "codex",
+        threadId: context.session.threadId,
+        createdAt: new Date().toISOString(),
+        method: "item/tool/requestUserInput/answered",
+        turnId: pendingRequest.turnId,
+        itemId: pendingRequest.itemId,
+        requestId: resolvedRequestId,
+        payload: {
+          requestId: resolvedRequestId,
+          answers: codexAnswers,
+        },
+      });
+    }
   }
 
   stopSession(threadId: ThreadId): void {
@@ -1191,7 +1186,8 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     const requestKind = this.requestKindForMethod(request.method);
     let requestId: ApprovalRequestId | undefined;
     if (requestKind) {
-      requestId = ApprovalRequestId.makeUnsafe(randomUUID());
+      requestId =
+        this.readPendingRequestId(request.params) ?? ApprovalRequestId.makeUnsafe(randomUUID());
       const pendingRequest: PendingApprovalRequest = {
         requestId,
         jsonRpcId: request.id,
@@ -1210,7 +1206,8 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     }
 
     if (request.method === "item/tool/requestUserInput") {
-      requestId = ApprovalRequestId.makeUnsafe(randomUUID());
+      requestId =
+        this.readPendingRequestId(request.params) ?? ApprovalRequestId.makeUnsafe(randomUUID());
       context.pendingUserInputs.set(requestId, {
         requestId,
         jsonRpcId: request.id,
@@ -1455,6 +1452,16 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     return route;
   }
 
+  private readPendingRequestId(params: unknown): ApprovalRequestId | undefined {
+    const requestId =
+      this.readString(params, "requestId") ??
+      this.readString(params, "request_id") ??
+      this.readString(this.readObject(params, "msg"), "requestId") ??
+      this.readString(this.readObject(params, "msg"), "request_id");
+
+    return requestId ? ApprovalRequestId.makeUnsafe(requestId) : undefined;
+  }
+
   private readObject(value: unknown, key?: string): Record<string, unknown> | undefined {
     const target =
       key === undefined
@@ -1532,10 +1539,7 @@ function assertSupportedCodexCliVersion(input: {
 }): void {
   const result = spawnSync(input.binaryPath, ["--version"], {
     cwd: input.cwd,
-    env: {
-      ...process.env,
-      ...(input.homePath ? { CODEX_HOME: input.homePath } : {}),
-    },
+    env: buildPopupSafeEnv(process.env, input.homePath ? { CODEX_HOME: input.homePath } : {}),
     encoding: "utf8",
     shell: process.platform === "win32",
     stdio: ["ignore", "pipe", "pipe"],

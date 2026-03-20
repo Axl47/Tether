@@ -9,7 +9,7 @@ import { OrchestrationEventStoreLive } from "./OrchestrationEventStore.ts";
 import { SqlitePersistenceMemory } from "./Sqlite.ts";
 
 const layer = it.layer(
-  OrchestrationEventStoreLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+  OrchestrationEventStoreLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)) as any,
 );
 
 layer("OrchestrationEventStore", (it) => {

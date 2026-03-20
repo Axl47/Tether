@@ -1,14 +1,20 @@
 import { useCallback, useSyncExternalStore } from "react";
 import { Option, Schema } from "effect";
-import { type ProviderKind } from "@t3tools/contracts";
+import { TrimmedNonEmptyString, type ProviderKind } from "@t3tools/contracts";
 import { getDefaultModel, getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
+import { DEFAULT_SIDEBAR_THREAD_SORT, SidebarThreadSortSchema } from "./sidebarThreadSort";
 
 const APP_SETTINGS_STORAGE_KEY = "tether:app-settings:v1";
 const LEGACY_APP_SETTINGS_STORAGE_KEYS = ["t3code:app-settings:v1"] as const;
 const MAX_CUSTOM_MODEL_COUNT = 32;
 export const MAX_CUSTOM_MODEL_LENGTH = 256;
+export const TIMESTAMP_FORMAT_OPTIONS = ["locale", "12-hour", "24-hour"] as const;
+export type TimestampFormat = (typeof TIMESTAMP_FORMAT_OPTIONS)[number];
+export const DEFAULT_TIMESTAMP_FORMAT: TimestampFormat = "locale";
 const BUILT_IN_MODEL_SLUGS_BY_PROVIDER: Record<ProviderKind, ReadonlySet<string>> = {
   codex: new Set(getModelOptions("codex").map((option) => option.slug)),
+  claudeCode: new Set(getModelOptions("claudeCode").map((option) => option.slug)),
+  gemini: new Set(getModelOptions("gemini").map((option) => option.slug)),
 };
 
 const AppSettingsSchema = Schema.Struct({
@@ -18,11 +24,27 @@ const AppSettingsSchema = Schema.Struct({
   codexHomePath: Schema.String.check(Schema.isMaxLength(4096)).pipe(
     Schema.withConstructorDefault(() => Option.some("")),
   ),
+  defaultThreadEnvMode: Schema.Literals(["local", "worktree"]).pipe(
+    Schema.withConstructorDefault(() => Option.some("local")),
+  ),
   confirmThreadDelete: Schema.Boolean.pipe(Schema.withConstructorDefault(() => Option.some(true))),
   enableAssistantStreaming: Schema.Boolean.pipe(
     Schema.withConstructorDefault(() => Option.some(false)),
   ),
+  timestampFormat: Schema.Literals(["locale", "12-hour", "24-hour"]).pipe(
+    Schema.withConstructorDefault(() => Option.some(DEFAULT_TIMESTAMP_FORMAT)),
+  ),
+  sidebarThreadSort: SidebarThreadSortSchema.pipe(
+    Schema.withConstructorDefault(() => Option.some(DEFAULT_SIDEBAR_THREAD_SORT)),
+  ),
   customCodexModels: Schema.Array(Schema.String).pipe(
+    Schema.withConstructorDefault(() => Option.some([])),
+  ),
+  textGenerationModel: Schema.optional(TrimmedNonEmptyString),
+  customGeminiModels: Schema.Array(Schema.String).pipe(
+    Schema.withConstructorDefault(() => Option.some([])),
+  ),
+  customClaudeModels: Schema.Array(Schema.String).pipe(
     Schema.withConstructorDefault(() => Option.some([])),
   ),
 });
@@ -71,7 +93,37 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
   return {
     ...settings,
     customCodexModels: normalizeCustomModelSlugs(settings.customCodexModels, "codex"),
+    customGeminiModels: normalizeCustomModelSlugs(settings.customGeminiModels, "gemini"),
+    customClaudeModels: normalizeCustomModelSlugs(settings.customClaudeModels, "claudeCode"),
   };
+}
+
+export function getCustomModelsForProvider(
+  settings: Pick<AppSettings, "customCodexModels" | "customGeminiModels"> &
+    Partial<Pick<AppSettings, "customClaudeModels">>,
+  provider: ProviderKind,
+): readonly string[] {
+  switch (provider) {
+    case "claudeCode":
+      return settings.customClaudeModels ?? [];
+    case "gemini":
+      return settings.customGeminiModels;
+    case "codex":
+    default:
+      return settings.customCodexModels;
+  }
+}
+
+export function patchCustomModelsForProvider(provider: ProviderKind, models: string[]) {
+  switch (provider) {
+    case "claudeCode":
+      return { customClaudeModels: models } satisfies Partial<AppSettings>;
+    case "gemini":
+      return { customGeminiModels: models } satisfies Partial<AppSettings>;
+    case "codex":
+    default:
+      return { customCodexModels: models } satisfies Partial<AppSettings>;
+  }
 }
 
 export function getAppModelOptions(
