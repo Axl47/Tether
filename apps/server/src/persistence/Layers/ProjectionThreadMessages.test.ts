@@ -7,7 +7,7 @@ import { ProjectionThreadMessageRepositoryLive } from "./ProjectionThreadMessage
 import { SqlitePersistenceMemory } from "./Sqlite.ts";
 
 const layer = it.layer(
-  ProjectionThreadMessageRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+  ProjectionThreadMessageRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)) as any,
 );
 
 layer("ProjectionThreadMessageRepository", (it) => {

@@ -1,6 +1,7 @@
 import {
   type ChatAttachment,
   CommandId,
+  DEFAULT_GIT_TEXT_GENERATION_MODEL,
   EventId,
   MessageId,
   type OrchestrationEvent,
@@ -568,6 +569,7 @@ const make = Effect.gen(function* () {
         cwd,
         message: input.messageText,
         ...(attachments.length > 0 ? { attachments } : {}),
+        model: DEFAULT_GIT_TEXT_GENERATION_MODEL,
       })
       .pipe(
         Effect.catch((error) =>

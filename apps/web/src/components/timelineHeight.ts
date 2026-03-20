@@ -1,4 +1,6 @@
 import { extractInlineAssistantImage } from "../assistantInlineImage";
+import { deriveDisplayedUserMessageState } from "../lib/terminalContext";
+import { buildInlineTerminalContextText } from "./chat/userMessageTerminalContexts";
 
 const ASSISTANT_CHARS_PER_LINE_FALLBACK = 72;
 const USER_CHARS_PER_LINE_FALLBACK = 56;
@@ -89,7 +91,17 @@ export function estimateTimelineMessageHeight(
 
   if (message.role === "user") {
     const charsPerLine = estimateCharsPerLineForUser(layout.timelineWidthPx);
-    const estimatedLines = estimateWrappedLineCount(message.text, charsPerLine);
+    const displayedUserMessage = deriveDisplayedUserMessageState(message.text);
+    const renderedText =
+      displayedUserMessage.contexts.length > 0
+        ? [
+            buildInlineTerminalContextText(displayedUserMessage.contexts),
+            displayedUserMessage.visibleText,
+          ]
+            .filter((part) => part.length > 0)
+            .join(" ")
+        : displayedUserMessage.visibleText;
+    const estimatedLines = estimateWrappedLineCount(renderedText, charsPerLine);
     const attachmentCount = message.attachments?.length ?? 0;
     const attachmentRows = Math.ceil(attachmentCount / ATTACHMENTS_PER_ROW);
     const attachmentHeight = attachmentRows * USER_ATTACHMENT_ROW_HEIGHT_PX;

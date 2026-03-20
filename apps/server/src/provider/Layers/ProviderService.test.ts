@@ -20,7 +20,7 @@ import {
 import { it, assert, vi } from "@effect/vitest";
 import { assertFailure } from "@effect/vitest/utils";
 
-import { Effect, Fiber, Layer, Option, PubSub, Ref, Stream } from "effect";
+import { Effect, Fiber, Layer, Option, PubSub, Ref, Scope, Stream } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import {
@@ -242,7 +242,7 @@ function makeProviderServiceLayer() {
 
       runtimeRepositoryLayer,
       NodeServices.layer,
-    ),
+    ) as any,
   );
 
   return {
@@ -251,69 +251,76 @@ function makeProviderServiceLayer() {
   };
 }
 
-const routing = makeProviderServiceLayer();
-it.effect("ProviderServiceLive keeps persisted resumable sessions on startup", () =>
-  Effect.gen(function* () {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-provider-service-"));
-    const dbPath = path.join(tempDir, "orchestration.sqlite");
+const routing = makeProviderServiceLayer() as {
+  codex: ReturnType<typeof makeFakeCodexAdapter>;
+  layer: any;
+};
+it.effect(
+  "ProviderServiceLive keeps persisted resumable sessions on startup",
+  () =>
+    Effect.gen(function* () {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-provider-service-"));
+      const dbPath = path.join(tempDir, "orchestration.sqlite");
 
-    const codex = makeFakeCodexAdapter();
-    const registry: typeof ProviderAdapterRegistry.Service = {
-      getByProvider: (provider) =>
-        provider === "codex"
-          ? Effect.succeed(codex.adapter)
-          : Effect.fail(new ProviderUnsupportedError({ provider })),
-      listProviders: () => Effect.succeed(["codex"]),
-    };
+      const codex = makeFakeCodexAdapter();
+      const registry: typeof ProviderAdapterRegistry.Service = {
+        getByProvider: (provider) =>
+          provider === "codex"
+            ? Effect.succeed(codex.adapter)
+            : Effect.fail(new ProviderUnsupportedError({ provider })),
+        listProviders: () => Effect.succeed(["codex"]),
+      };
 
-    const persistenceLayer = makeSqlitePersistenceLive(dbPath);
-    const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
-      Layer.provide(persistenceLayer),
-    );
-    const directoryLayer = ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer));
+      const persistenceLayer = makeSqlitePersistenceLive(dbPath);
+      const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
+        Layer.provide(persistenceLayer),
+      );
+      const directoryLayer = ProviderSessionDirectoryLive.pipe(
+        Layer.provide(runtimeRepositoryLayer),
+      );
 
-    yield* Effect.gen(function* () {
-      const directory = yield* ProviderSessionDirectory;
-      yield* directory.upsert({
-        provider: "codex",
-        threadId: ThreadId.makeUnsafe("thread-stale"),
-      });
-    }).pipe(Effect.provide(directoryLayer));
+      yield* Effect.gen(function* () {
+        const directory = yield* ProviderSessionDirectory;
+        yield* directory.upsert({
+          provider: "codex",
+          threadId: ThreadId.makeUnsafe("thread-stale"),
+        });
+      }).pipe(Effect.provide(directoryLayer));
 
-    const providerLayer = makeProviderServiceLive().pipe(
-      Layer.provide(Layer.succeed(ProviderAdapterRegistry, registry)),
-      Layer.provide(directoryLayer),
-      Layer.provide(AnalyticsService.layerTest),
-    );
+      const providerLayer = makeProviderServiceLive().pipe(
+        Layer.provide(Layer.succeed(ProviderAdapterRegistry, registry)),
+        Layer.provide(directoryLayer),
+        Layer.provide(AnalyticsService.layerTest),
+      ) as Layer.Layer<ProviderService, never, never>;
 
-    yield* Effect.gen(function* () {
-      yield* ProviderService;
-    }).pipe(Effect.provide(providerLayer));
+      yield* Effect.gen(function* () {
+        yield* ProviderService;
+      }).pipe(Effect.provide(providerLayer));
 
-    const persistedProvider = yield* Effect.gen(function* () {
-      const directory = yield* ProviderSessionDirectory;
-      return yield* directory.getProvider(asThreadId("thread-stale"));
-    }).pipe(Effect.provide(directoryLayer));
-    assert.equal(persistedProvider, "codex");
+      const persistedProvider = yield* Effect.gen(function* () {
+        const directory = yield* ProviderSessionDirectory;
+        return yield* directory.getProvider(asThreadId("thread-stale"));
+      }).pipe(Effect.provide(directoryLayer));
+      assert.equal(persistedProvider, "codex");
 
-    const runtime = yield* Effect.gen(function* () {
-      const repository = yield* ProviderSessionRuntimeRepository;
-      return yield* repository.getByThreadId({ threadId: asThreadId("thread-stale") });
-    }).pipe(Effect.provide(runtimeRepositoryLayer));
-    assert.equal(Option.isSome(runtime), true);
+      const runtime = yield* Effect.gen(function* () {
+        const repository = yield* ProviderSessionRuntimeRepository;
+        return yield* repository.getByThreadId({ threadId: asThreadId("thread-stale") });
+      }).pipe(Effect.provide(runtimeRepositoryLayer));
+      assert.equal(Option.isSome(runtime), true);
 
-    const legacyTableRows = yield* Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient;
-      return yield* sql<{ readonly name: string }>`
+      const legacyTableRows = yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        return yield* sql<{ readonly name: string }>`
         SELECT name
         FROM sqlite_master
         WHERE type = 'table' AND name = 'provider_sessions'
       `;
-    }).pipe(Effect.provide(persistenceLayer));
-    assert.equal(legacyTableRows.length, 0);
+      }).pipe(Effect.provide(persistenceLayer));
+      assert.equal(legacyTableRows.length, 0);
 
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  }).pipe(Effect.provide(NodeServices.layer)),
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }).pipe(Effect.provide(NodeServices.layer)) as Effect.Effect<void, unknown, Scope.Scope>,
 );
 
 it.effect(
@@ -343,7 +350,7 @@ it.effect(
         Layer.provide(Layer.succeed(ProviderAdapterRegistry, firstRegistry)),
         Layer.provide(firstDirectoryLayer),
         Layer.provide(AnalyticsService.layerTest),
-      );
+      ) as Layer.Layer<ProviderService, never, never>;
 
       const startedSession = yield* Effect.gen(function* () {
         const provider = yield* ProviderService;
@@ -381,7 +388,7 @@ it.effect(
         Layer.provide(Layer.succeed(ProviderAdapterRegistry, secondRegistry)),
         Layer.provide(secondDirectoryLayer),
         Layer.provide(AnalyticsService.layerTest),
-      );
+      ) as Layer.Layer<ProviderService, never, never>;
 
       secondCodex.startSession.mockClear();
       secondCodex.rollbackThread.mockClear();
@@ -415,10 +422,10 @@ it.effect(
       assert.equal(rollbackCall?.[1], 1);
 
       fs.rmSync(tempDir, { recursive: true, force: true });
-    }).pipe(Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.provide(NodeServices.layer)) as Effect.Effect<void, unknown, Scope.Scope>,
 );
 
-routing.layer("ProviderServiceLive routing", (it) => {
+routing.layer("ProviderServiceLive routing", (it: any) => {
   it.effect("routes provider operations and rollback conversation", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService;
@@ -703,7 +710,7 @@ fanout.layer("ProviderServiceLive fanout", (it) => {
         threadId: session.threadId,
         turnId: asTurnId("turn-1"),
         toolKind: "command",
-        title: "Command run",
+        title: "Ran command",
       });
       fanout.codex.emit({
         type: "tool.completed",
@@ -713,7 +720,7 @@ fanout.layer("ProviderServiceLive fanout", (it) => {
         threadId: session.threadId,
         turnId: asTurnId("turn-1"),
         toolKind: "command",
-        title: "Command run",
+        title: "Ran command",
       });
       fanout.codex.emit({
         type: "turn.completed",
@@ -768,7 +775,7 @@ fanout.layer("ProviderServiceLive fanout", (it) => {
           threadId: session.threadId,
           turnId: asTurnId("turn-1"),
           toolKind: "command",
-          title: "Command run",
+          title: "Ran command",
           detail: "echo one",
         },
         {

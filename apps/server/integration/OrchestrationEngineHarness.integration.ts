@@ -265,17 +265,19 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provideMerge(NodeServices.layer),
       Layer.provideMerge(providerSessionDirectoryLayer),
     );
-    const providerLayer = useRealCodex
-      ? makeProviderServiceLive().pipe(
-          Layer.provide(providerSessionDirectoryLayer),
-          Layer.provide(realCodexRegistry),
-          Layer.provide(AnalyticsService.layerTest),
-        )
-      : makeProviderServiceLive().pipe(
-          Layer.provide(providerSessionDirectoryLayer),
-          Layer.provide(fakeRegistry!),
-          Layer.provide(AnalyticsService.layerTest),
-        );
+    const providerLayer = (
+      useRealCodex
+        ? makeProviderServiceLive().pipe(
+            Layer.provide(providerSessionDirectoryLayer),
+            Layer.provide(realCodexRegistry),
+            Layer.provide(AnalyticsService.layerTest),
+          )
+        : makeProviderServiceLive().pipe(
+            Layer.provide(providerSessionDirectoryLayer),
+            Layer.provide(fakeRegistry!),
+            Layer.provide(AnalyticsService.layerTest),
+          )
+    ) as any;
 
     const runtimeServicesLayer = Layer.mergeAll(
       orchestrationLayer,
@@ -315,7 +317,7 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provideMerge(NodeServices.layer),
     );
 
-    const runtime = ManagedRuntime.make(layer);
+    const runtime = ManagedRuntime.make(layer as any);
     const engine = yield* tryRuntimePromise("load OrchestrationEngine service", () =>
       runtime.runPromise(Effect.service(OrchestrationEngineService)),
     ).pipe(Effect.orDie);

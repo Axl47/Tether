@@ -480,7 +480,7 @@ describe("WebSocket Server", () => {
       authToken?: string;
       stateDir?: string;
       staticDir?: string;
-      providerLayer?: Layer.Layer<ProviderService, never>;
+      providerLayer?: Layer.Layer<ProviderService>;
       providerHealth?: ProviderHealthShape;
       open?: OpenShape;
       gitManager?: GitManagerShape;
@@ -495,8 +495,13 @@ describe("WebSocket Server", () => {
 
     const stateDir = options.stateDir ?? makeTempDir("tether-ws-state-");
     const scope = await Effect.runPromise(Scope.make("sequential"));
-    const persistenceLayer = options.persistenceLayer ?? SqlitePersistenceMemory;
-    const providerLayer = options.providerLayer ?? makeServerProviderLayer();
+    const persistenceLayer = (options.persistenceLayer ?? SqlitePersistenceMemory) as Layer.Layer<
+      SqlClient.SqlClient,
+      SqlError.SqlError | MigrationError | PlatformError.PlatformError,
+      never
+    >;
+    const providerLayer = (options.providerLayer ??
+      makeServerProviderLayer()) as Layer.Layer<ProviderService>;
     const providerHealthLayer = Layer.succeed(
       ProviderHealth,
       options.providerHealth ?? defaultProviderHealthService,
@@ -546,12 +551,17 @@ describe("WebSocket Server", () => {
       Layer.provideMerge(NodeServices.layer),
     );
     const runtimeServices = await Effect.runPromise(
-      Layer.build(dependenciesLayer).pipe(Scope.provide(scope)),
+      Layer.build(dependenciesLayer as unknown as Layer.Layer<never>).pipe(
+        Scope.provide(scope),
+      ) as Effect.Effect<any, unknown, never>,
     );
 
     try {
       const runtime = await Effect.runPromise(
-        createServer().pipe(Effect.provide(runtimeServices), Scope.provide(scope)),
+        createServer().pipe(
+          Effect.provide(runtimeServices as never),
+          Scope.provide(scope),
+        ) as Effect.Effect<Http.Server, unknown, never>,
       );
       serverScope = scope;
       return runtime;
@@ -742,7 +752,11 @@ describe("WebSocket Server", () => {
     const stateDir = makeTempDir("tether-state-bootstrap-existing-");
     const persistenceLayer = makeSqlitePersistenceLive(path.join(stateDir, "state.sqlite")).pipe(
       Layer.provide(NodeServices.layer),
-    );
+    ) as Layer.Layer<
+      SqlClient.SqlClient,
+      SqlError.SqlError | MigrationError | PlatformError.PlatformError,
+      never
+    >;
     const cwd = "/test/bootstrap-existing";
 
     server = await createTestServer({
