@@ -16,12 +16,11 @@ The user-visible proof is concrete. A contributor should be able to inspect the 
 - [x] (2026-03-20 19:15Z) Verified the current health baseline: root `bun -b lint` and `bun typecheck` pass, targeted server and contracts suites pass, and the focused web suite fails in `apps/web/src/composerDraftStore.test.ts`.
 - [x] (2026-03-20 19:15Z) Chose current local `main` as the canonical repair base and selected “preserve original history if possible, otherwise replay logical commits” as the repair strategy.
 - [x] (2026-03-20 19:17Z) Created safety refs `safety/main-before-pr7-repair` at `50e76c5` and `safety/pr-7-conflict-test-snapshot` at `60f985d`, then created the repair branch `codex/pr-7-conflict-test-repaired` from local `main`.
-- [ ] Search for recoverable original commits in local reflogs and dangling objects and preserve any useful evidence.
-- [ ] Replay the intended branch delta from the snapshot branch onto the repair branch as a small logical series.
-- [ ] Fix the queued-message composer regression during replay so drafts normalize `terminalContexts` safely.
-- [ ] Run `bun fmt`, `bun -b lint`, `bun typecheck`, and the focused server/contracts/web test suites on the repaired branch.
-- [ ] Run browser chat coverage if the replay touches browser-only chat behavior.
-- [ ] Record the final branch state, remaining exact-history limitations, and the publish guidance for the user.
+- [x] (2026-03-20 19:19Z) Rechecked local reflogs, refs, and dangling commits and confirmed that the original cloud commit stack is not recoverable from this checkout alone; only the synthetic snapshot refs and unrelated WIP stash commits remain.
+- [x] (2026-03-20 19:27Z) Replayed the snapshot delta onto `codex/pr-7-conflict-test-repaired` as four logical commits: tooling/workflows, desktop shell sync, server/contracts runtime changes, and web chat/composer/sidebar changes.
+- [x] (2026-03-20 19:27Z) Fixed the queued-message composer regression by ensuring queued drafts always carry `terminalContexts` and by making persistence treat a missing array as empty.
+- [x] (2026-03-20 19:29Z) Ran `bun fmt`, `bun -b lint`, `bun typecheck`, the focused server/contracts/web tests, and the targeted browser suite successfully on the repaired branch.
+- [x] (2026-03-20 19:29Z) Recorded the final repaired branch state and the remaining exact-history limitation for later cloud import if the user wants it.
 
 ## Surprises & Discoveries
 
@@ -33,6 +32,9 @@ The user-visible proof is concrete. A contributor should be able to inspect the 
 
 - Observation: local dangling commits and stashes exist, but the synthetic snapshot branch is still the only local ref containing commit `60f985d`.
   Evidence: `git branch --all --contains 60f985d` returned only `pr-7-conflict-test` and `origin/pr-7-conflict-test`; `git fsck --full` exposed dangling commits, but they are stash/WIP artifacts rather than the missing cloud stack.
+
+- Observation: the replayed browser failures were expectation drift, not broad product regressions. The current UI launches project actions from the `Run actions` menu and wraps pending user-input options in a tooltip trigger.
+  Evidence: the targeted browser suite failed until the tests opened the `Run actions` menu and stopped asserting the exact `data-slot` value on the option button wrapper, after which `47` browser tests passed.
 
 ## Decision Log
 
@@ -48,9 +50,17 @@ The user-visible proof is concrete. A contributor should be able to inspect the 
   Rationale: the repaired branch should be both history-corrected and functionally trustworthy; leaving the known regression in place would defeat the purpose of the repair.
   Date/Author: 2026-03-20 / Codex
 
+- Decision: keep the current `main` header behavior for project actions and update browser tests to drive the menu-based launcher instead of restoring older direct-button expectations.
+  Rationale: `main` already renders project actions through the `Run actions` menu in `ChatView`, and the goal of this repair is to preserve current behavior while restoring the snapshot functionality on top of the correct base.
+  Date/Author: 2026-03-20 / Codex
+
 ## Outcomes & Retrospective
 
-Pending implementation.
+The repaired branch now exists as `codex/pr-7-conflict-test-repaired` on top of current local `main`, with the snapshot behavior replayed across four logical commits plus a small final validation cleanup. The frozen snapshot refs remain available, so no original branch state was overwritten during the repair.
+
+Local exact-history recovery is still incomplete because this checkout does not contain the original cloud commit stack; only the synthetic snapshot commit and older WIP stash objects are present. If the user later exports a bundle or patch series from the cloud terminal, that artifact can still be compared against this repaired branch and imported if preserving original authorship/topology remains important.
+
+Functionally, the branch is now in a trusted state. The queued-message composer regression is fixed, focused server/contracts/web coverage is green, the browser chat suite is green, and the repository checks pass.
 
 ## Context and Orientation
 
@@ -97,6 +107,14 @@ Inspect whether any local commit chain is recoverable:
     rtk proxy git log --graph --oneline --decorate --all
 
 Replay and validate incrementally. The exact path groups will be updated in this plan as implementation proceeds. After each logical slice, verify the branch shape and run the most relevant focused tests before moving on.
+
+The logical replay actually used during implementation was:
+
+1. `chore(recovery): replay tooling and workflow updates`
+2. `feat(desktop): replay shell environment sync changes`
+3. `feat(server): replay orchestration and contracts updates`
+4. `feat(web): replay chat and composer updates`
+5. `fix(recovery): finalize replay validation cleanup`
 
 Required final validation:
 
@@ -146,6 +164,16 @@ Current known healthy signals before the repair:
     packages/contracts focused suites: 2 passed, 26 tests passed
     root bun typecheck: passed
 
+Final repaired branch validation:
+
+    PATH="$HOME/.bun/bin:$PATH" ~/.bun/bin/bun fmt                      -> passed
+    PATH="$HOME/.bun/bin:$PATH" ~/.bun/bin/bun -b lint                  -> passed with 0 warnings
+    PATH="$HOME/.bun/bin:$PATH" ~/.bun/bin/bun typecheck                -> passed
+    apps/server focused Vitest suite                                    -> 123 passed, 1 skipped
+    packages/contracts focused Vitest suite                             -> 26 passed
+    apps/web focused Vitest suite                                       -> 73 passed
+    apps/web ChatView browser suite                                     -> 47 passed
+
 ## Interfaces and Dependencies
 
 This repair uses Git branch refs as the safety mechanism and relies on the existing Bun, Vitest, and Turbo toolchain already checked into the repository. The repaired branch must preserve the current provider/runtime contracts in `packages/contracts/src/`, the current websocket/server behavior in `apps/server/src/`, and the current queued-message and composer draft interfaces in `apps/web/src/` while fixing only the missing-array compatibility bug.
@@ -153,3 +181,5 @@ This repair uses Git branch refs as the safety mechanism and relies on the exist
 Revision note: Created on 2026-03-20 to drive the repair of `pr-7-conflict-test` from current local `main`, preserve the snapshot branch as a frozen reference, and fold the queued-message composer fix into the recovery work.
 
 Revision note: Updated on 2026-03-20 after creating the safety refs and the repair branch so the remaining work can proceed without mutating the snapshot branch.
+
+Revision note: Updated on 2026-03-20 after the full replay completed to record the actual commit grouping, the final validation results, and the remaining limitation that exact cloud-history recovery still requires an external export artifact.

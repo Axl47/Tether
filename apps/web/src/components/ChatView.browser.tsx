@@ -1653,10 +1653,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     try {
       wsRequests.length = 0;
       await openRunActionsMenu();
-      const runButton = await waitForTextElement(
-        "Lint",
-        "Unable to find Lint action.",
-      );
+      const runButton = await waitForTextElement("Lint", "Unable to find Lint action.");
       runButton.click();
 
       await vi.waitFor(
@@ -1717,10 +1714,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       wsRequests.length = 0;
 
       await openRunActionsMenu();
-      const runButton = await waitForTextElement(
-        "Dev",
-        "Unable to find Dev action.",
-      );
+      const runButton = await waitForTextElement("Dev", "Unable to find Dev action.");
       runButton.click();
 
       await vi.waitFor(

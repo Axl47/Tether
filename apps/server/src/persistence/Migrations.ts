@@ -18,7 +18,6 @@ import Migration0015 from "./Migrations/015_ProjectionThreadsAutorenameCache.ts"
 import Migration0016 from "./Migrations/016_ClearLegacyCodexContextWindow.ts";
 import Migration0017 from "./Migrations/017_ProjectionThreadProposedPlanImplementation.ts";
 import Migration0018 from "./Migrations/018_ProjectionTurnsSourceProposedPlan.ts";
-import { Effect } from "effect";
 
 /**
  * Database migration loader.
