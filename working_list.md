@@ -2,16 +2,19 @@
 
 ## Pending
 
-- [ ] Manual validation in the running app on an existing overflowed Codex thread
+- [ ] Import original cloud branch history if a bundle or patch series becomes available
+- [ ] Run browser chat coverage if the replayed web changes touch browser-only flows
+- [ ] Push or hand off the repaired branch once the user confirms the preferred publish step
 
 ## In Progress
 
-- [~] Close out with final summary and human verification notes
+- [~] Reconstruct `pr-7-conflict-test` on top of `main` as a reviewable commit series
+- [~] Fix the queued-message composer regression and re-run focused validation
 
 ## Done
 
-- [x] Write the execution plan and confirm the current architecture
-- [x] Implement Codex heuristic normalization and compaction anchoring
-- [x] Add legacy overflow recovery for pre-anchor Codex snapshots using the latest reported turn
-- [x] Update Codex composer indicator copy, immediate legacy fallback, and browser coverage
-- [x] Run focused tests plus repo verification (`fmt`, `lint`, `typecheck`)
+- [x] Inspect the current snapshot branch, merge ancestry, and validation status
+- [x] Confirm that local `main` is the correct canonical base for the repair
+- [x] Create a recovery-specific working checklist
+- [x] Create safety refs for `main` and `pr-7-conflict-test`
+- [x] Create the fresh repair branch `codex/pr-7-conflict-test-repaired` from `main`
