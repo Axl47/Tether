@@ -127,6 +127,7 @@ import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { summarizeTurnDiffStats } from "../lib/turnDiffTree";
 import { useCommandPaletteStore } from "../commandPaletteStore";
+import { findLeafByThreadId, useSplitViewStore } from "../splitViewStore";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import BranchToolbar from "./BranchToolbar";
 import GitActionsControl from "./GitActionsControl";
@@ -611,9 +612,10 @@ const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
 
 interface ChatViewProps {
   threadId: ThreadId;
+  onCloseSplitPane?: (() => void) | undefined;
 }
 
-export default function ChatView({ threadId }: ChatViewProps) {
+export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) {
   const threads = useStore((store) => store.threads);
   const projects = useStore((store) => store.projects);
   const markThreadVisited = useStore((store) => store.markThreadVisited);
@@ -662,6 +664,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     (store) => store.loadQueuedMessageIntoComposer,
   );
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
+  const createDraftThread = useComposerDraftStore((store) => store.createDraftThread);
   const draftThread = useComposerDraftStore(
     (store) => store.draftThreadsByThreadId[threadId] ?? null,
   );
@@ -854,6 +857,81 @@ export default function ChatView({ threadId }: ChatViewProps) {
     () => getLatestStartedThreadSelection(threads),
     [threads],
   );
+  const openCommandPalette = useCommandPaletteStore((store) => store.openPalette);
+
+  const openSplitCommandPalette = useCallback(
+    (mode: "split-right" | "split-down") => {
+      if (!activeThreadId) {
+        return;
+      }
+
+      const splitStore = useSplitViewStore.getState();
+      const sourceLeafId = splitStore.group?.focusedLeafId ?? null;
+      const previewProjectId =
+        activeProject?.id ?? activeThread?.projectId ?? draftThread?.projectId;
+      if (!previewProjectId) {
+        openCommandPalette({
+          mode,
+          sourceThreadId: activeThreadId,
+          sourceLeafId,
+        });
+        return;
+      }
+
+      const previewId = newThreadId();
+      createDraftThread(previewId, previewProjectId, {
+        createdAt: new Date().toISOString(),
+        branch: activeThread?.branch ?? null,
+        worktreePath: activeThread?.worktreePath ?? null,
+        envMode: draftThread?.envMode ?? (activeThread?.worktreePath ? "worktree" : "local"),
+        runtimeMode,
+        interactionMode,
+      });
+
+      const direction = mode === "split-right" ? "horizontal" : "vertical";
+      if (splitStore.group && sourceLeafId) {
+        splitStore.splitLeaf(sourceLeafId, previewId, direction, false);
+      } else {
+        splitStore.splitThread(activeThreadId, previewId, direction, false);
+      }
+
+      const previewGroup = useSplitViewStore.getState().group;
+      const nextPreviewLeafId = previewGroup
+        ? (findLeafByThreadId(previewGroup.root, previewId)?.id ?? null)
+        : null;
+
+      openCommandPalette({
+        mode,
+        sourceThreadId: activeThreadId,
+        sourceLeafId,
+        previewThreadId: previewId,
+        previewLeafId: nextPreviewLeafId,
+      });
+    },
+    [
+      activeProject?.id,
+      activeThread,
+      activeThreadId,
+      createDraftThread,
+      draftThread?.envMode,
+      draftThread?.projectId,
+      interactionMode,
+      openCommandPalette,
+      runtimeMode,
+    ],
+  );
+
+  const openReplaceFocusedPalette = useCallback(() => {
+    const splitStore = useSplitViewStore.getState();
+    if (!splitStore.group) {
+      return;
+    }
+    openCommandPalette({
+      mode: "replace-focused",
+      sourceThreadId: activeThreadId,
+      sourceLeafId: splitStore.group.focusedLeafId,
+    });
+  }, [activeThreadId, openCommandPalette]);
 
   useEffect(() => {
     if (!activeThread?.id) return;
@@ -2597,10 +2675,45 @@ export default function ChatView({ threadId }: ChatViewProps) {
         terminalOpen: Boolean(terminalState.terminalOpen),
       };
 
+      if (!shortcutContext.terminalFocus) {
+        const isMac = isMacPlatform(navigator.platform);
+        const key = event.key.toLowerCase();
+        const isSplitRightShortcut = isMac
+          ? event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && key === "d"
+          : event.ctrlKey && !event.metaKey && event.shiftKey && !event.altKey && key === "d";
+        const isSplitDownShortcut = isMac
+          ? event.metaKey && !event.ctrlKey && event.shiftKey && !event.altKey && key === "d"
+          : event.ctrlKey && !event.metaKey && event.shiftKey && !event.altKey && key === "e";
+
+        if (isSplitRightShortcut || isSplitDownShortcut) {
+          event.preventDefault();
+          event.stopPropagation();
+          openSplitCommandPalette(isSplitRightShortcut ? "split-right" : "split-down");
+          return;
+        }
+      }
+
       const command = resolveShortcutCommand(event, keybindings, {
         context: shortcutContext,
       });
-      if (!command) return;
+      if (!command) {
+        if (!shortcutContext.terminalFocus) {
+          const isMac = isMacPlatform(navigator.platform);
+          const isMod = isMac ? event.metaKey : event.ctrlKey;
+          if (
+            isMod &&
+            event.key.toLowerCase() === "w" &&
+            !event.shiftKey &&
+            !event.altKey &&
+            onCloseSplitPane
+          ) {
+            event.preventDefault();
+            event.stopPropagation();
+            onCloseSplitPane();
+          }
+        }
+        return;
+      }
 
       if (command === "terminal.toggle") {
         event.preventDefault();
@@ -2644,6 +2757,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
         return;
       }
 
+      if (command === "chat.splitRight" || command === "chat.splitDown") {
+        event.preventDefault();
+        event.stopPropagation();
+        openSplitCommandPalette(command === "chat.splitRight" ? "split-right" : "split-down");
+        return;
+      }
+
+      if (command === "chat.replaceFocusedPane") {
+        event.preventDefault();
+        event.stopPropagation();
+        openReplaceFocusedPalette();
+        return;
+      }
+
       const scriptId = projectScriptIdFromCommand(command);
       if (!scriptId || !activeProject) return;
       const script = activeProject.scripts.find((entry) => entry.id === scriptId);
@@ -2666,6 +2793,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
     splitTerminal,
     keybindings,
     diffOpen,
+    onCloseSplitPane,
+    openReplaceFocusedPalette,
+    openSplitCommandPalette,
     onToggleDiff,
     toggleTerminalVisibility,
   ]);

@@ -18,12 +18,14 @@ import {
   useDeferredValue,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type KeyboardEvent,
   type ReactNode,
 } from "react";
 import { useAppSettings } from "../appSettings";
 import { useCommandPaletteStore } from "../commandPaletteStore";
+import { useComposerDraftStore } from "../composerDraftStore";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import {
   startNewLocalThreadFromContext,
@@ -37,9 +39,11 @@ import {
 } from "../lib/projectPaths";
 import { addProjectFromPath } from "../lib/projectAdd";
 import { serverConfigQueryOptions } from "../lib/serverReactQuery";
-import { cn } from "../lib/utils";
+import { cn, newThreadId } from "../lib/utils";
 import { readNativeApi } from "../nativeApi";
+import { useSplitViewStore, findLeafByThreadId, type SplitDirection } from "../splitViewStore";
 import { useStore } from "../store";
+import { DEFAULT_RUNTIME_MODE } from "../types";
 import {
   ADDON_ICON_CLASS,
   buildBrowseGroups,
@@ -56,15 +60,28 @@ import {
   ITEM_ICON_CLASS,
   RECENT_THREAD_LIMIT,
 } from "./CommandPalette.logic";
+import {
+  buildPaletteItemGroups,
+  paletteItemKey,
+  type PaletteItem,
+  type PaletteItemGroup,
+} from "./commandPaletteGroups";
 import { CommandPaletteResults } from "./CommandPaletteResults";
 import { Button } from "./ui/button";
 import {
   Command,
   CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandGroupLabel,
   CommandDialogPopup,
   CommandFooter,
   CommandInput,
+  CommandItem,
+  CommandList,
   CommandPanel,
+  CommandSeparator,
+  useCommandFilteredItems,
 } from "./ui/command";
 import { Kbd, KbdGroup } from "./ui/kbd";
 import { toastManager } from "./ui/toast";
@@ -72,9 +89,28 @@ import { toastManager } from "./ui/toast";
 export function CommandPalette({ children }: { children: ReactNode }) {
   const open = useCommandPaletteStore((store) => store.open);
   const setOpen = useCommandPaletteStore((store) => store.setOpen);
+  const previewThreadId = useCommandPaletteStore((store) => store.previewThreadId);
+  const previewLeafId = useCommandPaletteStore((store) => store.previewLeafId);
+  const closePane = useSplitViewStore((store) => store.closePane);
+  const clearDraftThread = useComposerDraftStore((store) => store.clearDraftThread);
+
+  const handleOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      if (nextOpen) {
+        setOpen(true);
+        return;
+      }
+      if (previewLeafId && previewThreadId) {
+        closePane(previewLeafId);
+        clearDraftThread(previewThreadId);
+      }
+      setOpen(false);
+    },
+    [clearDraftThread, closePane, previewLeafId, previewThreadId, setOpen],
+  );
 
   return (
-    <CommandDialog open={open} onOpenChange={setOpen}>
+    <CommandDialog open={open} onOpenChange={handleOpenChange}>
       {children}
       <CommandPaletteDialog />
     </CommandDialog>
@@ -83,6 +119,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
 
 function CommandPaletteDialog() {
   const open = useCommandPaletteStore((store) => store.open);
+  const mode = useCommandPaletteStore((store) => store.mode);
   const setOpen = useCommandPaletteStore((store) => store.setOpen);
 
   useEffect(() => {
@@ -93,6 +130,10 @@ function CommandPaletteDialog() {
 
   if (!open) {
     return null;
+  }
+
+  if (mode !== "default") {
+    return <OpenSplitCommandPaletteDialog />;
   }
 
   return <OpenCommandPaletteDialog />;
@@ -612,4 +653,422 @@ function OpenCommandPaletteDialog() {
       </Command>
     </CommandDialogPopup>
   );
+}
+
+function splitPalettePlaceholder(
+  mode: ReturnType<typeof useCommandPaletteStore.getState>["mode"],
+): string {
+  switch (mode) {
+    case "split-right":
+      return "Split right with a thread or project...";
+    case "split-down":
+      return "Split down with a thread or project...";
+    case "replace-focused":
+      return "Replace the focused pane with a thread or project...";
+    default:
+      return "Search...";
+  }
+}
+
+function splitPaletteItemSearchText(item: PaletteItem): string {
+  switch (item.kind) {
+    case "new-thread":
+      return `new thread ${item.project.name} ${item.project.cwd}`;
+    case "workspace":
+      return `workspace ${item.name} ${item.threadCount}`;
+    case "thread":
+      return `${item.thread.title} ${item.project?.name ?? ""} ${item.project?.cwd ?? ""}`;
+    default:
+      return item.kind;
+  }
+}
+
+function OpenSplitCommandPaletteDialog() {
+  const navigate = useNavigate();
+  const { settings } = useAppSettings();
+  const paletteMode = useCommandPaletteStore((store) => store.mode);
+  const sourceThreadId = useCommandPaletteStore((store) => store.sourceThreadId);
+  const sourceLeafId = useCommandPaletteStore((store) => store.sourceLeafId);
+  const previewThreadId = useCommandPaletteStore((store) => store.previewThreadId);
+  const previewLeafId = useCommandPaletteStore((store) => store.previewLeafId);
+  const closePaletteStore = useCommandPaletteStore((store) => store.closePalette);
+  const [query, setQuery] = useState("");
+  const highlightedItemRef = useRef<PaletteItem | null>(null);
+
+  const projects = useStore((store) => store.projects);
+  const threads = useStore((store) => store.threads);
+  const splitGroup = useSplitViewStore((store) => store.group);
+  const workspaces = useSplitViewStore((store) => store.workspaces);
+  const activeWorkspaceId = useSplitViewStore((store) => store.activeWorkspaceId);
+  const activateWorkspace = useSplitViewStore((store) => store.activateWorkspace);
+  const deactivateWorkspace = useSplitViewStore((store) => store.deactivateWorkspace);
+  const splitThread = useSplitViewStore((store) => store.splitThread);
+  const splitLeaf = useSplitViewStore((store) => store.splitLeaf);
+  const replaceThreadInLeaf = useSplitViewStore((store) => store.replaceThreadInLeaf);
+  const replaceThreadInFocusedLeaf = useSplitViewStore((store) => store.replaceThreadInFocusedLeaf);
+  const setFocusedLeaf = useSplitViewStore((store) => store.setFocusedLeaf);
+  const closePane = useSplitViewStore((store) => store.closePane);
+
+  const getDraftThread = useComposerDraftStore((store) => store.getDraftThread);
+  const getDraftThreadByProjectId = useComposerDraftStore(
+    (store) => store.getDraftThreadByProjectId,
+  );
+  const setProjectDraftThreadId = useComposerDraftStore((store) => store.setProjectDraftThreadId);
+  const clearDraftThread = useComposerDraftStore((store) => store.clearDraftThread);
+  const clearProjectDraftThreadId = useComposerDraftStore(
+    (store) => store.clearProjectDraftThreadId,
+  );
+  const projectDraftThreadIdByProjectId = useComposerDraftStore(
+    (store) => store.projectDraftThreadIdByProjectId,
+  );
+
+  const itemGroups = useMemo(
+    () =>
+      buildPaletteItemGroups({
+        paletteMode,
+        projects,
+        threads,
+        workspaces,
+        routeThreadId: sourceThreadId,
+        activeWorkspaceId,
+        splitGroup,
+        projectDraftThreadIdByProjectId,
+      }),
+    [
+      activeWorkspaceId,
+      paletteMode,
+      projectDraftThreadIdByProjectId,
+      projects,
+      sourceThreadId,
+      splitGroup,
+      threads,
+      workspaces,
+    ],
+  );
+
+  const resetSplitPalette = useCallback(() => {
+    closePaletteStore();
+    setQuery("");
+    highlightedItemRef.current = null;
+  }, [closePaletteStore, highlightedItemRef]);
+
+  const closeSplitPalette = useCallback(() => {
+    if (previewLeafId && previewThreadId) {
+      closePane(previewLeafId);
+      clearDraftThread(previewThreadId);
+    }
+    resetSplitPalette();
+  }, [clearDraftThread, closePane, previewLeafId, previewThreadId, resetSplitPalette]);
+
+  const splitDirection = useMemo<SplitDirection | null>(() => {
+    switch (paletteMode) {
+      case "split-right":
+        return "horizontal";
+      case "split-down":
+        return "vertical";
+      default:
+        return null;
+    }
+  }, [paletteMode]);
+
+  const activateSplitThread = useCallback(
+    (threadId: string) => {
+      const existingWorkspace = workspaces.find((workspace) =>
+        findLeafByThreadId(workspace.root, threadId as never),
+      );
+      if (existingWorkspace) {
+        const leaf = findLeafByThreadId(existingWorkspace.root, threadId as never);
+        if (previewLeafId && previewThreadId && previewThreadId !== threadId) {
+          closePane(previewLeafId);
+          clearDraftThread(previewThreadId);
+        }
+        resetSplitPalette();
+        activateWorkspace(existingWorkspace.id);
+        if (leaf) {
+          setFocusedLeaf(leaf.id);
+        }
+        void navigate({
+          to: "/$threadId",
+          params: { threadId },
+        });
+        return;
+      }
+
+      if (previewLeafId && previewThreadId) {
+        replaceThreadInLeaf(previewLeafId, threadId as never);
+        if (previewThreadId !== threadId) {
+          clearDraftThread(previewThreadId);
+        }
+        resetSplitPalette();
+        void navigate({
+          to: "/$threadId",
+          params: { threadId },
+        });
+        return;
+      }
+
+      if (splitDirection && sourceThreadId) {
+        if (splitGroup && sourceLeafId) {
+          const existingLeaf = findLeafByThreadId(splitGroup.root, threadId as never);
+          if (existingLeaf) {
+            setFocusedLeaf(existingLeaf.id);
+          } else {
+            splitLeaf(sourceLeafId, threadId as never, splitDirection, false);
+          }
+        } else {
+          splitThread(sourceThreadId, threadId as never, splitDirection, false);
+        }
+        resetSplitPalette();
+        void navigate({
+          to: "/$threadId",
+          params: { threadId },
+        });
+        return;
+      }
+
+      if (paletteMode === "replace-focused" && splitGroup) {
+        const existingLeaf = findLeafByThreadId(splitGroup.root, threadId as never);
+        if (existingLeaf) {
+          setFocusedLeaf(existingLeaf.id);
+        } else {
+          replaceThreadInFocusedLeaf(threadId as never);
+        }
+        resetSplitPalette();
+        void navigate({
+          to: "/$threadId",
+          params: { threadId },
+        });
+        return;
+      }
+
+      deactivateWorkspace();
+      resetSplitPalette();
+      void navigate({
+        to: "/$threadId",
+        params: { threadId },
+      });
+    },
+    [
+      activateWorkspace,
+      clearDraftThread,
+      closePane,
+      deactivateWorkspace,
+      navigate,
+      paletteMode,
+      previewLeafId,
+      previewThreadId,
+      replaceThreadInFocusedLeaf,
+      replaceThreadInLeaf,
+      resetSplitPalette,
+      setFocusedLeaf,
+      sourceLeafId,
+      sourceThreadId,
+      splitDirection,
+      splitGroup,
+      splitLeaf,
+      splitThread,
+      workspaces,
+    ],
+  );
+
+  const handleSelectProject = useCallback(
+    (projectId: string) => {
+      const existingDraft = getDraftThreadByProjectId(projectId as never);
+      const targetThreadId = previewThreadId ?? existingDraft?.threadId ?? newThreadId();
+
+      if (previewThreadId) {
+        const previewDraft = getDraftThread(previewThreadId);
+        setProjectDraftThreadId(projectId as never, previewThreadId, {
+          createdAt: previewDraft?.createdAt ?? new Date().toISOString(),
+          branch: previewDraft?.branch ?? null,
+          worktreePath: previewDraft?.worktreePath ?? null,
+          envMode: previewDraft?.envMode ?? settings.defaultThreadEnvMode,
+          runtimeMode: previewDraft?.runtimeMode ?? DEFAULT_RUNTIME_MODE,
+          interactionMode: previewDraft?.interactionMode ?? "default",
+        });
+      } else if (!existingDraft) {
+        clearProjectDraftThreadId(projectId as never);
+        setProjectDraftThreadId(projectId as never, targetThreadId, {
+          createdAt: new Date().toISOString(),
+          branch: null,
+          worktreePath: null,
+          envMode: settings.defaultThreadEnvMode,
+          runtimeMode: DEFAULT_RUNTIME_MODE,
+        });
+      } else {
+        setProjectDraftThreadId(projectId as never, existingDraft.threadId);
+      }
+
+      activateSplitThread(targetThreadId);
+    },
+    [
+      activateSplitThread,
+      clearProjectDraftThreadId,
+      getDraftThread,
+      getDraftThreadByProjectId,
+      previewThreadId,
+      setProjectDraftThreadId,
+      settings.defaultThreadEnvMode,
+    ],
+  );
+
+  const handleItemClick = useCallback(
+    (item: PaletteItem) => {
+      switch (item.kind) {
+        case "new-thread":
+          handleSelectProject(item.project.id);
+          return;
+        case "workspace": {
+          resetSplitPalette();
+          const focusedThreadId = activateWorkspace(item.workspaceId);
+          if (!focusedThreadId) {
+            return;
+          }
+          void navigate({
+            to: "/$threadId",
+            params: { threadId: focusedThreadId },
+          });
+          return;
+        }
+        case "thread":
+          activateSplitThread(item.thread.id);
+          return;
+        default:
+          return;
+      }
+    },
+    [activateSplitThread, activateWorkspace, handleSelectProject, navigate, resetSplitPalette],
+  );
+
+  return (
+    <CommandDialogPopup
+      aria-label="Split command palette"
+      className="overflow-hidden p-0"
+      data-testid="command-palette"
+    >
+      <Command
+        items={itemGroups}
+        value={query}
+        onValueChange={setQuery}
+        itemToStringValue={(item) => (item ? splitPaletteItemSearchText(item as PaletteItem) : "")}
+        onItemHighlighted={(item) => {
+          highlightedItemRef.current = item ? (item as PaletteItem) : null;
+        }}
+      >
+        <CommandInput placeholder={splitPalettePlaceholder(paletteMode)} />
+        <CommandPanel
+          className="max-h-[min(28rem,70vh)]"
+          onKeyDownCapture={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              closeSplitPalette();
+              return;
+            }
+            if (event.key !== "Enter" || !highlightedItemRef.current) {
+              return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            handleItemClick(highlightedItemRef.current);
+          }}
+        >
+          <SplitCommandPaletteResults onItemClick={handleItemClick} />
+        </CommandPanel>
+        <CommandFooter className="gap-3 max-sm:flex-col max-sm:items-start">
+          <div className="flex items-center gap-3">
+            <KbdGroup className="items-center gap-1.5">
+              <Kbd>
+                <ArrowUpIcon />
+              </Kbd>
+              <Kbd>
+                <ArrowDownIcon />
+              </Kbd>
+              <span className={cn("text-muted-foreground/80")}>Navigate</span>
+            </KbdGroup>
+            <KbdGroup className="items-center gap-1.5">
+              <Kbd>Enter</Kbd>
+              <span className={cn("text-muted-foreground/80")}>
+                {paletteMode === "replace-focused" ? "Replace" : "Split"}
+              </span>
+            </KbdGroup>
+            <KbdGroup className="items-center gap-1.5">
+              <Kbd>Esc</Kbd>
+              <span className={cn("text-muted-foreground/80")}>Cancel</span>
+            </KbdGroup>
+          </div>
+        </CommandFooter>
+      </Command>
+    </CommandDialogPopup>
+  );
+}
+
+function SplitCommandPaletteResults(props: { onItemClick: (item: PaletteItem) => void }) {
+  const filteredItemGroups = useCommandFilteredItems<PaletteItemGroup>();
+  const visibleGroups = filteredItemGroups.filter((group) => group.items.length > 0);
+
+  return (
+    <CommandList>
+      <CommandEmpty>No results found.</CommandEmpty>
+      {visibleGroups.map((group) => (
+        <CommandGroup key={group.label}>
+          <CommandGroupLabel>{group.label}</CommandGroupLabel>
+          {group.items.map((item) => (
+            <CommandItem
+              key={`${group.label}:${paletteItemKey(item)}`}
+              value={item}
+              onMouseDown={(event) => {
+                event.preventDefault();
+              }}
+              onClick={() => props.onItemClick(item)}
+            >
+              <SplitPaletteItemContent item={item} />
+            </CommandItem>
+          ))}
+          <CommandSeparator />
+        </CommandGroup>
+      ))}
+    </CommandList>
+  );
+}
+
+function SplitPaletteItemContent({ item }: { item: PaletteItem }) {
+  switch (item.kind) {
+    case "new-thread":
+      return (
+        <>
+          <SquarePenIcon className="mr-2 size-4 shrink-0 text-muted-foreground" />
+          <div className="min-w-0 flex-1">
+            <div className="truncate">New thread in {item.project.name}</div>
+            <div className="truncate text-xs text-muted-foreground">{item.project.cwd}</div>
+          </div>
+        </>
+      );
+    case "workspace":
+      return (
+        <>
+          <FolderIcon className="mr-2 size-4 shrink-0 text-muted-foreground" />
+          <div className="min-w-0 flex-1">
+            <div className="truncate">{item.name}</div>
+            <div className="truncate text-xs text-muted-foreground">
+              {item.threadCount} thread{item.threadCount === 1 ? "" : "s"}
+            </div>
+          </div>
+        </>
+      );
+    case "thread":
+      return (
+        <>
+          <MessageSquareIcon className="mr-2 size-4 shrink-0 text-muted-foreground" />
+          <div className="min-w-0 flex-1">
+            <div className="truncate">{item.thread.title}</div>
+            <div className="truncate text-xs text-muted-foreground">
+              {item.project?.name ?? "Unknown project"}
+            </div>
+          </div>
+        </>
+      );
+    default:
+      return <div className="truncate">{item.kind}</div>;
+  }
 }

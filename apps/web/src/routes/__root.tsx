@@ -18,6 +18,7 @@ import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { serverConfigQueryOptions, serverQueryKeys } from "../lib/serverReactQuery";
 import { readNativeApi } from "../nativeApi";
 import { clearPromotedDraftThreads, useComposerDraftStore } from "../composerDraftStore";
+import { useSplitViewStore } from "../splitViewStore";
 import { useStore } from "../store";
 import { useTerminalStateStore } from "../terminalStateStore";
 import { useThreadRunStateStore } from "../threadRunStateStore";
@@ -156,6 +157,13 @@ function EventRouter() {
 
   pathnameRef.current = pathname;
 
+  const routeThreadIdFromPathname = (nextPathname: string): ThreadId | null => {
+    if (nextPathname === "/" || nextPathname === "/settings") {
+      return null;
+    }
+    return ThreadId.makeUnsafe(nextPathname.slice(1));
+  };
+
   useEffect(() => {
     const api = readNativeApi();
     if (!api) return;
@@ -179,8 +187,21 @@ function EventRouter() {
         snapshotThreads: snapshot.threads,
         draftThreadIds,
       });
+      const nextSplitRouteThreadId = useSplitViewStore.getState().reconcileThreads(activeThreadIds);
       removeOrphanedTerminalStates(activeThreadIds);
       removeOrphanedPendingRuns(activeThreadIds);
+      const routeThreadId = routeThreadIdFromPathname(pathnameRef.current);
+      if (routeThreadId && !activeThreadIds.has(routeThreadId)) {
+        if (nextSplitRouteThreadId && nextSplitRouteThreadId !== routeThreadId) {
+          void navigate({
+            to: "/$threadId",
+            params: { threadId: nextSplitRouteThreadId },
+            replace: true,
+          });
+        } else {
+          void navigate({ to: "/", replace: true });
+        }
+      }
       if (pending) {
         pending = false;
         await flushSnapshotSync();
@@ -256,6 +277,16 @@ function EventRouter() {
         setProjectExpanded(payload.bootstrapProjectId, true);
 
         if (pathnameRef.current !== "/") {
+          return;
+        }
+        const persistedWorkspaceThreadId = useSplitViewStore.getState().getFocusedThreadId();
+        if (persistedWorkspaceThreadId) {
+          await navigate({
+            to: "/$threadId",
+            params: { threadId: persistedWorkspaceThreadId },
+            replace: true,
+          });
+          handledBootstrapThreadIdRef.current = payload.bootstrapThreadId;
           return;
         }
         if (handledBootstrapThreadIdRef.current === payload.bootstrapThreadId) {
