@@ -19,7 +19,13 @@ import { ProviderSessionDirectoryPersistenceError } from "../Errors.ts";
 import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.ts";
 import { ProviderSessionDirectoryLive } from "./ProviderSessionDirectory.ts";
 
-function makeDirectoryLayer<E, R>(persistenceLayer: Layer.Layer<SqlClient.SqlClient, E, R>) {
+function makeDirectoryLayer<E, R>(
+  persistenceLayer: Layer.Layer<SqlClient.SqlClient, E, R>,
+): Layer.Layer<
+  ProviderSessionRuntimeRepository | ProviderSessionDirectory | NodeServices.NodeServices,
+  never,
+  never
+> {
   const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
     Layer.provide(persistenceLayer),
   );
@@ -27,7 +33,11 @@ function makeDirectoryLayer<E, R>(persistenceLayer: Layer.Layer<SqlClient.SqlCli
     runtimeRepositoryLayer,
     ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer)),
     NodeServices.layer,
-  );
+  ) as Layer.Layer<
+    ProviderSessionRuntimeRepository | ProviderSessionDirectory | NodeServices.NodeServices,
+    never,
+    never
+  >;
 }
 
 it.layer(makeDirectoryLayer(SqlitePersistenceMemory))("ProviderSessionDirectoryLive", (it) => {

@@ -164,7 +164,7 @@ function itemTitle(itemType: CanonicalItemType): string | undefined {
     case "plan":
       return "Plan";
     case "command_execution":
-      return "Command run";
+      return "Ran command";
     case "file_change":
       return "File change";
     case "mcp_tool_call":
@@ -1198,11 +1198,11 @@ function mapToRuntimeEvents(
       asString(asObject(payload?.error)?.message) ?? event.message ?? "Provider runtime error";
     return [
       {
-        type: "runtime.error",
+        type: payload?.willRetry === true ? "runtime.warning" : "runtime.error",
         ...runtimeEventBase(event, canonicalThreadId),
         payload: {
           message,
-          class: "provider_error",
+          ...(payload?.willRetry === true ? {} : { class: "provider_error" as const }),
           ...(event.payload !== undefined ? { detail: event.payload } : {}),
         },
       },

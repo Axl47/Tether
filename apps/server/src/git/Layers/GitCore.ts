@@ -9,8 +9,8 @@ const STATUS_UPSTREAM_REFRESH_TIMEOUT = Duration.seconds(5);
 const STATUS_UPSTREAM_REFRESH_CACHE_CAPACITY = 2_048;
 const DEFAULT_BASE_BRANCH_CANDIDATES = ["main", "master"] as const;
 const ENABLE_STATUS_UPSTREAM_REFRESH =
-  process.env.TETHER_ENABLE_STATUS_UPSTREAM_REFRESH === "1" ||
-  process.env.T3CODE_ENABLE_STATUS_UPSTREAM_REFRESH === "1";
+  process.env.TETHER_ENABLE_STATUS_UPSTREAM_REFRESH !== "0" &&
+  process.env.T3CODE_ENABLE_STATUS_UPSTREAM_REFRESH !== "0";
 
 class StatusUpstreamRefreshCacheKey extends Data.Class<{
   cwd: string;
@@ -771,9 +771,21 @@ const makeGitCore = Effect.gen(function* () {
       })),
     );
 
-  const prepareCommitContext: GitCoreShape["prepareCommitContext"] = (cwd) =>
+  const prepareCommitContext: GitCoreShape["prepareCommitContext"] = (cwd, filePaths) =>
     Effect.gen(function* () {
-      yield* runGit("GitCore.prepareCommitContext.addAll", cwd, ["add", "-A"]);
+      if (filePaths && filePaths.length > 0) {
+        yield* runGit("GitCore.prepareCommitContext.reset", cwd, ["reset"]).pipe(
+          Effect.catch(() => Effect.void),
+        );
+        yield* runGit("GitCore.prepareCommitContext.addSelected", cwd, [
+          "add",
+          "-A",
+          "--",
+          ...filePaths,
+        ]);
+      } else {
+        yield* runGit("GitCore.prepareCommitContext.addAll", cwd, ["add", "-A"]);
+      }
 
       const stagedSummary = yield* runGitStdout("GitCore.prepareCommitContext.stagedSummary", cwd, [
         "diff",
