@@ -2715,6 +2715,64 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("shows split actions in the command palette and opens split selection mode", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-command-palette-split-actions-test" as MessageId,
+        targetText: "command palette split actions test",
+      }),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          keybindings: [
+            {
+              command: "commandPalette.toggle",
+              shortcut: {
+                key: "k",
+                metaKey: false,
+                ctrlKey: false,
+                shiftKey: false,
+                altKey: false,
+                modKey: true,
+              },
+              whenAst: {
+                type: "not",
+                node: { type: "identifier", name: "terminalFocus" },
+              },
+            },
+          ],
+        };
+      },
+    });
+
+    try {
+      const useMetaForMod = isMacPlatform(navigator.platform);
+      const palette = page.getByTestId("command-palette");
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "k",
+          metaKey: useMetaForMod,
+          ctrlKey: !useMetaForMod,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+
+      await expect.element(palette).toBeInTheDocument();
+      await expect.element(palette.getByText("Split right", { exact: true })).toBeInTheDocument();
+      await expect.element(palette.getByText("Split down", { exact: true })).toBeInTheDocument();
+
+      await palette.getByText("Split right", { exact: true }).click();
+
+      await expect
+        .element(page.getByPlaceholder("Split right with a thread or project..."))
+        .toBeInTheDocument();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("filters command palette results as the user types", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,

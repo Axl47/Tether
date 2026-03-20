@@ -6,6 +6,7 @@ import { useDebouncedValue } from "@tanstack/react-pacer";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
+  ColumnsIcon,
   CornerLeftUpIcon,
   FolderIcon,
   FolderPlusIcon,
@@ -39,6 +40,10 @@ import {
 } from "../lib/projectPaths";
 import { addProjectFromPath } from "../lib/projectAdd";
 import { serverConfigQueryOptions } from "../lib/serverReactQuery";
+import {
+  openReplaceFocusedCommandPalette,
+  openSplitCommandPaletteWithPreview,
+} from "../lib/splitPalette";
 import { cn, newThreadId } from "../lib/utils";
 import { readNativeApi } from "../nativeApi";
 import { useSplitViewStore, findLeafByThreadId, type SplitDirection } from "../splitViewStore";
@@ -149,7 +154,8 @@ function OpenCommandPaletteDialog() {
   const [debouncedBrowsePath] = useDebouncedValue(query, { wait: 200 });
   const [highlightedItemValue, setHighlightedItemValue] = useState<string | null>(null);
   const { settings } = useAppSettings();
-  const { activeDraftThread, activeThread, handleNewThread, projects } = useHandleNewThread();
+  const { activeDraftThread, activeThread, handleNewThread, projects, routeThreadId } =
+    useHandleNewThread();
   const threads = useStore((store) => store.threads);
   const serverConfigQuery = useQuery(serverConfigQueryOptions());
   const keybindings = serverConfigQuery.data?.keybindings ?? [];
@@ -157,6 +163,9 @@ function OpenCommandPaletteDialog() {
   const currentView = viewStack.at(-1) ?? null;
   const paletteMode = getCommandPaletteMode({ currentView, isBrowsing });
   const [browseGeneration, setBrowseGeneration] = useState(0);
+  const openPalette = useCommandPaletteStore((store) => store.openPalette);
+  const splitGroup = useSplitViewStore((store) => store.group);
+  const createDraftThread = useComposerDraftStore((store) => store.createDraftThread);
 
   const projectCwdById = useMemo(
     () => new Map(projects.map((project) => [project.id, project.cwd] as const)),
@@ -171,10 +180,50 @@ function OpenCommandPaletteDialog() {
   const currentProjectCwd = currentProjectId
     ? (projectCwdById.get(currentProjectId) ?? null)
     : null;
+  const splitSourceThreadId = activeThread?.id ?? routeThreadId;
   const relativePathNeedsActiveProject =
     isExplicitRelativeProjectPath(query.trim()) && currentProjectCwd === null;
   const debouncedRelativePathNeedsActiveProject =
     isExplicitRelativeProjectPath(debouncedBrowsePath.trim()) && currentProjectCwd === null;
+
+  const openSplitPalette = useCallback(
+    (mode: "split-right" | "split-down") => {
+      openSplitCommandPaletteWithPreview({
+        mode,
+        activeThreadId: splitSourceThreadId,
+        previewProjectId: currentProjectId,
+        branch: activeThread?.branch ?? null,
+        worktreePath: activeThread?.worktreePath ?? null,
+        envMode: activeDraftThread?.envMode ?? (activeThread?.worktreePath ? "worktree" : "local"),
+        runtimeMode:
+          activeDraftThread?.runtimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE,
+        interactionMode:
+          activeDraftThread?.interactionMode ?? activeThread?.interactionMode ?? "default",
+        createDraftThread,
+        openCommandPalette: openPalette,
+      });
+    },
+    [
+      activeDraftThread?.envMode,
+      activeDraftThread?.interactionMode,
+      activeDraftThread?.runtimeMode,
+      activeThread?.branch,
+      activeThread?.interactionMode,
+      activeThread?.runtimeMode,
+      activeThread?.worktreePath,
+      createDraftThread,
+      currentProjectId,
+      openPalette,
+      splitSourceThreadId,
+    ],
+  );
+
+  const openReplaceFocusedSplitPalette = useCallback(() => {
+    openReplaceFocusedCommandPalette({
+      activeThreadId: splitSourceThreadId,
+      openCommandPalette: openPalette,
+    });
+  }, [openPalette, splitSourceThreadId]);
 
   const { data: browseEntries = [] } = useQuery({
     queryKey: ["filesystemBrowse", debouncedBrowsePath, currentProjectCwd],
@@ -375,6 +424,52 @@ function OpenCommandPaletteDialog() {
       },
     });
 
+    if (splitSourceThreadId) {
+      actionItems.push({
+        kind: "action",
+        value: "action:split-right",
+        label: "split right pane column workspace",
+        title: "Split right",
+        searchText: "split right pane column side by side workspace",
+        icon: <ColumnsIcon className={ITEM_ICON_CLASS} />,
+        shortcutCommand: "chat.splitRight",
+        keepOpen: true,
+        run: async () => {
+          openSplitPalette("split-right");
+        },
+      });
+
+      actionItems.push({
+        kind: "action",
+        value: "action:split-down",
+        label: "split down pane row workspace",
+        title: "Split down",
+        searchText: "split down pane row stacked workspace",
+        icon: <ColumnsIcon className={ITEM_ICON_CLASS} />,
+        shortcutCommand: "chat.splitDown",
+        keepOpen: true,
+        run: async () => {
+          openSplitPalette("split-down");
+        },
+      });
+    }
+
+    if (splitGroup && splitSourceThreadId) {
+      actionItems.push({
+        kind: "action",
+        value: "action:replace-focused-pane",
+        label: "replace focused pane split workspace",
+        title: "Replace focused pane",
+        searchText: "replace focused pane split workspace",
+        icon: <ColumnsIcon className={ITEM_ICON_CLASS} />,
+        shortcutCommand: "chat.replaceFocusedPane",
+        keepOpen: true,
+        run: async () => {
+          openReplaceFocusedSplitPalette();
+        },
+      });
+    }
+
     const groups: CommandPaletteGroup[] = [];
     if (actionItems.length > 0) {
       groups.push({
@@ -403,6 +498,10 @@ function OpenCommandPaletteDialog() {
     projects,
     recentThreadItems,
     settings.defaultThreadEnvMode,
+    splitGroup,
+    splitSourceThreadId,
+    openReplaceFocusedSplitPalette,
+    openSplitPalette,
   ]);
 
   const activeGroups = currentView ? currentView.groups : rootGroups;

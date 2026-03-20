@@ -127,7 +127,10 @@ import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { summarizeTurnDiffStats } from "../lib/turnDiffTree";
 import { useCommandPaletteStore } from "../commandPaletteStore";
-import { findLeafByThreadId, useSplitViewStore } from "../splitViewStore";
+import {
+  openReplaceFocusedCommandPalette,
+  openSplitCommandPaletteWithPreview,
+} from "../lib/splitPalette";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import BranchToolbar from "./BranchToolbar";
 import GitActionsControl from "./GitActionsControl";
@@ -861,51 +864,18 @@ export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) 
 
   const openSplitCommandPalette = useCallback(
     (mode: "split-right" | "split-down") => {
-      if (!activeThreadId) {
-        return;
-      }
-
-      const splitStore = useSplitViewStore.getState();
-      const sourceLeafId = splitStore.group?.focusedLeafId ?? null;
-      const previewProjectId =
-        activeProject?.id ?? activeThread?.projectId ?? draftThread?.projectId;
-      if (!previewProjectId) {
-        openCommandPalette({
-          mode,
-          sourceThreadId: activeThreadId,
-          sourceLeafId,
-        });
-        return;
-      }
-
-      const previewId = newThreadId();
-      createDraftThread(previewId, previewProjectId, {
-        createdAt: new Date().toISOString(),
+      openSplitCommandPaletteWithPreview({
+        mode,
+        activeThreadId,
+        previewProjectId:
+          activeProject?.id ?? activeThread?.projectId ?? draftThread?.projectId ?? null,
         branch: activeThread?.branch ?? null,
         worktreePath: activeThread?.worktreePath ?? null,
         envMode: draftThread?.envMode ?? (activeThread?.worktreePath ? "worktree" : "local"),
         runtimeMode,
         interactionMode,
-      });
-
-      const direction = mode === "split-right" ? "horizontal" : "vertical";
-      if (splitStore.group && sourceLeafId) {
-        splitStore.splitLeaf(sourceLeafId, previewId, direction, false);
-      } else {
-        splitStore.splitThread(activeThreadId, previewId, direction, false);
-      }
-
-      const previewGroup = useSplitViewStore.getState().group;
-      const nextPreviewLeafId = previewGroup
-        ? (findLeafByThreadId(previewGroup.root, previewId)?.id ?? null)
-        : null;
-
-      openCommandPalette({
-        mode,
-        sourceThreadId: activeThreadId,
-        sourceLeafId,
-        previewThreadId: previewId,
-        previewLeafId: nextPreviewLeafId,
+        createDraftThread,
+        openCommandPalette,
       });
     },
     [
@@ -922,14 +892,9 @@ export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) 
   );
 
   const openReplaceFocusedPalette = useCallback(() => {
-    const splitStore = useSplitViewStore.getState();
-    if (!splitStore.group) {
-      return;
-    }
-    openCommandPalette({
-      mode: "replace-focused",
-      sourceThreadId: activeThreadId,
-      sourceLeafId: splitStore.group.focusedLeafId,
+    openReplaceFocusedCommandPalette({
+      activeThreadId,
+      openCommandPalette,
     });
   }, [activeThreadId, openCommandPalette]);
 
