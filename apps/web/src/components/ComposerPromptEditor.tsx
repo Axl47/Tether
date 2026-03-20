@@ -375,6 +375,9 @@ function $setComposerEditorPrompt(prompt: string): void {
       paragraph.append($createComposerMentionNode(segment.path));
       continue;
     }
+    if (segment.type === "terminal-context") {
+      continue;
+    }
     $appendTextWithLineBreaks(paragraph, segment.text);
   }
 }
