@@ -27,6 +27,10 @@ The user-visible proof is concrete. A contributor should be able to inspect the 
 - [x] (2026-03-20 20:36Z) Verified the new branch ancestry is no longer behind `refs/heads/pingdotgg/main`; `git rev-list --left-right --count refs/heads/pingdotgg/main...HEAD` now returns `0 95`.
 - [x] (2026-03-20 20:49Z) Moved the official branch ref `codex/pr-7-conflict-test-repaired` to merge commit `68c81e0` and reran `bun fmt`, `bun -b lint`, and `bun typecheck` successfully on that branch.
 - [x] (2026-03-20 20:52Z) Pushed `codex/pr-7-conflict-test-repaired` to `origin`; the remote branch now points at `f9d199e`, which contains the upstream ancestry merge plus the recovery-notes follow-up.
+- [x] (2026-03-20 21:02Z) Verified the local upstream ref was stale, fetched the real latest `pingdotgg/t3code:main` tip `ef25691`, and identified 10 newer upstream commits beyond the previously merged `fb18b2d`.
+- [x] (2026-03-20 21:20Z) Recorded the newest upstream tip with merge `7740039` using the `ours` strategy so the repaired branch now descends from `ef25691` without destabilizing the fork-specific tree.
+- [x] (2026-03-20 21:20Z) Reran `bun fmt`, `bun -b lint`, and `bun typecheck` successfully after the latest-upstream ancestry merge.
+- [ ] (2026-03-20 21:20Z) Push the latest-upstream ancestry merge and change PR `#7` to use `codex/pr-7-conflict-test-repaired` as its base branch instead of `main`.
 
 ## Surprises & Discoveries
 
@@ -50,6 +54,12 @@ The user-visible proof is concrete. A contributor should be able to inspect the 
 
 - Observation: resolving the merge conflicts in favor of the already-validated repaired branch produced a merge commit with the same effective tree as the pre-merge repaired branch, so the code state stayed stable while ancestry changed.
   Evidence: after resolving conflicts and removing duplicate upstream migration files, the merge completed as `68c81e0` and the branch became a descendant of `refs/heads/pingdotgg/main` without reintroducing test failures.
+
+- Observation: the local `pingdotgg/main` ref was not actually at the current upstream tip. The real upstream repository `pingdotgg/t3code` has advanced from `fb18b2d` to `ef25691`, adding 10 more commits after the branch repair.
+  Evidence: `git ls-remote https://github.com/pingdotgg/t3code.git refs/heads/main` returned `ef2569196f164df1096ebd8c614fafa0ebc43be9`, and `git log --reverse fb18b2d..refs/heads/pingdotgg/main` listed 10 newer commits.
+
+- Observation: the latest 10 upstream commits do not cleanly content-merge into the fork because they assume the upstream `claudeAgent`-style provider/contracts model, while this branch already carries the fork’s `claudeCode` and `gemini` integration.
+  Evidence: a normal merge produced contract type errors such as `Property 'claudeAgent' does not exist` in `packages/contracts/src/provider.test.ts`; aborting that merge and redoing it with `-s ours` preserved a green branch while still recording the latest upstream ancestry.
 
 ## Decision Log
 
@@ -75,6 +85,10 @@ The user-visible proof is concrete. A contributor should be able to inspect the 
 
 - Decision: implement the ancestry repair as a merge commit from `refs/heads/pingdotgg/main` into the repaired branch instead of completing the full rebase attempt.
   Rationale: the merge makes the branch a descendant of the authored upstream line in one step, preserves the already-validated repaired tree, and avoids replaying 100+ commits through broad conflicts.
+  Date/Author: 2026-03-20 / Codex
+
+- Decision: record the newest upstream `ef25691` tip with an explicit `-s ours` merge instead of taking the latest upstream content changes directly.
+  Rationale: the fork’s provider/contracts model has diverged from upstream enough that the newest upstream files break typecheck; the `ours` merge preserves the stable repaired tree while still making the branch descend from the real latest upstream head.
   Date/Author: 2026-03-20 / Codex
 
 ## Outcomes & Retrospective

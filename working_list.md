@@ -3,6 +3,7 @@
 ## Pending
 
 ## In Progress
+- [~] Repoint PR `#7` to use `codex/pr-7-conflict-test-repaired` as its base branch after pushing the latest upstream-history merge
 
 ## Done
 
@@ -20,3 +21,5 @@
 - [x] Move `codex/pr-7-conflict-test-repaired` to the authorship-corrected merge commit
 - [x] Re-run `bun fmt`, `bun -b lint`, and `bun typecheck` on the official repaired branch
 - [x] Push the authorship-corrected repaired branch to `origin`
+- [x] Fetch the real latest `pingdotgg/t3code:main` tip and merge it into the repaired branch history
+- [x] Re-run `bun fmt`, `bun -b lint`, and `bun typecheck` after recording the latest upstream ancestry
