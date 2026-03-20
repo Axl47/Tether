@@ -2,8 +2,7 @@
 
 ## Pending
 
-- [ ] Import original cloud branch history if a bundle or patch series becomes available
-- [ ] Push or hand off the repaired branch once the user confirms the preferred publish step
+- [ ] Push or hand off the authorship-repaired branch once the user confirms the preferred publish step
 
 ## In Progress
 
@@ -18,3 +17,7 @@
 - [x] Reconstruct `pr-7-conflict-test` on top of `main` as a reviewable commit series
 - [x] Fix the queued-message composer regression and re-run focused validation
 - [x] Run browser chat coverage for the replayed browser-only chat flows
+- [x] Confirm that the repaired branch still appears behind upstream because it is based on local `main` rather than the authored `pingdotgg/main` line
+- [x] Create an authorship-corrected branch that merges the authored `pingdotgg/main` line into the repaired branch without changing the validated tree
+- [x] Move `codex/pr-7-conflict-test-repaired` to the authorship-corrected merge commit
+- [x] Re-run `bun fmt`, `bun -b lint`, and `bun typecheck` on the official repaired branch

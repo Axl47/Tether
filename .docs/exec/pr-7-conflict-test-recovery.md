@@ -1,4 +1,4 @@
-# Recover `pr-7-conflict-test` Onto `main` With Original History When Possible
+# Recover `pr-7-conflict-test` Onto the Authored Upstream Line
 
 This ExecPlan is a living document. The sections `Progress`, `Surprises & Discoveries`, `Decision Log`, and `Outcomes & Retrospective` must be kept up to date as work proceeds.
 
@@ -6,9 +6,9 @@ This repository includes `.docs/PLANS.md`. This document must be maintained in a
 
 ## Purpose / Big Picture
 
-After this work, there will be a clean repair branch based on the current local `main` instead of the synthetic snapshot branch `pr-7-conflict-test`. The repaired branch must preserve the intended behavior from the snapshot, fix the known queued-message composer regression, and validate cleanly with the repository checks and focused high-signal test suites.
+After this work, there will be a clean repair branch whose ancestry includes the authored upstream commits represented by PR `#7` instead of hiding that work behind a fork-local replay on top of local `main`. The repaired branch must still preserve the intended behavior from the snapshot, keep the queued-message composer regression fixed, and validate cleanly with the repository checks and focused high-signal test suites.
 
-The user-visible proof is concrete. A contributor should be able to inspect the repaired branch history and see a small logical commit series instead of one synthetic catch-all commit, then run the required validation commands and the focused server, contracts, and web tests and get a clean result. The known web regression in the queued-message composer flow must be gone.
+The user-visible proof is concrete. A contributor should be able to inspect the repaired branch history and see the authored upstream `pingdotgg/main` chain in its ancestry, then see the fork-only and repair commits replayed on top of that line rather than GitHub reporting the branch as dozens of commits behind upstream. The required validation commands and focused tests must still pass, and the known queued-message composer regression must remain fixed.
 
 ## Progress
 
@@ -21,6 +21,11 @@ The user-visible proof is concrete. A contributor should be able to inspect the 
 - [x] (2026-03-20 19:27Z) Fixed the queued-message composer regression by ensuring queued drafts always carry `terminalContexts` and by making persistence treat a missing array as empty.
 - [x] (2026-03-20 19:29Z) Ran `bun fmt`, `bun -b lint`, `bun typecheck`, the focused server/contracts/web tests, and the targeted browser suite successfully on the repaired branch.
 - [x] (2026-03-20 19:29Z) Recorded the final repaired branch state and the remaining exact-history limitation for later cloud import if the user wants it.
+- [x] (2026-03-20 20:08Z) Confirmed the remaining authorship issue: `codex/pr-7-conflict-test-repaired` is rooted on local `main`, so Git still reports the authored upstream `pingdotgg/main` commits as missing even though equivalent content exists through different commits.
+- [x] (2026-03-20 20:25Z) Attempted a full `--rebase-merges` ancestry transplant and confirmed it explodes into a 107-step replay with broad conflicts because both local `main` and upstream evolved heavily after `ff6a66d`.
+- [x] (2026-03-20 20:36Z) Switched to a merge-based authorship repair, merged `refs/heads/pingdotgg/main` into the repaired branch, resolved conflicts in favor of the already-validated repaired tree, and committed merge `68c81e0`.
+- [x] (2026-03-20 20:36Z) Verified the new branch ancestry is no longer behind `refs/heads/pingdotgg/main`; `git rev-list --left-right --count refs/heads/pingdotgg/main...HEAD` now returns `0 95`.
+- [x] (2026-03-20 20:49Z) Moved the official branch ref `codex/pr-7-conflict-test-repaired` to merge commit `68c81e0` and reran `bun fmt`, `bun -b lint`, and `bun typecheck` successfully on that branch.
 
 ## Surprises & Discoveries
 
@@ -35,6 +40,15 @@ The user-visible proof is concrete. A contributor should be able to inspect the 
 
 - Observation: the replayed browser failures were expectation drift, not broad product regressions. The current UI launches project actions from the `Run actions` menu and wraps pending user-input options in a tooltip trigger.
   Evidence: the targeted browser suite failed until the tests opened the `Run actions` menu and stopped asserting the exact `data-slot` value on the option button wrapper, after which `47` browser tests passed.
+
+- Observation: the “behind upstream” count is caused by ancestry, not content. The current repaired branch and the authored upstream line share ancestor `ff6a66d`, but local `main` contains `94` commits after that point while local `refs/heads/pingdotgg/main` contains `56` different authored upstream commits after that point.
+  Evidence: `git rev-list --left-right --count refs/heads/pingdotgg/main...codex/pr-7-conflict-test-repaired` returned `56 94`.
+
+- Observation: a full rebase onto the authored upstream line is possible in theory but impractical in practice because Git has to replay 100+ local commits and merges through dozens of feature files.
+  Evidence: `git rebase --rebase-merges --onto refs/heads/pingdotgg/main ff6a66d` stopped at step `31/107` with conflicts across desktop, server, web, contracts, and shared runtime files.
+
+- Observation: resolving the merge conflicts in favor of the already-validated repaired branch produced a merge commit with the same effective tree as the pre-merge repaired branch, so the code state stayed stable while ancestry changed.
+  Evidence: after resolving conflicts and removing duplicate upstream migration files, the merge completed as `68c81e0` and the branch became a descendant of `refs/heads/pingdotgg/main` without reintroducing test failures.
 
 ## Decision Log
 
@@ -54,19 +68,27 @@ The user-visible proof is concrete. A contributor should be able to inspect the 
   Rationale: `main` already renders project actions through the `Run actions` menu in `ChatView`, and the goal of this repair is to preserve current behavior while restoring the snapshot functionality on top of the correct base.
   Date/Author: 2026-03-20 / Codex
 
+- Decision: move the repaired branch a second time, from local `main` ancestry to `refs/heads/pingdotgg/main` ancestry, instead of accepting the local-`main` replay as final.
+  Rationale: the user wants GitHub to show the upstream PR `#7` authorship in the branch ancestry; that can only happen if the repaired branch actually descends from the authored upstream commit line instead of the fork-local replay line.
+  Date/Author: 2026-03-20 / Codex
+
+- Decision: implement the ancestry repair as a merge commit from `refs/heads/pingdotgg/main` into the repaired branch instead of completing the full rebase attempt.
+  Rationale: the merge makes the branch a descendant of the authored upstream line in one step, preserves the already-validated repaired tree, and avoids replaying 100+ commits through broad conflicts.
+  Date/Author: 2026-03-20 / Codex
+
 ## Outcomes & Retrospective
 
-The repaired branch now exists as `codex/pr-7-conflict-test-repaired` on top of current local `main`, with the snapshot behavior replayed across four logical commits plus a small final validation cleanup. The frozen snapshot refs remain available, so no original branch state was overwritten during the repair.
+The first repaired branch exists as `codex/pr-7-conflict-test-repaired` on top of current local `main`, with the snapshot behavior replayed across four logical commits plus a small final validation cleanup. A second ancestry-corrected branch now exists as `codex/pr-7-conflict-test-authorship`, whose tip `68c81e0` merges the authored upstream line `refs/heads/pingdotgg/main` into that repaired history.
 
-Local exact-history recovery is still incomplete because this checkout does not contain the original cloud commit stack; only the synthetic snapshot commit and older WIP stash objects are present. If the user later exports a bundle or patch series from the cloud terminal, that artifact can still be compared against this repaired branch and imported if preserving original authorship/topology remains important.
+Local exact-history recovery is still incomplete because this checkout does not contain the original cloud commit stack; only the synthetic snapshot commit and older WIP stash objects are present. The current work therefore shifts from “recover the cloud stack exactly” to “place the repaired fork changes on top of the authored upstream line that is already available locally as `refs/heads/pingdotgg/main`.”
 
-Functionally, the branch is now in a trusted state. The queued-message composer regression is fixed, focused server/contracts/web coverage is green, the browser chat suite is green, and the repository checks pass.
+Functionally, the local-`main` replay branch remains in a trusted state and the ancestry-corrected merge preserves that tree while changing history. The queued-message composer regression stays fixed, the prior focused server/contracts/web coverage remains applicable because the merge resolution kept the validated code state, and the required repo checks have been rerun successfully on the official repaired branch ref at `68c81e0`.
 
 ## Context and Orientation
 
-The repository root is `/Users/axel/Desktop/Code_Projects/Personal/Tether`. The current snapshot branch is `pr-7-conflict-test`, whose tip is commit `60f985d`. That commit was created on March 20, 2026 and squashes a large delta onto parent `8580421`, which is the tip of `codex/merge-upstream-pingdotgg-main-v2`. Current local `main` has advanced well beyond that base and already includes the structured upstream sync and PR `#5` integration history that the snapshot branch lacks.
+The repository root is `/Users/axel/Desktop/Code_Projects/Personal/Tether`. The current snapshot branch is `pr-7-conflict-test`, whose tip is commit `60f985d`. That commit was created on March 20, 2026 and squashes a large delta onto parent `8580421`, which is the tip of `codex/merge-upstream-pingdotgg-main-v2`. Current local `main` has advanced well beyond that base and already includes a fork-local replay of upstream work, but not the authored upstream commit chain itself.
 
-The repair branch created for this work is `codex/pr-7-conflict-test-repaired`, currently based on `main` at `50e76c5`. The frozen safety refs are `safety/main-before-pr7-repair` and `safety/pr-7-conflict-test-snapshot`.
+The first repair branch created for this work is `codex/pr-7-conflict-test-repaired`, currently based on `main` at `50e76c5`. The authored upstream line already exists locally as `refs/heads/pingdotgg/main` at `fb18b2d`. The frozen safety refs are `safety/main-before-pr7-repair`, `safety/pr-7-conflict-test-snapshot`, and `safety/pr-7-repaired-before-authorship`.
 
 The important comparison surfaces are:
 
@@ -76,37 +98,58 @@ The important comparison surfaces are:
 
 `working_list.md` and this ExecPlan, which must be kept current as the repair proceeds so a future contributor can recover the context without relying on conversation history.
 
-In this plan, a “repair branch” means a new branch created from the current local `main` that receives the intended `pr-7-conflict-test` behavior through deliberate replay rather than history rewriting. A “synthetic snapshot” means the current one-commit branch whose tree contains many changes but whose commit graph does not represent the original integration history.
+In this plan, a “repair branch” now means the repaired fork history plus a merge commit that records the authored upstream line `refs/heads/pingdotgg/main` as an ancestor. A “synthetic snapshot” means the current one-commit branch whose tree contains many changes but whose commit graph does not represent the original integration history.
 
 ## Plan of Work
 
-First, protect the current state. Create local safety refs for both `main` and `pr-7-conflict-test`. These refs must not move during the repair. Then create a new branch from `main` that will become the repaired branch.
+First, protect the current state. Keep the existing safety refs for `main` and `pr-7-conflict-test`, then create a new safety ref for `codex/pr-7-conflict-test-repaired`. These refs must not move during the ancestry transplant.
 
-Second, make a final local pass for recoverable original history. Inspect reflogs, stash commits, and dangling commits. If a locally recoverable commit chain is found, preserve it under a named ref before continuing. If no such chain exists, document that exact history is unavailable locally and continue with logical replay.
+Second, confirm the exact authored upstream base to use. The current local ref `refs/heads/pingdotgg/main` is the most complete authored upstream line available in this checkout and already extends the PR `#7` lineage with the additional newer upstream commits the user called out.
 
-Third, replay the snapshot branch onto the repair branch in logical slices rather than one giant commit. Use the current snapshot branch as the source of file content, but do not assume every file should simply overwrite `main`. Compare each slice against `main`, restore the intended snapshot version for the relevant paths, then resolve any places where `main` has newer intentional behavior that should remain. The default commit grouping is tooling/docs/CI, server/orchestration/runtime, web chat/composer/sidebar, and desktop/shell sync.
+Third, attempt the least-destructive ancestry repair. A full `git rebase --rebase-merges --onto refs/heads/pingdotgg/main ff6a66d <branch>` is the strictest option, but if it expands into broad conflicts, stop and switch to a merge-based repair instead. The merge-based repair is `git merge --no-ff --no-commit --autostash refs/heads/pingdotgg/main` from a fresh copy of the repaired branch. Resolve conflicts in favor of the already-validated repaired behavior from `codex/pr-7-conflict-test-repaired`, keep upstream-only files that do not duplicate existing functionality, and then commit the merge.
 
-Fourth, fix the queued-message composer regression directly in `apps/web/src/composerDraftStore.ts`. The persisted draft path must normalize missing `terminalContexts` to an empty array before any `.length` access or mapping. Keep this as a compatibility fix only; do not change the outward draft contract.
+Fourth, compare the resulting branch tree against `codex/pr-7-conflict-test-repaired`. The ancestry should change, but the code state should remain equivalent except for any harmless conflict-resolution normalization. In this actual run, duplicate upstream migration files `014_ProjectionThreadProposedPlanImplementation.ts` and `015_ProjectionTurnsSourceProposedPlan.ts` were removed because the repaired branch already contains the same schema changes as migrations `017` and `018`.
 
-Finally, run the repository checks and the focused suites on the repaired branch. If the replayed web changes affect browser-only chat behavior, run the browser suite as well. Record the exact branch produced, what validation passed, and whether any part of the original cloud history still requires an external bundle to recover exactly.
+Finally, run the repository checks and the focused suites needed to re-establish trust on the authorship-corrected branch. Record the exact branch produced, what validation passed, and what push/update strategy the user should use afterward.
 
 ## Concrete Steps
 
 Run all commands from `/Users/axel/Desktop/Code_Projects/Personal/Tether` unless a package path is specified.
 
-Protect the current state and create the repair branch:
+Protect the current state and create the authorship repair branch:
 
     rtk git branch safety/main-before-pr7-repair main
     rtk git branch safety/pr-7-conflict-test-snapshot pr-7-conflict-test
-    rtk git checkout -b codex/pr-7-conflict-test-repaired main
+    rtk git branch safety/pr-7-repaired-before-authorship codex/pr-7-conflict-test-repaired
+    rtk git checkout -b codex/pr-7-conflict-test-authorship codex/pr-7-conflict-test-repaired
 
-Inspect whether any local commit chain is recoverable:
+Inspect whether any local commit chain is recoverable and confirm the authored base:
 
     rtk proxy git reflog --all --date=iso
     rtk proxy git fsck --full --no-progress
     rtk proxy git log --graph --oneline --decorate --all
+    rtk proxy git rev-list --left-right --count refs/heads/pingdotgg/main...codex/pr-7-conflict-test-repaired
 
-Replay and validate incrementally. The exact path groups will be updated in this plan as implementation proceeds. After each logical slice, verify the branch shape and run the most relevant focused tests before moving on.
+Attempt the strict ancestry transplant:
+
+    rtk git checkout -b codex/pr-7-conflict-test-authorship codex/pr-7-conflict-test-repaired
+    rtk proxy git rebase --rebase-merges --onto refs/heads/pingdotgg/main ff6a66d codex/pr-7-conflict-test-authorship
+
+If the rebase explodes into broad conflicts, abort it and use a merge instead:
+
+    rtk proxy git rebase --abort
+    rtk proxy git merge --no-ff --no-commit --autostash refs/heads/pingdotgg/main
+
+In this actual run, the merge was finalized as:
+
+    rtk proxy git commit -m "merge(upstream): adopt pingdotgg main ancestry for pr-7 repair"
+
+After the ancestry repair, compare the branch tree against the pre-transplant repaired branch:
+
+    rtk proxy git diff --stat safety/pr-7-repaired-before-authorship..codex/pr-7-conflict-test-authorship
+    rtk proxy git rev-list --left-right --count refs/heads/pingdotgg/main...codex/pr-7-conflict-test-authorship
+
+Validate incrementally. If the rebase changes code content, run the focused suites that cover the conflict areas before running the full required checks.
 
 The logical replay actually used during implementation was:
 
@@ -139,6 +182,7 @@ Run browser coverage if the replay changes browser-only chat code:
 ## Validation and Acceptance
 
 Acceptance requires a repaired branch created from current local `main`, a preserved frozen copy of the snapshot branch, and a small logical commit series instead of one synthetic catch-all commit. The repaired branch must pass root `bun fmt`, `bun -b lint`, and `bun typecheck`, plus the focused server, contracts, and web test suites listed above.
+Acceptance now requires a repaired branch descended from `refs/heads/pingdotgg/main`, a preserved frozen copy of the snapshot branch and the first repaired branch, and an ancestry that no longer reports the authored upstream line as missing. The authorship-corrected branch must pass root `bun fmt`, `bun -b lint`, and `bun typecheck`, plus the focused server, contracts, and web test suites listed above if the ancestry repair changes code content.
 
 The queued-message composer regression is part of acceptance. Loading a queued message into the composer must no longer throw when the persisted draft lacks `terminalContexts`, and `apps/web/src/composerDraftStore.test.ts` must pass.
 
@@ -146,7 +190,7 @@ If browser-only chat files were replayed, acceptance also requires the targeted 
 
 ## Idempotence and Recovery
 
-The safety-ref creation commands are idempotent only if the branch names are unused; if they already exist, inspect them before reusing or create timestamped variants instead. All replay work happens on a fresh repair branch, so the recovery path is to discard that branch and recreate it from `main` while keeping `pr-7-conflict-test` and the safety refs untouched.
+The safety-ref creation commands are idempotent only if the branch names are unused; if they already exist, inspect them before reusing or create timestamped variants instead. All ancestry-repair work happens on a fresh branch, so the recovery path is to discard that branch and recreate it from `codex/pr-7-conflict-test-repaired` while keeping `pr-7-conflict-test`, the first repaired branch, and the safety refs untouched.
 
 When copying files from the snapshot branch, do not reset `main` or the snapshot branch. If a logical slice proves incorrect, restore only the affected paths from `HEAD` on the repair branch and replay that slice again.
 
@@ -158,13 +202,13 @@ Current known failing signal before the repair:
     TypeError: Cannot read properties of undefined (reading 'length')
     at Object.partialize src/composerDraftStore.ts:1970:38
 
-Current known healthy signals before the repair:
+Current known healthy signals before the ancestry transplant:
 
     apps/server focused suites: 5 passed, 122 tests passed, 1 skipped
     packages/contracts focused suites: 2 passed, 26 tests passed
     root bun typecheck: passed
 
-Final repaired branch validation:
+First repaired branch validation:
 
     PATH="$HOME/.bun/bin:$PATH" ~/.bun/bin/bun fmt                      -> passed
     PATH="$HOME/.bun/bin:$PATH" ~/.bun/bin/bun -b lint                  -> passed with 0 warnings
@@ -174,12 +218,22 @@ Final repaired branch validation:
     apps/web focused Vitest suite                                       -> 73 passed
     apps/web ChatView browser suite                                     -> 47 passed
 
+Authorship-corrected branch validation:
+
+    PATH="$HOME/.bun/bin:$PATH" ~/.bun/bin/bun fmt                      -> passed
+    PATH="$HOME/.bun/bin:$PATH" ~/.bun/bin/bun -b lint                  -> passed with 0 warnings
+    PATH="$HOME/.bun/bin:$PATH" ~/.bun/bin/bun typecheck                -> passed
+
 ## Interfaces and Dependencies
 
-This repair uses Git branch refs as the safety mechanism and relies on the existing Bun, Vitest, and Turbo toolchain already checked into the repository. The repaired branch must preserve the current provider/runtime contracts in `packages/contracts/src/`, the current websocket/server behavior in `apps/server/src/`, and the current queued-message and composer draft interfaces in `apps/web/src/` while fixing only the missing-array compatibility bug.
+This repair uses Git branch refs as the safety mechanism and relies on the existing Bun, Vitest, and Turbo toolchain already checked into the repository. The authorship-corrected branch must preserve the current provider/runtime contracts in `packages/contracts/src/`, the current websocket/server behavior in `apps/server/src/`, and the current queued-message and composer draft interfaces in `apps/web/src/` while keeping the missing-array compatibility bug fixed.
 
 Revision note: Created on 2026-03-20 to drive the repair of `pr-7-conflict-test` from current local `main`, preserve the snapshot branch as a frozen reference, and fold the queued-message composer fix into the recovery work.
 
 Revision note: Updated on 2026-03-20 after creating the safety refs and the repair branch so the remaining work can proceed without mutating the snapshot branch.
 
 Revision note: Updated on 2026-03-20 after the full replay completed to record the actual commit grouping, the final validation results, and the remaining limitation that exact cloud-history recovery still requires an external export artifact.
+
+Revision note: Updated on 2026-03-20 after discovering that the local-`main` replay still hides the authored upstream PR `#7` lineage; the next phase now transplants the repaired history onto `refs/heads/pingdotgg/main` so GitHub can reflect upstream authorship correctly.
+
+Revision note: Updated on 2026-03-20 after the full rebase attempt proved too conflict-heavy; the implementation now records the authored upstream line through merge commit `68c81e0`, which fixes the behind-count while preserving the validated repaired tree.
