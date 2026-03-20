@@ -2,8 +2,6 @@
 
 ## Pending
 
-- [ ] Push or hand off the authorship-repaired branch once the user confirms the preferred publish step
-
 ## In Progress
 
 ## Done
@@ -21,3 +19,4 @@
 - [x] Create an authorship-corrected branch that merges the authored `pingdotgg/main` line into the repaired branch without changing the validated tree
 - [x] Move `codex/pr-7-conflict-test-repaired` to the authorship-corrected merge commit
 - [x] Re-run `bun fmt`, `bun -b lint`, and `bun typecheck` on the official repaired branch
+- [x] Push the authorship-corrected repaired branch to `origin`

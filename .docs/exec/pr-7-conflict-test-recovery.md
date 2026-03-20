@@ -26,6 +26,7 @@ The user-visible proof is concrete. A contributor should be able to inspect the 
 - [x] (2026-03-20 20:36Z) Switched to a merge-based authorship repair, merged `refs/heads/pingdotgg/main` into the repaired branch, resolved conflicts in favor of the already-validated repaired tree, and committed merge `68c81e0`.
 - [x] (2026-03-20 20:36Z) Verified the new branch ancestry is no longer behind `refs/heads/pingdotgg/main`; `git rev-list --left-right --count refs/heads/pingdotgg/main...HEAD` now returns `0 95`.
 - [x] (2026-03-20 20:49Z) Moved the official branch ref `codex/pr-7-conflict-test-repaired` to merge commit `68c81e0` and reran `bun fmt`, `bun -b lint`, and `bun typecheck` successfully on that branch.
+- [x] (2026-03-20 20:52Z) Pushed `codex/pr-7-conflict-test-repaired` to `origin`; the remote branch now points at `f9d199e`, which contains the upstream ancestry merge plus the recovery-notes follow-up.
 
 ## Surprises & Discoveries
 
