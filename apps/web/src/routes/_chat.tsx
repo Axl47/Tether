@@ -3,15 +3,20 @@ import { useQuery } from "@tanstack/react-query";
 import { Outlet, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 
+import { CommandPalette } from "../components/CommandPalette";
+import { useCommandPaletteStore } from "../commandPaletteStore";
 import ThreadSidebar from "../components/Sidebar";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
+import {
+  startNewLocalThreadFromContext,
+  startNewThreadFromContext,
+} from "../lib/chatThreadActions";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { serverConfigQueryOptions } from "../lib/serverReactQuery";
 import { resolveShortcutCommand } from "../keybindings";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { Sidebar, SidebarProvider } from "~/components/ui/sidebar";
-import { resolveSidebarNewThreadEnvMode } from "~/components/Sidebar.logic";
 import { useAppSettings } from "~/appSettings";
 
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
@@ -21,6 +26,8 @@ function ChatRouteGlobalShortcuts() {
   const selectedThreadIdsSize = useThreadSelectionStore((state) => state.selectedThreadIds.size);
   const { activeDraftThread, activeThread, handleNewThread, projects, routeThreadId } =
     useHandleNewThread();
+  const commandPaletteOpen = useCommandPaletteStore((s) => s.open);
+  const toggleOpen = useCommandPaletteStore((s) => s.toggleOpen);
   const serverConfigQuery = useQuery(serverConfigQueryOptions());
   const keybindings = serverConfigQuery.data?.keybindings ?? EMPTY_KEYBINDINGS;
   const terminalOpen = useTerminalStateStore((state) =>
@@ -34,15 +41,6 @@ function ChatRouteGlobalShortcuts() {
     const onWindowKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
 
-      if (event.key === "Escape" && selectedThreadIdsSize > 0) {
-        event.preventDefault();
-        clearSelection();
-        return;
-      }
-
-      const projectId = activeThread?.projectId ?? activeDraftThread?.projectId ?? projects[0]?.id;
-      if (!projectId) return;
-
       const command = resolveShortcutCommand(event, keybindings, {
         context: {
           terminalFocus: isTerminalFocused(),
@@ -50,13 +48,32 @@ function ChatRouteGlobalShortcuts() {
         },
       });
 
+      if (command === "commandPalette.toggle") {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleOpen();
+        return;
+      }
+
+      if (commandPaletteOpen) {
+        return;
+      }
+
+      if (event.key === "Escape" && selectedThreadIdsSize > 0) {
+        event.preventDefault();
+        clearSelection();
+        return;
+      }
+
       if (command === "chat.newLocal") {
         event.preventDefault();
         event.stopPropagation();
-        void handleNewThread(projectId, {
-          envMode: resolveSidebarNewThreadEnvMode({
-            defaultEnvMode: appSettings.defaultThreadEnvMode,
-          }),
+        void startNewLocalThreadFromContext({
+          activeDraftThread,
+          activeThread,
+          defaultThreadEnvMode: appSettings.defaultThreadEnvMode,
+          handleNewThread,
+          projects,
         });
         return;
       }
@@ -64,10 +81,12 @@ function ChatRouteGlobalShortcuts() {
       if (command !== "chat.new") return;
       event.preventDefault();
       event.stopPropagation();
-      void handleNewThread(projectId, {
-        branch: activeThread?.branch ?? activeDraftThread?.branch ?? null,
-        worktreePath: activeThread?.worktreePath ?? activeDraftThread?.worktreePath ?? null,
-        envMode: activeDraftThread?.envMode ?? (activeThread?.worktreePath ? "worktree" : "local"),
+      void startNewThreadFromContext({
+        activeDraftThread,
+        activeThread,
+        defaultThreadEnvMode: appSettings.defaultThreadEnvMode,
+        handleNewThread,
+        projects,
       });
     };
 
@@ -79,11 +98,13 @@ function ChatRouteGlobalShortcuts() {
     activeDraftThread,
     activeThread,
     clearSelection,
+    commandPaletteOpen,
     handleNewThread,
     keybindings,
     projects,
     selectedThreadIdsSize,
     terminalOpen,
+    toggleOpen,
     appSettings.defaultThreadEnvMode,
   ]);
 
@@ -112,17 +133,19 @@ function ChatRouteLayout() {
   }, [navigate]);
 
   return (
-    <SidebarProvider defaultOpen storageKey={CHAT_SIDEBAR_STORAGE_KEY}>
-      <ChatRouteGlobalShortcuts />
-      <Sidebar
-        side="left"
-        collapsible="offcanvas"
-        className="border-r border-border bg-card text-foreground"
-      >
-        <ThreadSidebar />
-      </Sidebar>
-      <Outlet />
-    </SidebarProvider>
+    <CommandPalette>
+      <SidebarProvider defaultOpen storageKey={CHAT_SIDEBAR_STORAGE_KEY}>
+        <ChatRouteGlobalShortcuts />
+        <Sidebar
+          side="left"
+          collapsible="offcanvas"
+          className="border-r border-border bg-card text-foreground"
+        >
+          <ThreadSidebar />
+        </Sidebar>
+        <Outlet />
+      </SidebarProvider>
+    </CommandPalette>
   );
 }
 

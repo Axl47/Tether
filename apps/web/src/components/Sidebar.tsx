@@ -5,6 +5,7 @@ import {
   GitPullRequestIcon,
   PlusIcon,
   RocketIcon,
+  SearchIcon,
   SparklesIcon,
   SettingsIcon,
   SquarePenIcon,
@@ -61,6 +62,7 @@ import { useQueuedTurnRuntimeStore } from "../queuedTurnRuntimeStore";
 import { useThreadRunStateStore } from "../threadRunStateStore";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { toastManager } from "./ui/toast";
+import { Kbd } from "./ui/kbd";
 import {
   getArm64IntelBuildWarningDescription,
   getDesktopUpdateActionError,
@@ -92,6 +94,7 @@ import {
 } from "./ui/sidebar";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "./ui/input-group";
+import { CommandDialogTrigger } from "./ui/command";
 import {
   deriveThreadStatusPill,
   filterSidebarThreads,
@@ -1348,6 +1351,10 @@ export default function Sidebar() {
       shortcutLabelForCommand(keybindings, "chat.new"),
     [keybindings],
   );
+  const commandPaletteShortcutLabel = useMemo(
+    () => shortcutLabelForCommand(keybindings, "commandPalette.toggle"),
+    [keybindings],
+  );
   const threadSort = appSettings.sidebarThreadSort ?? DEFAULT_SIDEBAR_THREAD_SORT;
   const hasSidebarThreadSearch = threadSearchQuery.trim().length > 0;
   const hasAnyThreads = sidebarThreads.length > 0;
@@ -1520,6 +1527,29 @@ export default function Sidebar() {
       )}
 
       <SidebarContent className="gap-0 select-none" style={{ WebkitTouchCallout: "none" }}>
+        <SidebarGroup className="px-2 pt-2 pb-1">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <CommandDialogTrigger
+                render={
+                  <SidebarMenuButton
+                    size="sm"
+                    className="gap-2 px-2 py-1.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground focus-visible:ring-0"
+                    data-testid="command-palette-trigger"
+                  />
+                }
+              >
+                <SearchIcon className="size-3.5" />
+                <span className="flex-1 truncate text-left text-xs">Search</span>
+                {commandPaletteShortcutLabel ? (
+                  <Kbd className="h-4 min-w-0 rounded-sm px-1.5 text-[10px]">
+                    {commandPaletteShortcutLabel}
+                  </Kbd>
+                ) : null}
+              </CommandDialogTrigger>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarGroup>
         {showArm64IntelBuildWarning && arm64IntelBuildWarningDescription ? (
           <SidebarGroup className="px-2 pt-2 pb-0">
             <Alert variant="warning" className="rounded-2xl border-warning/40 bg-warning/8">

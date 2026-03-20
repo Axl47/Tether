@@ -126,11 +126,12 @@ import { useTheme } from "../hooks/useTheme";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { summarizeTurnDiffStats } from "../lib/turnDiffTree";
+import { useCommandPaletteStore } from "../commandPaletteStore";
+import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import BranchToolbar from "./BranchToolbar";
 import GitActionsControl from "./GitActionsControl";
 import PlanSidebar from "./PlanSidebar";
 import RuntimeModeToggle from "./RuntimeModeToggle";
-import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import ChatMarkdown from "./ChatMarkdown";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
@@ -2588,7 +2589,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
     };
 
     const handler = (event: globalThis.KeyboardEvent) => {
-      if (!activeThreadId || event.defaultPrevented) return;
+      if (!activeThreadId || useCommandPaletteStore.getState().open || event.defaultPrevented) {
+        return;
+      }
       const shortcutContext = {
         terminalFocus: isTerminalFocused(),
         terminalOpen: Boolean(terminalState.terminalOpen),

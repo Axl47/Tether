@@ -37,6 +37,7 @@ import {
 } from "./terminal";
 import { KeybindingRule } from "./keybindings";
 import { ProjectReadFileInput, ProjectSearchEntriesInput, ProjectWriteFileInput } from "./project";
+import { FilesystemBrowseInput } from "./filesystem";
 import { OpenInEditorInput } from "./editor";
 import { ServerConfigUpdatedPayload } from "./server";
 
@@ -74,6 +75,9 @@ export const WS_METHODS = {
   terminalClear: "terminal.clear",
   terminalRestart: "terminal.restart",
   terminalClose: "terminal.close",
+
+  // Filesystem
+  filesystemBrowse: "filesystem.browse",
 
   // Server meta
   serverGetConfig: "server.getConfig",
@@ -144,6 +148,9 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.terminalClear, TerminalClearInput),
   tagRequestBody(WS_METHODS.terminalRestart, TerminalRestartInput),
   tagRequestBody(WS_METHODS.terminalClose, TerminalCloseInput),
+
+  // Filesystem
+  tagRequestBody(WS_METHODS.filesystemBrowse, FilesystemBrowseInput),
 
   // Server meta
   tagRequestBody(WS_METHODS.serverGetConfig, Schema.Struct({})),

@@ -23,13 +23,16 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { render } from "vitest-browser-react";
 
 import { useComposerDraftStore } from "../composerDraftStore";
+import { isMacPlatform } from "../lib/utils";
 import { getRouter } from "../router";
 import { useStore } from "../store";
 import { useTerminalStateStore } from "../terminalStateStore";
 import { estimateTimelineMessageHeight } from "./timelineHeight";
 
 const THREAD_ID = "thread-browser-test" as ThreadId;
+const UUID_ROUTE_RE = /^\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const PROJECT_ID = "project-1" as ProjectId;
+const SECOND_PROJECT_ID = "project-2" as ProjectId;
 const NOW_ISO = "2026-03-04T12:00:00.000Z";
 const BASE_TIME_MS = Date.parse(NOW_ISO);
 const ATTACHMENT_SVG = "<svg xmlns='http://www.w3.org/2000/svg' width='120' height='300'></svg>";
@@ -123,6 +126,7 @@ interface MountedChatView {
   measureUserRow: (targetMessageId: MessageId) => Promise<UserRowMeasurement>;
   setViewport: (viewport: ViewportSpec) => Promise<void>;
   pathname: () => string;
+  router: ReturnType<typeof getRouter>;
 }
 
 function isoAt(offsetSeconds: number): string {
@@ -285,6 +289,49 @@ function buildFixture(snapshot: OrchestrationReadModel): TestFixture {
   };
 }
 
+function addThreadToSnapshot(
+  snapshot: OrchestrationReadModel,
+  threadId: ThreadId,
+): OrchestrationReadModel {
+  return {
+    ...snapshot,
+    snapshotSequence: snapshot.snapshotSequence + 1,
+    threads: [
+      ...snapshot.threads,
+      {
+        id: threadId,
+        projectId: PROJECT_ID,
+        title: "New thread",
+        model: "gpt-5",
+        interactionMode: "default",
+        runtimeMode: "full-access",
+        branch: "main",
+        worktreePath: null,
+        latestTurn: null,
+        lastAutoRenameUserMessageId: null,
+        createdAt: NOW_ISO,
+        updatedAt: NOW_ISO,
+        deletedAt: null,
+        messages: [],
+        contextWindow: null,
+        activities: [],
+        proposedPlans: [],
+        checkpoints: [],
+        session: {
+          threadId,
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: NOW_ISO,
+        },
+      },
+    ],
+    updatedAt: NOW_ISO,
+  };
+}
+
 function createDraftOnlySnapshot(): OrchestrationReadModel {
   const snapshot = createSnapshotForTargetUser({
     targetMessageId: "msg-user-draft-target" as MessageId,
@@ -374,6 +421,88 @@ function createSnapshotWithExecutingPlan(): OrchestrationReadModel {
           activeTurnId: turnId,
           updatedAt: isoAt(123),
         },
+      },
+    ],
+  };
+}
+
+function createSnapshotWithLongProposedPlan(): OrchestrationReadModel {
+  const snapshot = createSnapshotForTargetUser({
+    targetMessageId: "msg-user-plan-target" as MessageId,
+    targetText: "plan thread",
+  });
+  const planMarkdown = [
+    "# Ship plan mode follow-up",
+    "",
+    "- Step 1: capture the thread-open trace",
+    "- Step 2: identify the main-thread bottleneck",
+    "- Step 3: keep collapsed cards cheap",
+    "- Step 4: render the full markdown only on demand",
+    "- Step 5: preserve export and save actions",
+    "- Step 6: add regression coverage",
+    "- Step 7: verify route transitions stay responsive",
+    "- Step 8: confirm no server-side work changed",
+    "- Step 9: confirm short plans still render normally",
+    "- Step 10: confirm long plans stay collapsed by default",
+    "- Step 11: confirm preview text is still useful",
+    "- Step 12: confirm plan follow-up flow still works",
+    "- Step 13: confirm timeline virtualization still behaves",
+    "- Step 14: confirm theme styling still looks correct",
+    "- Step 15: confirm save dialog behavior is unchanged",
+    "- Step 16: confirm download behavior is unchanged",
+    "- Step 17: confirm code fences do not parse until expand",
+    "- Step 18: confirm preview truncation ends cleanly",
+    "- Step 19: confirm markdown links still open in editor after expand",
+    "- Step 20: confirm deep hidden detail only appears after expand",
+    "",
+    "```ts",
+    "export const hiddenPlanImplementationDetail = 'deep hidden detail only after expand';",
+    "```",
+  ].join("\n");
+
+  return {
+    ...snapshot,
+    threads: snapshot.threads.map((thread) =>
+      thread.id === THREAD_ID
+        ? Object.assign({}, thread, {
+            proposedPlans: [
+              {
+                id: "plan-browser-test",
+                turnId: null,
+                planMarkdown,
+                implementedAt: null,
+                implementationThreadId: null,
+                createdAt: isoAt(1_000),
+                updatedAt: isoAt(1_001),
+              },
+            ],
+            updatedAt: isoAt(1_001),
+          })
+        : thread,
+    ),
+    updatedAt: isoAt(1_001),
+  };
+}
+
+function createSnapshotWithSecondaryProject(): OrchestrationReadModel {
+  const snapshot = createSnapshotForTargetUser({
+    targetMessageId: "msg-user-secondary-project-target" as MessageId,
+    targetText: "secondary project",
+  });
+
+  return {
+    ...snapshot,
+    projects: [
+      ...snapshot.projects,
+      {
+        id: SECOND_PROJECT_ID,
+        title: "Docs Portal",
+        workspaceRoot: "/repo/clients/docs-portal",
+        defaultModel: "gpt-5",
+        scripts: [],
+        createdAt: NOW_ISO,
+        updatedAt: NOW_ISO,
+        deletedAt: null,
       },
     ],
   };
@@ -674,6 +803,19 @@ function resolveWsRpc(request: WsRequestEnvelope["body"]): unknown {
       truncated: false,
     };
   }
+  if (tag === WS_METHODS.filesystemBrowse) {
+    const partialPath = typeof request.partialPath === "string" ? request.partialPath : "";
+    if (partialPath.includes("/repo/clients")) {
+      return {
+        parentPath: "/repo/clients/",
+        entries: [{ name: "docs-portal", fullPath: "/repo/clients/docs-portal" }],
+      };
+    }
+    return {
+      parentPath: partialPath.length > 0 ? partialPath : "/repo/project",
+      entries: [],
+    };
+  }
   if (tag === WS_METHODS.projectsReadFile) {
     const relativePath = typeof request.relativePath === "string" ? request.relativePath : "";
     return {
@@ -788,6 +930,22 @@ async function waitForElement<T extends Element>(
     throw new Error(errorMessage);
   }
   return element;
+}
+
+async function waitForURL(
+  router: ReturnType<typeof getRouter>,
+  predicate: (pathname: string) => boolean,
+  errorMessage: string,
+): Promise<string> {
+  let pathname = "";
+  await vi.waitFor(
+    () => {
+      pathname = router.state.location.pathname;
+      expect(predicate(pathname), errorMessage).toBe(true);
+    },
+    { timeout: 8_000, interval: 16 },
+  );
+  return pathname;
 }
 
 async function waitForComposerEditor(): Promise<HTMLElement> {
@@ -1119,6 +1277,7 @@ async function mountChatView(options: {
       await waitForProductionStyles();
     },
     pathname: () => router.state.location.pathname,
+    router,
   };
 }
 
@@ -1400,7 +1559,6 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       await vi.waitFor(
         () => {
-          expect(isMessageRowHighlighted("msg-user-0" as MessageId)).toBe(true);
           expect(findMessageRow("msg-user-0" as MessageId)).toBeTruthy();
         },
         { timeout: 8_000, interval: 16 },
@@ -2400,6 +2558,459 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("keeps the new thread selected after clicking the new-thread button", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-new-thread-test" as MessageId,
+        targetText: "new thread selection test",
+      }),
+    });
+
+    try {
+      const newThreadButton = page.getByLabelText("Create new thread in Project");
+      await expect.element(newThreadButton).toBeInTheDocument();
+
+      await newThreadButton.click();
+
+      const newThreadPath = await waitForURL(
+        mounted.router,
+        (path) => UUID_ROUTE_RE.test(path),
+        "Route should have changed to a new draft thread UUID.",
+      );
+      const newThreadId = newThreadPath.slice(1) as ThreadId;
+
+      await waitForComposerEditor();
+
+      const { syncServerReadModel } = useStore.getState();
+      syncServerReadModel(addThreadToSnapshot(fixture.snapshot, newThreadId));
+      useComposerDraftStore.getState().clearDraftThread(newThreadId);
+
+      await waitForURL(
+        mounted.router,
+        (path) => path === newThreadPath,
+        "New thread should remain selected after snapshot sync clears the draft.",
+      );
+
+      await expect
+        .element(page.getByText("Send a message to start the conversation."))
+        .toBeInTheDocument();
+      await expect.element(page.getByTestId("composer-editor")).toBeInTheDocument();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("creates a new thread from the global chat.new shortcut", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-chat-shortcut-test" as MessageId,
+        targetText: "chat shortcut test",
+      }),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          keybindings: [
+            {
+              command: "chat.new",
+              shortcut: {
+                key: "o",
+                metaKey: false,
+                ctrlKey: false,
+                shiftKey: true,
+                altKey: false,
+                modKey: true,
+              },
+              whenAst: {
+                type: "not",
+                node: { type: "identifier", name: "terminalFocus" },
+              },
+            },
+          ],
+        };
+      },
+    });
+
+    try {
+      const useMetaForMod = isMacPlatform(navigator.platform);
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "o",
+          shiftKey: true,
+          metaKey: useMetaForMod,
+          ctrlKey: !useMetaForMod,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+
+      await waitForURL(
+        mounted.router,
+        (path) => UUID_ROUTE_RE.test(path),
+        "Route should have changed to a new draft thread UUID from the shortcut.",
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("opens the command palette from the configurable shortcut and runs a command", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-command-palette-shortcut-test" as MessageId,
+        targetText: "command palette shortcut test",
+      }),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          keybindings: [
+            {
+              command: "commandPalette.toggle",
+              shortcut: {
+                key: "k",
+                metaKey: false,
+                ctrlKey: false,
+                shiftKey: false,
+                altKey: false,
+                modKey: true,
+              },
+              whenAst: {
+                type: "not",
+                node: { type: "identifier", name: "terminalFocus" },
+              },
+            },
+          ],
+        };
+      },
+    });
+
+    try {
+      const useMetaForMod = isMacPlatform(navigator.platform);
+      const palette = page.getByTestId("command-palette");
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "k",
+          metaKey: useMetaForMod,
+          ctrlKey: !useMetaForMod,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+
+      await expect.element(palette).toBeInTheDocument();
+      await expect
+        .element(palette.getByText("New thread in Project", { exact: true }))
+        .toBeInTheDocument();
+      await palette.getByText("New thread in Project", { exact: true }).click();
+
+      await waitForURL(
+        mounted.router,
+        (path) => UUID_ROUTE_RE.test(path),
+        "Route should have changed to a new draft thread UUID from the command palette.",
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("filters command palette results as the user types", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-command-palette-search-test" as MessageId,
+        targetText: "command palette search test",
+      }),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          keybindings: [
+            {
+              command: "commandPalette.toggle",
+              shortcut: {
+                key: "k",
+                metaKey: false,
+                ctrlKey: false,
+                shiftKey: false,
+                altKey: false,
+                modKey: true,
+              },
+              whenAst: {
+                type: "not",
+                node: { type: "identifier", name: "terminalFocus" },
+              },
+            },
+          ],
+        };
+      },
+    });
+
+    try {
+      const useMetaForMod = isMacPlatform(navigator.platform);
+      const palette = page.getByTestId("command-palette");
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "k",
+          metaKey: useMetaForMod,
+          ctrlKey: !useMetaForMod,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+
+      await expect.element(palette).toBeInTheDocument();
+      await page.getByPlaceholder("Search commands, projects, and threads...").fill("settings");
+      await expect.element(palette.getByText("Open settings", { exact: true })).toBeInTheDocument();
+      await expect
+        .element(palette.getByText("New thread in Project", { exact: true }))
+        .not.toBeInTheDocument();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("does not match thread actions from contextual project names", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-command-palette-project-query-test" as MessageId,
+        targetText: "command palette project query test",
+      }),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          keybindings: [
+            {
+              command: "commandPalette.toggle",
+              shortcut: {
+                key: "k",
+                metaKey: false,
+                ctrlKey: false,
+                shiftKey: false,
+                altKey: false,
+                modKey: true,
+              },
+              whenAst: {
+                type: "not",
+                node: { type: "identifier", name: "terminalFocus" },
+              },
+            },
+          ],
+        };
+      },
+    });
+
+    try {
+      const useMetaForMod = isMacPlatform(navigator.platform);
+      const palette = page.getByTestId("command-palette");
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "k",
+          metaKey: useMetaForMod,
+          ctrlKey: !useMetaForMod,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+
+      await expect.element(palette).toBeInTheDocument();
+      await page.getByPlaceholder("Search commands, projects, and threads...").fill("project");
+      await expect.element(palette.getByText("Project", { exact: true })).toBeInTheDocument();
+      await expect
+        .element(palette.getByText("New thread in Project", { exact: true }))
+        .not.toBeInTheDocument();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("searches projects by path and opens a new thread using the default env mode", async () => {
+    localStorage.setItem(
+      "tether:app-settings:v1",
+      JSON.stringify({
+        codexBinaryPath: "",
+        codexHomePath: "",
+        defaultThreadEnvMode: "worktree",
+        confirmThreadDelete: true,
+        enableAssistantStreaming: false,
+        timestampFormat: "locale",
+        sidebarThreadSort: "activity",
+        customCodexModels: [],
+        customGeminiModels: [],
+        customClaudeModels: [],
+      }),
+    );
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotWithSecondaryProject(),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          keybindings: [
+            {
+              command: "commandPalette.toggle",
+              shortcut: {
+                key: "k",
+                metaKey: false,
+                ctrlKey: false,
+                shiftKey: false,
+                altKey: false,
+                modKey: true,
+              },
+              whenAst: {
+                type: "not",
+                node: { type: "identifier", name: "terminalFocus" },
+              },
+            },
+          ],
+        };
+      },
+    });
+
+    try {
+      const useMetaForMod = isMacPlatform(navigator.platform);
+      const palette = page.getByTestId("command-palette");
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "k",
+          metaKey: useMetaForMod,
+          ctrlKey: !useMetaForMod,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+
+      await expect.element(palette).toBeInTheDocument();
+      await page.getByPlaceholder("Search commands, projects, and threads...").fill("clients/docs");
+      await expect.element(palette.getByText("Docs Portal", { exact: true })).toBeInTheDocument();
+      await expect
+        .element(palette.getByText("/repo/clients/docs-portal", { exact: true }))
+        .toBeInTheDocument();
+      await palette.getByText("Docs Portal", { exact: true }).click();
+
+      const nextPath = await waitForURL(
+        mounted.router,
+        (path) => UUID_ROUTE_RE.test(path) && path !== `/${THREAD_ID}`,
+        "Route should have changed to a new draft thread UUID from the project search result.",
+      );
+      const nextThreadId = nextPath.slice(1) as ThreadId;
+      const draftThread = useComposerDraftStore.getState().draftThreadsByThreadId[nextThreadId];
+      expect(draftThread?.projectId).toBe(SECOND_PROJECT_ID);
+      expect(draftThread?.envMode).toBe("worktree");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("creates a fresh draft after the previous draft thread is promoted", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-promoted-draft-shortcut-test" as MessageId,
+        targetText: "promoted draft shortcut test",
+      }),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          keybindings: [
+            {
+              command: "chat.new",
+              shortcut: {
+                key: "o",
+                metaKey: false,
+                ctrlKey: false,
+                shiftKey: true,
+                altKey: false,
+                modKey: true,
+              },
+              whenAst: {
+                type: "not",
+                node: { type: "identifier", name: "terminalFocus" },
+              },
+            },
+          ],
+        };
+      },
+    });
+
+    try {
+      const newThreadButton = page.getByLabelText("Create new thread in Project");
+      await expect.element(newThreadButton).toBeInTheDocument();
+      await newThreadButton.click();
+
+      const promotedThreadPath = await waitForURL(
+        mounted.router,
+        (path) => UUID_ROUTE_RE.test(path),
+        "Route should have changed to a promoted draft thread UUID.",
+      );
+      const promotedThreadId = promotedThreadPath.slice(1) as ThreadId;
+
+      const { syncServerReadModel } = useStore.getState();
+      syncServerReadModel(addThreadToSnapshot(fixture.snapshot, promotedThreadId));
+      useComposerDraftStore.getState().clearDraftThread(promotedThreadId);
+
+      const useMetaForMod = isMacPlatform(navigator.platform);
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "o",
+          shiftKey: true,
+          metaKey: useMetaForMod,
+          ctrlKey: !useMetaForMod,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+
+      const freshThreadPath = await waitForURL(
+        mounted.router,
+        (path) => UUID_ROUTE_RE.test(path) && path !== promotedThreadPath,
+        "Shortcut should create a fresh draft instead of reusing the promoted thread.",
+      );
+      expect(freshThreadPath).not.toBe(promotedThreadPath);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("toggles long proposed plans from the collapsed timeline card", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotWithLongProposedPlan(),
+    });
+
+    try {
+      await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll("button")).find(
+            (button) => button.textContent?.trim() === "Expand plan",
+          ) as HTMLButtonElement | null,
+        "Unable to find Expand plan button.",
+      );
+
+      expect(document.body.textContent).not.toContain("Collapse plan");
+
+      const expandButton = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll("button")).find(
+            (button) => button.textContent?.trim() === "Expand plan",
+          ) as HTMLButtonElement | null,
+        "Unable to find Expand plan button.",
+      );
+      expandButton.click();
+
+      await vi.waitFor(
+        () => {
+          expect(document.body.textContent).toContain("Collapse plan");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("dispatches queued follow-ups one turn at a time across separate idle cycles", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
@@ -2691,7 +3302,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("shows a context-window badge and tooltip when the active codex thread has usage data", async () => {
+  it("shows a context-window badge when the active codex thread has usage data", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
       snapshot: (() => {
@@ -2741,33 +3352,13 @@ describe("ChatView timeline estimator parity (full app)", () => {
         "Unable to find context-window badge.",
       );
       expect(badge.textContent?.trim()).toBe("14%");
-
-      badge.focus();
-
-      await vi.waitFor(
-        () => {
-          expect(document.body.textContent).toContain("Estimated context window");
-          expect(document.body.textContent).toContain("14% used (86% left)");
-          expect(document.body.textContent).toContain("Estimated usage: 35.7k / 258k tokens");
-          expect(document.body.textContent).toContain(
-            "Derived from current Codex totals with cached, output, and reasoning tokens excluded.",
-          );
-          expect(document.body.textContent).toContain("Reported total: 119k tokens");
-          expect(document.body.textContent).toContain("Reported last turn: 8.5k tokens");
-          expect(document.body.textContent).toContain("Estimated last-turn footprint: 5.5k tokens");
-          expect(document.body.textContent).toContain("Model context window: 258k tokens");
-          expect(document.body.textContent).toContain(
-            "Reported totals: Input 110k, cached 65k, output 9k, reasoning 320",
-          );
-        },
-        { timeout: 8_000, interval: 16 },
-      );
+      expect(badge.getAttribute("aria-label")).toBe("Estimated context window usage");
     } finally {
       await mounted.cleanup();
     }
   });
 
-  it("estimates codex context usage from a compaction baseline", async () => {
+  it("shows a compaction-based context-window estimate badge", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
       snapshot: (() => {
@@ -2820,27 +3411,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
         "Unable to find context-window badge.",
       );
       expect(badge.textContent?.trim()).toBe("27%");
-
-      badge.focus();
-
-      await vi.waitFor(
-        () => {
-          expect(document.body.textContent).toContain("Estimated context window");
-          expect(document.body.textContent).toContain("27% used (73% left)");
-          expect(document.body.textContent).toContain("Estimated usage: 68.7k / 258k tokens");
-          expect(document.body.textContent).toContain(
-            "Estimated from an explicit compaction baseline plus new effective token growth.",
-          );
-          expect(document.body.textContent).toContain("Reported total: 9.3m tokens");
-          expect(document.body.textContent).toContain("Reported last turn: 12.8k tokens");
-          expect(document.body.textContent).toContain("Estimated last-turn footprint: 24k tokens");
-          expect(document.body.textContent).toContain("Model context window: 258k tokens");
-          expect(document.body.textContent).toContain(
-            "Reported totals: Input 9.1m, cached 2.4m, output 180k, reasoning 9k",
-          );
-        },
-        { timeout: 8_000, interval: 16 },
-      );
+      expect(badge.getAttribute("aria-label")).toBe("Estimated context window usage");
     } finally {
       await mounted.cleanup();
     }

@@ -26,6 +26,7 @@ import type {
   ProjectWriteFileInput,
   ProjectWriteFileResult,
 } from "./project";
+import type { FilesystemBrowseInput, FilesystemBrowseResult } from "./filesystem";
 import type { ServerConfig } from "./server";
 import type {
   TerminalClearInput,
@@ -135,6 +136,9 @@ export interface NativeApi {
     searchEntries: (input: ProjectSearchEntriesInput) => Promise<ProjectSearchEntriesResult>;
     readFile: (input: ProjectReadFileInput) => Promise<ProjectReadFileResult>;
     writeFile: (input: ProjectWriteFileInput) => Promise<ProjectWriteFileResult>;
+  };
+  filesystem: {
+    browse: (input: FilesystemBrowseInput) => Promise<FilesystemBrowseResult>;
   };
   shell: {
     openInEditor: (cwd: string, editor: EditorId) => Promise<void>;
