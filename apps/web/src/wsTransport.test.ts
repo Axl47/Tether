@@ -15,10 +15,12 @@ class MockWebSocket {
   static readonly CLOSED = 3;
 
   readyState = MockWebSocket.CONNECTING;
+  readonly url: string;
   readonly sent: string[] = [];
   private readonly listeners = new Map<WsEventType, Set<WsListener>>();
 
-  constructor(_url: string) {
+  constructor(url: string) {
+    this.url = url;
     sockets.push(this);
   }
 
@@ -85,6 +87,28 @@ afterEach(() => {
 });
 
 describe("WsTransport", () => {
+  it("replaces wildcard websocket hosts with the current browser hostname", () => {
+    (
+      globalThis.window as unknown as {
+        location: { hostname: string; port: string };
+        desktopBridge?: { getWsUrl: () => string };
+      }
+    ).location = {
+      hostname: "192.168.1.55",
+      port: "5733",
+    };
+    (globalThis.window as unknown as { desktopBridge?: { getWsUrl: () => string } }).desktopBridge =
+      {
+        getWsUrl: () => "ws://0.0.0.0:3773",
+      };
+
+    const transport = new WsTransport();
+    const socket = getSocket();
+
+    expect(socket.url).toBe("ws://192.168.1.55:3773/");
+    transport.dispose();
+  });
+
   it("routes valid push envelopes to channel listeners", () => {
     const transport = new WsTransport("ws://localhost:3020");
     const socket = getSocket();
@@ -175,7 +199,7 @@ describe("WsTransport", () => {
     expect(warnSpy).toHaveBeenNthCalledWith(
       1,
       "Dropped inbound WebSocket envelope",
-      "SyntaxError: Expected property name or '}' in JSON at position 2 (line 1 column 3)",
+      expect.stringContaining("SyntaxError"),
     );
     expect(warnSpy).toHaveBeenNthCalledWith(
       2,

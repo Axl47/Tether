@@ -342,6 +342,40 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       return [userMessageEvent, turnStartRequestedEvent];
     }
 
+    case "thread.proposed-plan.defer": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const proposedPlan = thread.proposedPlans.find((entry) => entry.id === command.planId);
+      if (!proposedPlan) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Proposed plan '${command.planId}' does not exist on thread '${command.threadId}'.`,
+        });
+      }
+
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.proposed-plan-upserted",
+        payload: {
+          threadId: command.threadId,
+          proposedPlan: {
+            ...proposedPlan,
+            implementedAt: proposedPlan.implementedAt ?? command.createdAt,
+            implementationThreadId: proposedPlan.implementationThreadId ?? null,
+            updatedAt: command.createdAt,
+          },
+        },
+      };
+    }
+
     case "thread.turn.interrupt": {
       yield* requireThread({
         readModel,

@@ -484,6 +484,70 @@ function createSnapshotWithLongProposedPlan(): OrchestrationReadModel {
   };
 }
 
+function createSnapshotWithActionableProposedPlanFollowUp(): OrchestrationReadModel {
+  const snapshot = createSnapshotForTargetUser({
+    targetMessageId: "msg-user-plan-follow-up-target" as MessageId,
+    targetText: "plan follow-up thread",
+  });
+  const turnId = "turn-browser-plan-follow-up-1" as TurnId;
+  return {
+    ...snapshot,
+    threads: snapshot.threads.map((thread) =>
+      thread.id === THREAD_ID
+        ? Object.assign({}, thread, {
+            interactionMode: "plan",
+            latestTurn: {
+              turnId,
+              state: "completed",
+              requestedAt: isoAt(200),
+              startedAt: isoAt(201),
+              completedAt: isoAt(202),
+              assistantMessageId: null,
+            },
+            proposedPlans: [
+              {
+                id: "plan-browser-follow-up",
+                turnId,
+                planMarkdown: "# Plan follow-up\n\n- Step 1\n- Step 2",
+                implementedAt: null,
+                implementationThreadId: null,
+                createdAt: isoAt(203),
+                updatedAt: isoAt(203),
+              },
+            ],
+            updatedAt: isoAt(203),
+          })
+        : thread,
+    ),
+    updatedAt: isoAt(203),
+  };
+}
+
+function createSnapshotWithDeferredProposedPlanFollowUp(): OrchestrationReadModel {
+  const snapshot = createSnapshotWithActionableProposedPlanFollowUp();
+  return {
+    ...snapshot,
+    threads: snapshot.threads.map((thread) =>
+      thread.id === THREAD_ID
+        ? Object.assign({}, thread, {
+            proposedPlans: thread.proposedPlans.map((plan) =>
+              plan.id === "plan-browser-follow-up"
+                ? {
+                    ...plan,
+                    implementedAt: isoAt(204),
+                    implementationThreadId: null,
+                    updatedAt: isoAt(204),
+                  }
+                : plan,
+            ),
+            updatedAt: isoAt(204),
+          })
+        : thread,
+    ),
+    updatedAt: isoAt(204),
+  };
+}
+
 function createSnapshotWithSecondaryProject(): OrchestrationReadModel {
   const snapshot = createSnapshotForTargetUser({
     targetMessageId: "msg-user-secondary-project-target" as MessageId,
@@ -1135,6 +1199,15 @@ async function openRunActionsMenu(): Promise<void> {
     "Unable to find run actions button.",
   );
   runActionsButton.click();
+  await waitForLayout();
+}
+
+async function openImplementationActionsMenu(): Promise<void> {
+  const actionsButton = await waitForElement(
+    () => document.querySelector<HTMLButtonElement>('button[aria-label="Implementation actions"]'),
+    "Unable to find implementation actions button.",
+  );
+  actionsButton.click();
   await waitForLayout();
 }
 
@@ -2466,6 +2539,61 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("dispatches thread.proposed-plan.defer from implementation actions", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotWithActionableProposedPlanFollowUp(),
+    });
+
+    try {
+      await waitForElement(
+        () => findButtonsByText("Implement")[0] ?? null,
+        "Unable to find Implement follow-up button.",
+      );
+      await openImplementationActionsMenu();
+      const deferMenuItem = await waitForTextElement(
+        "Defer plan",
+        "Unable to find Defer plan action.",
+      );
+      deferMenuItem.click();
+
+      await vi.waitFor(
+        () => {
+          const deferRequest = wsRequests.find(
+            (request) => dispatchCommand(request)?.type === "thread.proposed-plan.defer",
+          );
+          expect(deferRequest).toBeTruthy();
+          const command = dispatchCommand(deferRequest!);
+          expect(command?.threadId).toBe(THREAD_ID);
+          expect(command?.planId).toBe("plan-browser-follow-up");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("hides plan follow-up actions after a proposed plan is already deferred", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotWithDeferredProposedPlanFollowUp(),
+    });
+
+    try {
+      await vi.waitFor(
+        () => {
+          expect(document.querySelector('button[aria-label="Implementation actions"]')).toBeNull();
+          expect(findButtonsByText("Implement")).toHaveLength(0);
+          expect(findButtonsByText("Refine")).toHaveLength(0);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("queues a follow-up while the thread is running and auto-dispatches it after the thread becomes idle", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
@@ -2710,6 +2838,64 @@ describe("ChatView timeline estimator parity (full app)", () => {
         (path) => UUID_ROUTE_RE.test(path),
         "Route should have changed to a new draft thread UUID from the command palette.",
       );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("shows split actions in the command palette and opens split selection mode", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-command-palette-split-actions-test" as MessageId,
+        targetText: "command palette split actions test",
+      }),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          keybindings: [
+            {
+              command: "commandPalette.toggle",
+              shortcut: {
+                key: "k",
+                metaKey: false,
+                ctrlKey: false,
+                shiftKey: false,
+                altKey: false,
+                modKey: true,
+              },
+              whenAst: {
+                type: "not",
+                node: { type: "identifier", name: "terminalFocus" },
+              },
+            },
+          ],
+        };
+      },
+    });
+
+    try {
+      const useMetaForMod = isMacPlatform(navigator.platform);
+      const palette = page.getByTestId("command-palette");
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "k",
+          metaKey: useMetaForMod,
+          ctrlKey: !useMetaForMod,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+
+      await expect.element(palette).toBeInTheDocument();
+      await expect.element(palette.getByText("Split right", { exact: true })).toBeInTheDocument();
+      await expect.element(palette.getByText("Split down", { exact: true })).toBeInTheDocument();
+
+      await palette.getByText("Split right", { exact: true }).click();
+
+      await expect
+        .element(page.getByPlaceholder("Split right with a thread or project..."))
+        .toBeInTheDocument();
     } finally {
       await mounted.cleanup();
     }

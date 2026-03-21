@@ -137,6 +137,9 @@ interface CreateDevRunnerEnvInput {
 const isWildcardHost = (host: string | undefined): boolean =>
   host === "0.0.0.0" || host === "::" || host === "[::]";
 
+const formatHostForUrl = (host: string): string =>
+  host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+
 function resolveBrowserHost(input: {
   readonly host: string | undefined;
   readonly publicHost: string | undefined;
@@ -150,6 +153,23 @@ function resolveBrowserHost(input: {
     return host;
   }
   return "localhost";
+}
+
+function resolveWebSocketHost(input: {
+  readonly host: string | undefined;
+  readonly publicHost: string | undefined;
+}): string {
+  const publicHost = input.publicHost?.trim();
+  if (publicHost) {
+    return publicHost;
+  }
+  const host = input.host?.trim();
+  if (host) {
+    return host;
+  }
+  // Use wildcard by default so the browser can substitute its own hostname
+  // when opening from localhost, LAN IP, or another routed host.
+  return "0.0.0.0";
 }
 
 export function createDevRunnerEnv({
@@ -172,6 +192,7 @@ export function createDevRunnerEnv({
     const webPort = BASE_WEB_PORT + webOffset;
     const resolvedStateDir = yield* resolveStateDir(stateDir);
     const browserHost = resolveBrowserHost({ host, publicHost });
+    const webSocketHost = resolveWebSocketHost({ host, publicHost });
 
     const output: NodeJS.ProcessEnv = {
       ...baseEnv,
@@ -179,8 +200,9 @@ export function createDevRunnerEnv({
       PORT: String(webPort),
       ELECTRON_RENDERER_PORT: String(webPort),
       TETHER_STATE_DIR: resolvedStateDir,
-      VITE_WS_URL: `ws://${browserHost}:${serverPort}`,
-      VITE_DEV_SERVER_URL: devUrl?.toString() ?? `http://${browserHost}:${webPort}`,
+      VITE_WS_URL: `ws://${formatHostForUrl(webSocketHost)}:${serverPort}`,
+      VITE_DEV_SERVER_URL:
+        devUrl?.toString() ?? `http://${formatHostForUrl(browserHost)}:${webPort}`,
     };
 
     if (host !== undefined) {

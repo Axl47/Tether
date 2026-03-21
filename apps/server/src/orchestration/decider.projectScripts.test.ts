@@ -15,6 +15,92 @@ import { createEmptyReadModel, projectEvent } from "./projector.ts";
 const asEventId = (value: string): EventId => EventId.makeUnsafe(value);
 const asProjectId = (value: string): ProjectId => ProjectId.makeUnsafe(value);
 const asMessageId = (value: string): MessageId => MessageId.makeUnsafe(value);
+const asThreadId = (value: string): ThreadId => ThreadId.makeUnsafe(value);
+
+async function createReadModelWithSingleProposedPlan(input: {
+  now: string;
+  projectId: ProjectId;
+  threadId: ThreadId;
+  planId: string;
+}) {
+  const withProject = await Effect.runPromise(
+    projectEvent(createEmptyReadModel(input.now), {
+      sequence: 1,
+      eventId: asEventId("evt-project-create-for-plan-defer"),
+      aggregateKind: "project",
+      aggregateId: input.projectId,
+      type: "project.created",
+      occurredAt: input.now,
+      commandId: CommandId.makeUnsafe("cmd-project-create-for-plan-defer"),
+      causationEventId: null,
+      correlationId: CommandId.makeUnsafe("cmd-project-create-for-plan-defer"),
+      metadata: {},
+      payload: {
+        projectId: input.projectId,
+        title: "Project",
+        workspaceRoot: "/tmp/project",
+        defaultModel: null,
+        scripts: [],
+        createdAt: input.now,
+        updatedAt: input.now,
+      },
+    }),
+  );
+
+  const withThread = await Effect.runPromise(
+    projectEvent(withProject, {
+      sequence: 2,
+      eventId: asEventId("evt-thread-create-for-plan-defer"),
+      aggregateKind: "thread",
+      aggregateId: input.threadId,
+      type: "thread.created",
+      occurredAt: input.now,
+      commandId: CommandId.makeUnsafe("cmd-thread-create-for-plan-defer"),
+      causationEventId: null,
+      correlationId: CommandId.makeUnsafe("cmd-thread-create-for-plan-defer"),
+      metadata: {},
+      payload: {
+        threadId: input.threadId,
+        projectId: input.projectId,
+        title: "Thread",
+        model: "gpt-5-codex",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "full-access",
+        branch: null,
+        worktreePath: null,
+        createdAt: input.now,
+        updatedAt: input.now,
+      },
+    }),
+  );
+
+  return Effect.runPromise(
+    projectEvent(withThread, {
+      sequence: 3,
+      eventId: asEventId("evt-plan-upsert-for-plan-defer"),
+      aggregateKind: "thread",
+      aggregateId: input.threadId,
+      type: "thread.proposed-plan-upserted",
+      occurredAt: input.now,
+      commandId: CommandId.makeUnsafe("cmd-plan-upsert-for-plan-defer"),
+      causationEventId: null,
+      correlationId: CommandId.makeUnsafe("cmd-plan-upsert-for-plan-defer"),
+      metadata: {},
+      payload: {
+        threadId: input.threadId,
+        proposedPlan: {
+          id: input.planId,
+          turnId: null,
+          planMarkdown: "# Plan",
+          implementedAt: null,
+          implementationThreadId: null,
+          createdAt: input.now,
+          updatedAt: input.now,
+        },
+      },
+    }),
+  );
+}
 
 describe("decider project scripts", () => {
   it("emits empty scripts on project.create", async () => {
@@ -367,5 +453,70 @@ describe("decider project scripts", () => {
         interactionMode: "plan",
       },
     });
+  });
+
+  it("marks a proposed plan implemented when thread.proposed-plan.defer is dispatched", async () => {
+    const now = "2026-01-01T00:00:00.000Z";
+    const deferredAt = "2026-01-01T00:00:05.000Z";
+    const projectId = asProjectId("project-plan-defer");
+    const threadId = asThreadId("thread-plan-defer");
+    const planId = "plan:thread-plan-defer:turn:turn-1";
+    const readModel = await createReadModelWithSingleProposedPlan({
+      now,
+      projectId,
+      threadId,
+      planId,
+    });
+
+    const result = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: {
+          type: "thread.proposed-plan.defer",
+          commandId: CommandId.makeUnsafe("cmd-plan-defer"),
+          threadId,
+          planId,
+          createdAt: deferredAt,
+        },
+        readModel,
+      }),
+    );
+
+    expect(Array.isArray(result)).toBe(false);
+    const event = Array.isArray(result) ? result[0] : result;
+    if (!event || event.type !== "thread.proposed-plan-upserted") {
+      throw new Error("Expected thread.proposed-plan-upserted event");
+    }
+    expect(event.payload.threadId).toBe(threadId);
+    expect(event.payload.proposedPlan.id).toBe(planId);
+    expect(event.payload.proposedPlan.implementedAt).toBe(deferredAt);
+    expect(event.payload.proposedPlan.implementationThreadId).toBeNull();
+    expect(event.payload.proposedPlan.updatedAt).toBe(deferredAt);
+  });
+
+  it("rejects thread.proposed-plan.defer when the target plan does not exist", async () => {
+    const now = "2026-01-01T00:00:00.000Z";
+    const projectId = asProjectId("project-plan-defer-missing");
+    const threadId = asThreadId("thread-plan-defer-missing");
+    const readModel = await createReadModelWithSingleProposedPlan({
+      now,
+      projectId,
+      threadId,
+      planId: "plan:thread-plan-defer-missing:turn:turn-1",
+    });
+
+    await expect(
+      Effect.runPromise(
+        decideOrchestrationCommand({
+          command: {
+            type: "thread.proposed-plan.defer",
+            commandId: CommandId.makeUnsafe("cmd-plan-defer-missing"),
+            threadId,
+            planId: "plan:missing",
+            createdAt: "2026-01-01T00:00:05.000Z",
+          },
+          readModel,
+        }),
+      ),
+    ).rejects.toThrow("does not exist");
   });
 });

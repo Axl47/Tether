@@ -6,7 +6,7 @@ import * as Path from "node:path";
 
 import {
   app,
-  BrowserWindow,
+  BaseWindow,
   dialog,
   ipcMain,
   Menu,
@@ -14,6 +14,8 @@ import {
   nativeTheme,
   protocol,
   shell,
+  View,
+  WebContentsView,
 } from "electron";
 import type { MenuItemConstructorOptions } from "electron";
 import * as Effect from "effect/Effect";
@@ -43,6 +45,7 @@ import {
   reduceDesktopUpdateStateOnUpdateAvailable,
 } from "./updateMachine";
 import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch";
+import { createBrowserPaneManager } from "./browserPaneManager";
 
 syncShellEnvironment();
 
@@ -56,6 +59,19 @@ const UPDATE_STATE_CHANNEL = "desktop:update-state";
 const UPDATE_GET_STATE_CHANNEL = "desktop:update-get-state";
 const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
 const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
+const BROWSER_SYNC_SHORTCUTS_CHANNEL = "desktop:browser-sync-shortcuts";
+const BROWSER_EVENT_CHANNEL = "desktop:browser-event";
+const BROWSER_GET_SNAPSHOT_CHANNEL = "desktop:browser-get-snapshot";
+const BROWSER_CAPTURE_SCREENSHOT_CHANNEL = "desktop:browser-capture-screenshot";
+const BROWSER_STOP_CHANNEL = "desktop:browser-stop";
+const BROWSER_RELOAD_CHANNEL = "desktop:browser-reload";
+const BROWSER_GO_FORWARD_CHANNEL = "desktop:browser-go-forward";
+const BROWSER_GO_BACK_CHANNEL = "desktop:browser-go-back";
+const BROWSER_NAVIGATE_CHANNEL = "desktop:browser-navigate";
+const BROWSER_SET_VISIBLE_CHANNEL = "desktop:browser-set-visible";
+const BROWSER_SET_BOUNDS_CHANNEL = "desktop:browser-set-bounds";
+const BROWSER_DESTROY_CHANNEL = "desktop:browser-destroy";
+const BROWSER_ENSURE_CHANNEL = "desktop:browser-ensure";
 const STATE_DIR =
   process.env.TETHER_STATE_DIR?.trim() || Path.join(OS.homedir(), ".t3", "userdata");
 const DESKTOP_SCHEME = "t3";
@@ -79,10 +95,15 @@ const AUTO_UPDATE_STARTUP_DELAY_MS = 15_000;
 const AUTO_UPDATE_POLL_INTERVAL_MS = 4 * 60 * 60 * 1000;
 const DESKTOP_UPDATE_CHANNEL = "latest";
 const DESKTOP_UPDATE_ALLOW_PRERELEASE = false;
+const BROWSER_COMPOSITION_PROBE_URL =
+  process.env.TETHER_BROWSER_COMPOSITION_PROBE_URL?.trim() ?? "";
+const BROWSER_COMPOSITION_PROBE_PANE_ID = "browser-composition-probe";
+const BROWSER_COMPOSITION_PROBE_TIMEOUT_MS = 8_000;
 
 type DesktopUpdateErrorContext = DesktopUpdateState["errorContext"];
 
-let mainWindow: BrowserWindow | null = null;
+let mainWindow: BaseWindow | null = null;
+const appViewByWindowId = new Map<number, WebContentsView>();
 let backendProcess: ChildProcess.ChildProcess | null = null;
 let backendPort = 0;
 let backendAuthToken = "";
@@ -95,6 +116,7 @@ let aboutCommitHashCache: string | null | undefined;
 let desktopLogSink: RotatingFileSink | null = null;
 let backendLogSink: RotatingFileSink | null = null;
 let restoreStdIoCapture: (() => void) | null = null;
+let browserPaneManager: ReturnType<typeof createBrowserPaneManager> | null = null;
 
 let destructiveMenuIconCache: Electron.NativeImage | null | undefined;
 const desktopRuntimeInfo = resolveDesktopRuntimeInfo({
@@ -493,23 +515,25 @@ function registerDesktopProtocol(): void {
 
 function dispatchMenuAction(action: string): void {
   const existingWindow =
-    BrowserWindow.getFocusedWindow() ?? mainWindow ?? BrowserWindow.getAllWindows()[0];
+    BaseWindow.getFocusedWindow() ?? mainWindow ?? BaseWindow.getAllWindows()[0];
   const targetWindow = existingWindow ?? createWindow();
   if (!existingWindow) {
     mainWindow = targetWindow;
   }
+  const targetWebContents = getAppWebContents(targetWindow);
+  if (!targetWebContents) return;
 
   const send = () => {
     if (targetWindow.isDestroyed()) return;
-    targetWindow.webContents.send(MENU_ACTION_CHANNEL, action);
+    targetWebContents.send(MENU_ACTION_CHANNEL, action);
     if (!targetWindow.isVisible()) {
       targetWindow.show();
     }
     targetWindow.focus();
   };
 
-  if (targetWindow.webContents.isLoadingMainFrame()) {
-    targetWindow.webContents.once("did-finish-load", send);
+  if (targetWebContents.isLoadingMainFrame()) {
+    targetWebContents.once("did-finish-load", send);
     return;
   }
 
@@ -536,7 +560,7 @@ function handleCheckForUpdatesMenuClick(): void {
     return;
   }
 
-  if (!BrowserWindow.getAllWindows().length) {
+  if (!BaseWindow.getAllWindows().length) {
     mainWindow = createWindow();
   }
   void checkForUpdatesFromMenu();
@@ -726,10 +750,19 @@ function clearUpdatePollTimer(): void {
 }
 
 function emitUpdateState(): void {
-  for (const window of BrowserWindow.getAllWindows()) {
+  for (const window of BaseWindow.getAllWindows()) {
     if (window.isDestroyed()) continue;
-    window.webContents.send(UPDATE_STATE_CHANNEL, updateState);
+    getAppWebContents(window)?.send(UPDATE_STATE_CHANNEL, updateState);
   }
+}
+
+function getAppView(window: BaseWindow | null | undefined): WebContentsView | null {
+  if (!window || window.isDestroyed()) return null;
+  return appViewByWindowId.get(window.id) ?? null;
+}
+
+function getAppWebContents(window: BaseWindow | null | undefined): Electron.WebContents | null {
+  return getAppView(window)?.webContents ?? null;
 }
 
 function setUpdateState(patch: Partial<DesktopUpdateState>): void {
@@ -1087,7 +1120,7 @@ async function stopBackendAndWaitForExit(timeoutMs = 5_000): Promise<void> {
 function registerIpcHandlers(): void {
   ipcMain.removeHandler(PICK_FOLDER_CHANNEL);
   ipcMain.handle(PICK_FOLDER_CHANNEL, async () => {
-    const owner = BrowserWindow.getFocusedWindow() ?? mainWindow;
+    const owner = BaseWindow.getFocusedWindow() ?? mainWindow;
     const result = owner
       ? await dialog.showOpenDialog(owner, {
           properties: ["openDirectory", "createDirectory"],
@@ -1105,7 +1138,7 @@ function registerIpcHandlers(): void {
       return false;
     }
 
-    const owner = BrowserWindow.getFocusedWindow() ?? mainWindow;
+    const owner = BaseWindow.getFocusedWindow() ?? mainWindow;
     return showDesktopConfirmDialog(message, owner);
   });
 
@@ -1146,7 +1179,7 @@ function registerIpcHandlers(): void {
             }
           : null;
 
-      const window = BrowserWindow.getFocusedWindow() ?? mainWindow;
+      const window = BaseWindow.getFocusedWindow() ?? mainWindow;
       if (!window) return null;
 
       return new Promise<string | null>((resolve) => {
@@ -1226,6 +1259,43 @@ function registerIpcHandlers(): void {
   });
 }
 
+ipcMain.handle(BROWSER_ENSURE_CHANNEL, async (_event, input) => {
+  await browserPaneManager?.ensurePane(input);
+});
+ipcMain.handle(BROWSER_DESTROY_CHANNEL, async (_event, input) => {
+  await browserPaneManager?.destroyPane(input);
+});
+ipcMain.handle(BROWSER_SET_BOUNDS_CHANNEL, async (_event, input) => {
+  await browserPaneManager?.setBounds(input);
+});
+ipcMain.handle(BROWSER_SET_VISIBLE_CHANNEL, async (_event, input) => {
+  await browserPaneManager?.setVisible(input);
+});
+ipcMain.handle(BROWSER_NAVIGATE_CHANNEL, async (_event, input) => {
+  await browserPaneManager?.navigate(input);
+});
+ipcMain.handle(BROWSER_GO_BACK_CHANNEL, async (_event, input) => {
+  await browserPaneManager?.goBack(input);
+});
+ipcMain.handle(BROWSER_GO_FORWARD_CHANNEL, async (_event, input) => {
+  await browserPaneManager?.goForward(input);
+});
+ipcMain.handle(BROWSER_RELOAD_CHANNEL, async (_event, input) => {
+  await browserPaneManager?.reload(input);
+});
+ipcMain.handle(BROWSER_STOP_CHANNEL, async (_event, input) => {
+  await browserPaneManager?.stop(input);
+});
+ipcMain.handle(BROWSER_CAPTURE_SCREENSHOT_CHANNEL, async (_event, input) =>
+  browserPaneManager?.captureScreenshot(input),
+);
+ipcMain.handle(BROWSER_GET_SNAPSHOT_CHANNEL, async (_event, input) =>
+  browserPaneManager?.getSnapshot(input),
+);
+ipcMain.handle(BROWSER_SYNC_SHORTCUTS_CHANNEL, async (_event, input) => {
+  await browserPaneManager?.syncShortcutState(input);
+});
+
 function getIconOption(): { icon: string } | Record<string, never> {
   if (process.platform === "darwin") return {}; // macOS uses .icns from app bundle
   const ext = process.platform === "win32" ? "ico" : "png";
@@ -1233,8 +1303,70 @@ function getIconOption(): { icon: string } | Record<string, never> {
   return iconPath ? { icon: iconPath } : {};
 }
 
-function createWindow(): BrowserWindow {
-  const window = new BrowserWindow({
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function runBrowserCompositionProbe(
+  window: BaseWindow,
+  manager: NonNullable<typeof browserPaneManager>,
+): Promise<void> {
+  if (!BROWSER_COMPOSITION_PROBE_URL) return;
+
+  const bounds = window.getContentBounds();
+  const probeBounds = {
+    left: 32,
+    top: 32,
+    width: Math.max(320, bounds.width - 64),
+    height: Math.max(240, bounds.height - 64),
+  };
+
+  console.log(`[browser-probe] start url=${BROWSER_COMPOSITION_PROBE_URL}`);
+
+  try {
+    await manager.ensurePane({
+      paneId: BROWSER_COMPOSITION_PROBE_PANE_ID,
+      url: BROWSER_COMPOSITION_PROBE_URL,
+      targetThreadId: "browser-composition-probe-thread" as never,
+      createdFromThreadId: "browser-composition-probe-thread" as never,
+    });
+    await manager.setBounds({
+      paneId: BROWSER_COMPOSITION_PROBE_PANE_ID,
+      bounds: probeBounds,
+    });
+    await manager.setVisible({
+      paneId: BROWSER_COMPOSITION_PROBE_PANE_ID,
+      visible: true,
+    });
+
+    const deadline = Date.now() + BROWSER_COMPOSITION_PROBE_TIMEOUT_MS;
+    let snapshot = await manager.getSnapshot({ paneId: BROWSER_COMPOSITION_PROBE_PANE_ID });
+    while (snapshot.isLoading && Date.now() < deadline) {
+      await sleep(100);
+      snapshot = await manager.getSnapshot({ paneId: BROWSER_COMPOSITION_PROBE_PANE_ID });
+    }
+
+    const screenshot = await manager.captureScreenshot({
+      paneId: BROWSER_COMPOSITION_PROBE_PANE_ID,
+    });
+    console.log(
+      `[browser-probe] success bytes=${screenshot.sizeBytes} url=${snapshot.url} title=${snapshot.title}`,
+    );
+  } catch (error) {
+    process.exitCode = 1;
+    console.error(`[browser-probe] failure ${formatErrorMessage(error)}`);
+  } finally {
+    await manager.destroyPane({ paneId: BROWSER_COMPOSITION_PROBE_PANE_ID });
+    setTimeout(() => {
+      if (!window.isDestroyed()) window.close();
+    }, 100);
+  }
+}
+
+function createWindow(): BaseWindow {
+  const window = new BaseWindow({
     width: 1100,
     height: 780,
     minWidth: 840,
@@ -1245,6 +1377,8 @@ function createWindow(): BrowserWindow {
     title: APP_DISPLAY_NAME,
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 16, y: 18 },
+  });
+  const appView = new WebContentsView({
     webPreferences: {
       preload: Path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -1252,8 +1386,32 @@ function createWindow(): BrowserWindow {
       sandbox: true,
     },
   });
+  const appStageView = new View();
+  appStageView.setBackgroundColor("#00000000");
+  const browserOverlayView = new View();
+  browserOverlayView.setBackgroundColor("#00000000");
+  const rootContentView = window.contentView;
+  appViewByWindowId.set(window.id, appView);
+  rootContentView.addChildView(appStageView);
+  rootContentView.addChildView(browserOverlayView);
+  appStageView.addChildView(appView);
+  const resizeAppView = () => {
+    const bounds = window.getContentBounds();
+    appStageView.setBounds({ x: 0, y: 0, width: bounds.width, height: bounds.height });
+    browserOverlayView.setBounds({ x: 0, y: 0, width: bounds.width, height: bounds.height });
+    appView.setBounds({ x: 0, y: 0, width: bounds.width, height: bounds.height });
+  };
+  resizeAppView();
+  window.on("resize", resizeAppView);
 
-  window.webContents.on("context-menu", (event, params) => {
+  browserPaneManager = createBrowserPaneManager({
+    window,
+    parentView: browserOverlayView,
+    emitEvent: (event) => appView.webContents.send(BROWSER_EVENT_CHANNEL, event),
+    onOpenExternal: (url) => shell.openExternal(url),
+  });
+
+  appView.webContents.on("context-menu", (event, params) => {
     event.preventDefault();
 
     const menuTemplate: MenuItemConstructorOptions[] = [];
@@ -1262,7 +1420,7 @@ function createWindow(): BrowserWindow {
       for (const suggestion of params.dictionarySuggestions.slice(0, 5)) {
         menuTemplate.push({
           label: suggestion,
-          click: () => window.webContents.replaceMisspelling(suggestion),
+          click: () => appView.webContents.replaceMisspelling(suggestion),
         });
       }
       if (params.dictionarySuggestions.length === 0) {
@@ -1281,7 +1439,7 @@ function createWindow(): BrowserWindow {
     Menu.buildFromTemplate(menuTemplate).popup({ window });
   });
 
-  window.webContents.setWindowOpenHandler(({ url }) => {
+  appView.webContents.setWindowOpenHandler(({ url }) => {
     const externalUrl = getSafeExternalUrl(url);
     if (externalUrl) {
       void shell.openExternal(externalUrl);
@@ -1289,26 +1447,45 @@ function createWindow(): BrowserWindow {
     return { action: "deny" };
   });
 
-  window.on("page-title-updated", (event) => {
-    event.preventDefault();
-    window.setTitle(APP_DISPLAY_NAME);
-  });
-  window.webContents.on("did-finish-load", () => {
+  appView.webContents.on("did-finish-load", () => {
     window.setTitle(APP_DISPLAY_NAME);
     emitUpdateState();
-  });
-  window.once("ready-to-show", () => {
-    window.show();
+    if (!window.isVisible()) {
+      window.show();
+    }
+    if (browserPaneManager && BROWSER_COMPOSITION_PROBE_URL) {
+      void runBrowserCompositionProbe(window, browserPaneManager);
+    }
   });
 
   if (isDevelopment) {
-    void window.loadURL(process.env.VITE_DEV_SERVER_URL as string);
-    window.webContents.openDevTools({ mode: "detach" });
+    void appView.webContents.loadURL(process.env.VITE_DEV_SERVER_URL as string);
+    appView.webContents.openDevTools({ mode: "detach" });
   } else {
-    void window.loadURL(`${DESKTOP_SCHEME}://app/index.html`);
+    void appView.webContents.loadURL(`${DESKTOP_SCHEME}://app/index.html`);
   }
 
   window.on("closed", () => {
+    window.removeListener("resize", resizeAppView);
+    appViewByWindowId.delete(window.id);
+    void browserPaneManager?.destroyAll();
+    try {
+      appStageView.removeChildView(appView);
+    } catch {
+      // App view may already be tearing down.
+    }
+    try {
+      rootContentView.removeChildView(browserOverlayView);
+    } catch {
+      // Root view may already be tearing down.
+    }
+    try {
+      rootContentView.removeChildView(appStageView);
+    } catch {
+      // Root view may already be tearing down.
+    }
+    appView.webContents.close({ waitForBeforeUnload: false });
+    browserPaneManager = null;
     if (mainWindow === window) {
       mainWindow = null;
     }
@@ -1366,7 +1543,7 @@ app
     });
 
     app.on("activate", () => {
-      if (BrowserWindow.getAllWindows().length === 0) {
+      if (BaseWindow.getAllWindows().length === 0) {
         mainWindow = createWindow();
       }
     });

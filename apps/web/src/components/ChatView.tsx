@@ -84,6 +84,7 @@ import {
   type WorkLogEntry,
   PROVIDER_OPTIONS,
   deriveWorkLogEntries,
+  hasActionableProposedPlan,
   hasToolActivityForTurn,
   isLatestTurnSettled,
   formatElapsed,
@@ -127,6 +128,10 @@ import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { summarizeTurnDiffStats } from "../lib/turnDiffTree";
 import { useCommandPaletteStore } from "../commandPaletteStore";
+import {
+  openReplaceFocusedCommandPalette,
+  openSplitCommandPaletteWithPreview,
+} from "../lib/splitPalette";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import BranchToolbar from "./BranchToolbar";
 import GitActionsControl from "./GitActionsControl";
@@ -611,9 +616,10 @@ const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
 
 interface ChatViewProps {
   threadId: ThreadId;
+  onCloseSplitPane?: (() => void) | undefined;
 }
 
-export default function ChatView({ threadId }: ChatViewProps) {
+export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) {
   const threads = useStore((store) => store.threads);
   const projects = useStore((store) => store.projects);
   const markThreadVisited = useStore((store) => store.markThreadVisited);
@@ -662,6 +668,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     (store) => store.loadQueuedMessageIntoComposer,
   );
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
+  const createDraftThread = useComposerDraftStore((store) => store.createDraftThread);
   const draftThread = useComposerDraftStore(
     (store) => store.draftThreadsByThreadId[threadId] ?? null,
   );
@@ -854,6 +861,43 @@ export default function ChatView({ threadId }: ChatViewProps) {
     () => getLatestStartedThreadSelection(threads),
     [threads],
   );
+  const openCommandPalette = useCommandPaletteStore((store) => store.openPalette);
+
+  const openSplitCommandPalette = useCallback(
+    (mode: "split-right" | "split-down") => {
+      openSplitCommandPaletteWithPreview({
+        mode,
+        activeThreadId,
+        previewProjectId:
+          activeProject?.id ?? activeThread?.projectId ?? draftThread?.projectId ?? null,
+        branch: activeThread?.branch ?? null,
+        worktreePath: activeThread?.worktreePath ?? null,
+        envMode: draftThread?.envMode ?? (activeThread?.worktreePath ? "worktree" : "local"),
+        runtimeMode,
+        interactionMode,
+        createDraftThread,
+        openCommandPalette,
+      });
+    },
+    [
+      activeProject?.id,
+      activeThread,
+      activeThreadId,
+      createDraftThread,
+      draftThread?.envMode,
+      draftThread?.projectId,
+      interactionMode,
+      openCommandPalette,
+      runtimeMode,
+    ],
+  );
+
+  const openReplaceFocusedPalette = useCallback(() => {
+    openReplaceFocusedCommandPalette({
+      activeThreadId,
+      openCommandPalette,
+    });
+  }, [activeThreadId, openCommandPalette]);
 
   useEffect(() => {
     if (!activeThread?.id) return;
@@ -1051,7 +1095,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     pendingUserInputs.length === 0 &&
     interactionMode === "plan" &&
     latestTurnSettled &&
-    activeProposedPlan !== null;
+    hasActionableProposedPlan(activeProposedPlan);
   const showPlanSidebarToggle =
     activePlan !== null || activeProposedPlan !== null || planSidebarOpen;
   const activePendingApproval = pendingApprovals[0] ?? null;
@@ -2597,10 +2641,45 @@ export default function ChatView({ threadId }: ChatViewProps) {
         terminalOpen: Boolean(terminalState.terminalOpen),
       };
 
+      if (!shortcutContext.terminalFocus) {
+        const isMac = isMacPlatform(navigator.platform);
+        const key = event.key.toLowerCase();
+        const isSplitRightShortcut = isMac
+          ? event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && key === "d"
+          : event.ctrlKey && !event.metaKey && event.shiftKey && !event.altKey && key === "d";
+        const isSplitDownShortcut = isMac
+          ? event.metaKey && !event.ctrlKey && event.shiftKey && !event.altKey && key === "d"
+          : event.ctrlKey && !event.metaKey && event.shiftKey && !event.altKey && key === "e";
+
+        if (isSplitRightShortcut || isSplitDownShortcut) {
+          event.preventDefault();
+          event.stopPropagation();
+          openSplitCommandPalette(isSplitRightShortcut ? "split-right" : "split-down");
+          return;
+        }
+      }
+
       const command = resolveShortcutCommand(event, keybindings, {
         context: shortcutContext,
       });
-      if (!command) return;
+      if (!command) {
+        if (!shortcutContext.terminalFocus) {
+          const isMac = isMacPlatform(navigator.platform);
+          const isMod = isMac ? event.metaKey : event.ctrlKey;
+          if (
+            isMod &&
+            event.key.toLowerCase() === "w" &&
+            !event.shiftKey &&
+            !event.altKey &&
+            onCloseSplitPane
+          ) {
+            event.preventDefault();
+            event.stopPropagation();
+            onCloseSplitPane();
+          }
+        }
+        return;
+      }
 
       if (command === "terminal.toggle") {
         event.preventDefault();
@@ -2644,6 +2723,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
         return;
       }
 
+      if (command === "chat.splitRight" || command === "chat.splitDown") {
+        event.preventDefault();
+        event.stopPropagation();
+        openSplitCommandPalette(command === "chat.splitRight" ? "split-right" : "split-down");
+        return;
+      }
+
+      if (command === "chat.replaceFocusedPane") {
+        event.preventDefault();
+        event.stopPropagation();
+        openReplaceFocusedPalette();
+        return;
+      }
+
       const scriptId = projectScriptIdFromCommand(command);
       if (!scriptId || !activeProject) return;
       const script = activeProject.scripts.find((entry) => entry.id === scriptId);
@@ -2666,9 +2759,29 @@ export default function ChatView({ threadId }: ChatViewProps) {
     splitTerminal,
     keybindings,
     diffOpen,
+    onCloseSplitPane,
+    openReplaceFocusedPalette,
+    openSplitCommandPalette,
     onToggleDiff,
     toggleTerminalVisibility,
   ]);
+
+  useEffect(() => {
+    const onBrowserCommand = (rawEvent: Event) => {
+      const event = rawEvent as CustomEvent<{ command: string }>;
+      const command = event.detail?.command;
+      if (command === "diff.toggle") {
+        onToggleDiff(!diffOpen);
+        return;
+      }
+      if (command === "chat.splitRight" || command === "chat.splitDown") {
+        openSplitCommandPalette(command === "chat.splitRight" ? "split-right" : "split-down");
+        return;
+      }
+    };
+    window.addEventListener("tether-browser-command", onBrowserCommand);
+    return () => window.removeEventListener("tether-browser-command", onBrowserCommand);
+  }, [diffOpen, onToggleDiff, openSplitCommandPalette]);
 
   const addComposerImages = (files: File[]) => {
     if (!activeThreadId || files.length === 0) return;
@@ -3645,6 +3758,62 @@ export default function ChatView({ threadId }: ChatViewProps) {
     providerOptionsForDispatch,
     selectedProvider,
     settings.enableAssistantStreaming,
+    syncServerReadModel,
+  ]);
+
+  const onDeferProposedPlan = useCallback(async () => {
+    const api = readNativeApi();
+    if (
+      !api ||
+      !activeThread ||
+      !activeProposedPlan ||
+      !hasActionableProposedPlan(activeProposedPlan) ||
+      !isServerThread ||
+      isPendingThreadRun ||
+      isSendBusy ||
+      isConnecting ||
+      sendInFlightRef.current
+    ) {
+      return;
+    }
+
+    const createdAt = new Date().toISOString();
+    sendInFlightRef.current = true;
+    beginSendPhase("sending-turn");
+    const finish = () => {
+      sendInFlightRef.current = false;
+      resetSendPhase();
+    };
+
+    await api.orchestration
+      .dispatchCommand({
+        type: "thread.proposed-plan.defer",
+        commandId: newCommandId(),
+        threadId: activeThread.id,
+        planId: activeProposedPlan.id,
+        createdAt,
+      })
+      .then(() => api.orchestration.getSnapshot())
+      .then((snapshot) => {
+        syncServerReadModel(snapshot);
+      })
+      .catch((err) => {
+        toastManager.add({
+          type: "error",
+          title: "Could not defer plan",
+          description: err instanceof Error ? err.message : "An error occurred while deferring.",
+        });
+      })
+      .then(finish, finish);
+  }, [
+    activeProposedPlan,
+    activeThread,
+    beginSendPhase,
+    isConnecting,
+    isPendingThreadRun,
+    isSendBusy,
+    isServerThread,
+    resetSendPhase,
     syncServerReadModel,
   ]);
 
@@ -4686,6 +4855,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                     onClick={() => void onImplementPlanInNewThread()}
                                   >
                                     Implement in new thread
+                                  </MenuItem>
+                                  <MenuItem
+                                    disabled={composerLocked}
+                                    onClick={() => void onDeferProposedPlan()}
+                                  >
+                                    Defer plan
                                   </MenuItem>
                                 </MenuPopup>
                               </Menu>

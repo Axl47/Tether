@@ -10,6 +10,7 @@ import {
   formatShortcutLabel,
   isChatNewShortcut,
   isChatNewLocalShortcut,
+  isChatReplaceFocusedPaneShortcut,
   isCommandPaletteToggleShortcut,
   isDiffToggleShortcut,
   isOpenFavoriteEditorShortcut,
@@ -31,6 +32,21 @@ function event(overrides: Partial<ShortcutEventLike> = {}): ShortcutEventLike {
     ctrlKey: false,
     shiftKey: false,
     altKey: false,
+    ...overrides,
+  };
+}
+
+function shortcut(
+  key: string,
+  overrides: Partial<Omit<KeybindingShortcut, "key">> = {},
+): KeybindingShortcut {
+  return {
+    key,
+    metaKey: false,
+    ctrlKey: false,
+    shiftKey: false,
+    altKey: false,
+    modKey: false,
     ...overrides,
   };
 }
@@ -84,7 +100,7 @@ const DEFAULT_BINDINGS = compile([
     whenAst: whenIdentifier("terminalFocus"),
   },
   {
-    shortcut: modShortcut("d", { shiftKey: true }),
+    shortcut: modShortcut("n"),
     command: "terminal.new",
     whenAst: whenIdentifier("terminalFocus"),
   },
@@ -94,7 +110,7 @@ const DEFAULT_BINDINGS = compile([
     whenAst: whenIdentifier("terminalFocus"),
   },
   {
-    shortcut: modShortcut("d"),
+    shortcut: shortcut("d", { ctrlKey: true }),
     command: "diff.toggle",
     whenAst: whenNot(whenIdentifier("terminalFocus")),
   },
@@ -105,6 +121,36 @@ const DEFAULT_BINDINGS = compile([
   },
   { shortcut: modShortcut("o", { shiftKey: true }), command: "chat.new" },
   { shortcut: modShortcut("n", { shiftKey: true }), command: "chat.newLocal" },
+  {
+    shortcut: shortcut("d", { metaKey: true }),
+    command: "chat.splitRight",
+    whenAst: whenNot(whenIdentifier("terminalFocus")),
+  },
+  {
+    shortcut: shortcut("d", { ctrlKey: true, shiftKey: true }),
+    command: "chat.splitRight",
+    whenAst: whenNot(whenIdentifier("terminalFocus")),
+  },
+  {
+    shortcut: shortcut("d", { metaKey: true, shiftKey: true }),
+    command: "chat.splitDown",
+    whenAst: whenNot(whenIdentifier("terminalFocus")),
+  },
+  {
+    shortcut: shortcut("e", { ctrlKey: true, shiftKey: true }),
+    command: "chat.splitDown",
+    whenAst: whenNot(whenIdentifier("terminalFocus")),
+  },
+  {
+    shortcut: shortcut("d", { metaKey: true, altKey: true }),
+    command: "chat.replaceFocusedPane",
+    whenAst: whenNot(whenIdentifier("terminalFocus")),
+  },
+  {
+    shortcut: shortcut("i", { ctrlKey: true, shiftKey: true }),
+    command: "chat.replaceFocusedPane",
+    whenAst: whenNot(whenIdentifier("terminalFocus")),
+  },
   { shortcut: modShortcut("o"), command: "editor.openFavorite" },
 ]);
 
@@ -133,7 +179,7 @@ describe("split/new/close terminal shortcuts", () => {
       }),
     );
     assert.isFalse(
-      isTerminalNewShortcut(event({ key: "d", ctrlKey: true, shiftKey: true }), DEFAULT_BINDINGS, {
+      isTerminalNewShortcut(event({ key: "n", ctrlKey: true }), DEFAULT_BINDINGS, {
         platform: "Linux",
         context: { terminalFocus: false },
       }),
@@ -154,7 +200,7 @@ describe("split/new/close terminal shortcuts", () => {
       }),
     );
     assert.isTrue(
-      isTerminalNewShortcut(event({ key: "d", ctrlKey: true, shiftKey: true }), DEFAULT_BINDINGS, {
+      isTerminalNewShortcut(event({ key: "n", ctrlKey: true }), DEFAULT_BINDINGS, {
         platform: "Linux",
         context: { terminalFocus: true },
       }),
@@ -251,6 +297,10 @@ describe("shortcutLabelForCommand", () => {
       shortcutLabelForCommand(DEFAULT_BINDINGS, "editor.openFavorite", "Linux"),
       "Ctrl+O",
     );
+    assert.strictEqual(
+      shortcutLabelForCommand(DEFAULT_BINDINGS, "chat.replaceFocusedPane", "MacIntel"),
+      "⌥⌘D",
+    );
   });
 });
 
@@ -278,6 +328,27 @@ describe("chat/editor shortcuts", () => {
       isChatNewLocalShortcut(event({ key: "n", ctrlKey: true, shiftKey: true }), DEFAULT_BINDINGS, {
         platform: "Linux",
       }),
+    );
+  });
+
+  it("matches chat.replaceFocusedPane shortcut", () => {
+    assert.isTrue(
+      isChatReplaceFocusedPaneShortcut(
+        event({ key: "d", metaKey: true, altKey: true }),
+        DEFAULT_BINDINGS,
+        {
+          platform: "MacIntel",
+        },
+      ),
+    );
+    assert.isTrue(
+      isChatReplaceFocusedPaneShortcut(
+        event({ key: "i", ctrlKey: true, shiftKey: true }),
+        DEFAULT_BINDINGS,
+        {
+          platform: "Linux",
+        },
+      ),
     );
   });
 
@@ -311,16 +382,40 @@ describe("chat/editor shortcuts", () => {
 
   it("matches diff.toggle shortcut outside terminal focus", () => {
     assert.isTrue(
-      isDiffToggleShortcut(event({ key: "d", metaKey: true }), DEFAULT_BINDINGS, {
-        platform: "MacIntel",
+      isDiffToggleShortcut(event({ key: "d", ctrlKey: true }), DEFAULT_BINDINGS, {
+        platform: "Linux",
         context: { terminalFocus: false },
       }),
     );
     assert.isFalse(
-      isDiffToggleShortcut(event({ key: "d", metaKey: true }), DEFAULT_BINDINGS, {
-        platform: "MacIntel",
+      isDiffToggleShortcut(event({ key: "d", ctrlKey: true }), DEFAULT_BINDINGS, {
+        platform: "Linux",
         context: { terminalFocus: true },
       }),
+    );
+  });
+
+  it("resolves split palette shortcuts", () => {
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: "d", metaKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { terminalFocus: false },
+      }),
+      "chat.splitRight",
+    );
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: "e", ctrlKey: true, shiftKey: true }), DEFAULT_BINDINGS, {
+        platform: "Linux",
+        context: { terminalFocus: false },
+      }),
+      "chat.splitDown",
+    );
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: "d", metaKey: true, altKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { terminalFocus: false },
+      }),
+      "chat.replaceFocusedPane",
     );
   });
 });

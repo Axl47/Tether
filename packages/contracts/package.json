@@ -17,11 +17,11 @@
     }
   },
   "scripts": {
-    "dev": "tsdown src/index.ts --format esm,cjs --dts --watch --clean",
-    "build": "tsdown src/index.ts --format esm,cjs --dts --clean",
+    "dev": "bun --bun ./node_modules/.bin/tsdown src/index.ts --format esm,cjs --dts --watch --clean",
+    "build": "bun --bun ./node_modules/.bin/tsdown src/index.ts --format esm,cjs --dts --clean",
     "prepare": "effect-language-service patch",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "bun --bun ./node_modules/.bin/vitest run"
   },
   "dependencies": {
     "effect": "catalog:"

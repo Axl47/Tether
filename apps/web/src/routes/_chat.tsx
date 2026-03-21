@@ -4,6 +4,7 @@ import { Outlet, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 
 import { CommandPalette } from "../components/CommandPalette";
+import { DiffWorkerPoolProvider } from "../components/DiffWorkerPoolProvider";
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import ThreadSidebar from "../components/Sidebar";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
@@ -18,6 +19,8 @@ import { selectThreadTerminalState, useTerminalStateStore } from "../terminalSta
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { Sidebar, SidebarProvider } from "~/components/ui/sidebar";
 import { useAppSettings } from "~/appSettings";
+import { useBrowserPaneRuntimeStore } from "../browserPaneRuntimeStore";
+import { readNativeApi } from "../nativeApi";
 
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 
@@ -36,6 +39,61 @@ function ChatRouteGlobalShortcuts() {
       : false,
   );
   const { settings: appSettings } = useAppSettings();
+  const handleBrowserEvent = useBrowserPaneRuntimeStore((state) => state.handleEvent);
+
+  useEffect(() => {
+    const api = readNativeApi();
+    if (!api) return;
+    void api.browser.syncShortcutState({ keybindings, terminalOpen, platform: navigator.platform });
+    const unsubscribe = api.browser.onEvent((event) => {
+      handleBrowserEvent(event);
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, [handleBrowserEvent, keybindings, terminalOpen]);
+
+  useEffect(() => {
+    const onBrowserShortcut = (rawEvent: Event) => {
+      const event = rawEvent as CustomEvent<{ command: string }>;
+      const command = event.detail?.command;
+      if (!command) return;
+      if (command === "commandPalette.toggle") {
+        toggleOpen();
+        return;
+      }
+      if (command === "chat.newLocal") {
+        void startNewLocalThreadFromContext({
+          activeDraftThread,
+          activeThread,
+          defaultThreadEnvMode: appSettings.defaultThreadEnvMode,
+          handleNewThread,
+          projects,
+        });
+        return;
+      }
+      if (command === "chat.new") {
+        void startNewThreadFromContext({
+          activeDraftThread,
+          activeThread,
+          defaultThreadEnvMode: appSettings.defaultThreadEnvMode,
+          handleNewThread,
+          projects,
+        });
+        return;
+      }
+      window.dispatchEvent(new CustomEvent("tether-browser-command", { detail: { command } }));
+    };
+    window.addEventListener("tether-browser-shortcut", onBrowserShortcut);
+    return () => window.removeEventListener("tether-browser-shortcut", onBrowserShortcut);
+  }, [
+    activeDraftThread,
+    activeThread,
+    appSettings.defaultThreadEnvMode,
+    handleNewThread,
+    projects,
+    toggleOpen,
+  ]);
 
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {
@@ -143,7 +201,9 @@ function ChatRouteLayout() {
         >
           <ThreadSidebar />
         </Sidebar>
-        <Outlet />
+        <DiffWorkerPoolProvider>
+          <Outlet />
+        </DiffWorkerPoolProvider>
       </SidebarProvider>
     </CommandPalette>
   );

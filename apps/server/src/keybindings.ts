@@ -69,11 +69,17 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+d", command: "terminal.split", when: "terminalFocus" },
   { key: "mod+n", command: "terminal.new", when: "terminalFocus" },
   { key: "mod+w", command: "terminal.close", when: "terminalFocus" },
-  { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
+  { key: "ctrl+d", command: "diff.toggle", when: "!terminalFocus" },
   { key: "mod+k", command: "commandPalette.toggle", when: "!terminalFocus" },
   { key: "mod+n", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+o", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+n", command: "chat.newLocal", when: "!terminalFocus" },
+  { key: "cmd+d", command: "chat.splitRight", when: "!terminalFocus" },
+  { key: "ctrl+shift+d", command: "chat.splitRight", when: "!terminalFocus" },
+  { key: "cmd+shift+d", command: "chat.splitDown", when: "!terminalFocus" },
+  { key: "ctrl+shift+e", command: "chat.splitDown", when: "!terminalFocus" },
+  { key: "cmd+alt+d", command: "chat.replaceFocusedPane", when: "!terminalFocus" },
+  { key: "ctrl+shift+i", command: "chat.replaceFocusedPane", when: "!terminalFocus" },
   { key: "mod+o", command: "editor.openFavorite" },
 ];
 

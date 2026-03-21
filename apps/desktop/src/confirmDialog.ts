@@ -1,10 +1,10 @@
-import { type BrowserWindow, dialog } from "electron";
+import { type BaseWindow, dialog } from "electron";
 
 const CONFIRM_BUTTON_INDEX = 1;
 
 export async function showDesktopConfirmDialog(
   message: string,
-  ownerWindow: BrowserWindow | null,
+  ownerWindow: BaseWindow | null,
 ): Promise<boolean> {
   const normalizedMessage = message.trim();
   if (normalizedMessage.length === 0) {

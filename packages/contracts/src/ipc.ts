@@ -1,4 +1,15 @@
 import type {
+  BrowserPaneEnsureInput,
+  BrowserPaneSetBoundsInput,
+  BrowserPaneSetVisibleInput,
+  BrowserPaneNavigateInput,
+  BrowserPaneCommandInput,
+  BrowserPaneCaptureScreenshotResult,
+  BrowserPaneSnapshot,
+  BrowserPaneEvent,
+  BrowserPaneShortcutState,
+} from "./browser";
+import type {
   GitCheckoutInput,
   GitCreateBranchInput,
   GitPreparePullRequestThreadInput,
@@ -102,6 +113,23 @@ export interface DesktopUpdateActionResult {
 }
 
 export interface DesktopBridge {
+  browser: {
+    ensurePane: (input: BrowserPaneEnsureInput) => Promise<void>;
+    destroyPane: (input: BrowserPaneCommandInput) => Promise<void>;
+    setBounds: (input: BrowserPaneSetBoundsInput) => Promise<void>;
+    setVisible: (input: BrowserPaneSetVisibleInput) => Promise<void>;
+    navigate: (input: BrowserPaneNavigateInput) => Promise<void>;
+    goBack: (input: BrowserPaneCommandInput) => Promise<void>;
+    goForward: (input: BrowserPaneCommandInput) => Promise<void>;
+    reload: (input: BrowserPaneCommandInput) => Promise<void>;
+    stop: (input: BrowserPaneCommandInput) => Promise<void>;
+    captureScreenshot: (
+      input: BrowserPaneCommandInput,
+    ) => Promise<BrowserPaneCaptureScreenshotResult>;
+    getSnapshot: (input: BrowserPaneCommandInput) => Promise<BrowserPaneSnapshot>;
+    onEvent: (listener: (event: BrowserPaneEvent) => void) => () => void;
+    syncShortcutState: (state: BrowserPaneShortcutState) => Promise<void>;
+  };
   getWsUrl: () => string | null;
   pickFolder: () => Promise<string | null>;
   confirm: (message: string) => Promise<boolean>;
@@ -170,6 +198,23 @@ export interface NativeApi {
   server: {
     getConfig: () => Promise<ServerConfig>;
     upsertKeybinding: (input: ServerUpsertKeybindingInput) => Promise<ServerUpsertKeybindingResult>;
+  };
+  browser: {
+    ensurePane: (input: BrowserPaneEnsureInput) => Promise<void>;
+    destroyPane: (input: BrowserPaneCommandInput) => Promise<void>;
+    setBounds: (input: BrowserPaneSetBoundsInput) => Promise<void>;
+    setVisible: (input: BrowserPaneSetVisibleInput) => Promise<void>;
+    navigate: (input: BrowserPaneNavigateInput) => Promise<void>;
+    goBack: (input: BrowserPaneCommandInput) => Promise<void>;
+    goForward: (input: BrowserPaneCommandInput) => Promise<void>;
+    reload: (input: BrowserPaneCommandInput) => Promise<void>;
+    stop: (input: BrowserPaneCommandInput) => Promise<void>;
+    captureScreenshot: (
+      input: BrowserPaneCommandInput,
+    ) => Promise<BrowserPaneCaptureScreenshotResult>;
+    getSnapshot: (input: BrowserPaneCommandInput) => Promise<BrowserPaneSnapshot>;
+    onEvent: (callback: (event: BrowserPaneEvent) => void) => () => void;
+    syncShortcutState: (state: BrowserPaneShortcutState) => Promise<void>;
   };
   orchestration: {
     getSnapshot: () => Promise<OrchestrationReadModel>;
