@@ -14,6 +14,7 @@ import {
   nativeTheme,
   protocol,
   shell,
+  WebContentsView,
 } from "electron";
 import type { MenuItemConstructorOptions } from "electron";
 import * as Effect from "effect/Effect";
@@ -97,6 +98,7 @@ const DESKTOP_UPDATE_ALLOW_PRERELEASE = false;
 type DesktopUpdateErrorContext = DesktopUpdateState["errorContext"];
 
 let mainWindow: BrowserWindow | null = null;
+const appViewByWindowId = new Map<number, WebContentsView>();
 let backendProcess: ChildProcess.ChildProcess | null = null;
 let backendPort = 0;
 let backendAuthToken = "";
@@ -513,18 +515,20 @@ function dispatchMenuAction(action: string): void {
   if (!existingWindow) {
     mainWindow = targetWindow;
   }
+  const targetWebContents = getAppWebContents(targetWindow);
+  if (!targetWebContents) return;
 
   const send = () => {
     if (targetWindow.isDestroyed()) return;
-    targetWindow.webContents.send(MENU_ACTION_CHANNEL, action);
+    targetWebContents.send(MENU_ACTION_CHANNEL, action);
     if (!targetWindow.isVisible()) {
       targetWindow.show();
     }
     targetWindow.focus();
   };
 
-  if (targetWindow.webContents.isLoadingMainFrame()) {
-    targetWindow.webContents.once("did-finish-load", send);
+  if (targetWebContents.isLoadingMainFrame()) {
+    targetWebContents.once("did-finish-load", send);
     return;
   }
 
@@ -743,8 +747,17 @@ function clearUpdatePollTimer(): void {
 function emitUpdateState(): void {
   for (const window of BrowserWindow.getAllWindows()) {
     if (window.isDestroyed()) continue;
-    window.webContents.send(UPDATE_STATE_CHANNEL, updateState);
+    getAppWebContents(window)?.send(UPDATE_STATE_CHANNEL, updateState);
   }
+}
+
+function getAppView(window: BrowserWindow | null | undefined): WebContentsView | null {
+  if (!window || window.isDestroyed()) return null;
+  return appViewByWindowId.get(window.id) ?? null;
+}
+
+function getAppWebContents(window: BrowserWindow | null | undefined): Electron.WebContents | null {
+  return getAppView(window)?.webContents ?? null;
 }
 
 function setUpdateState(patch: Partial<DesktopUpdateState>): void {
@@ -1297,6 +1310,8 @@ function createWindow(): BrowserWindow {
     title: APP_DISPLAY_NAME,
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 16, y: 18 },
+  });
+  const appView = new WebContentsView({
     webPreferences: {
       preload: Path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -1304,14 +1319,24 @@ function createWindow(): BrowserWindow {
       sandbox: true,
     },
   });
+  const rootContentView = window.contentView;
+  appViewByWindowId.set(window.id, appView);
+  rootContentView.addChildView(appView);
+  const resizeAppView = () => {
+    const bounds = window.getContentBounds();
+    appView.setBounds({ x: 0, y: 0, width: bounds.width, height: bounds.height });
+  };
+  resizeAppView();
+  window.on("resize", resizeAppView);
 
   browserPaneManager = createBrowserPaneManager({
     window,
-    emitEvent: (event) => window.webContents.send(BROWSER_EVENT_CHANNEL, event),
+    parentView: rootContentView,
+    emitEvent: (event) => appView.webContents.send(BROWSER_EVENT_CHANNEL, event),
     onOpenExternal: (url) => shell.openExternal(url),
   });
 
-  window.webContents.on("context-menu", (event, params) => {
+  appView.webContents.on("context-menu", (event, params) => {
     event.preventDefault();
 
     const menuTemplate: MenuItemConstructorOptions[] = [];
@@ -1320,7 +1345,7 @@ function createWindow(): BrowserWindow {
       for (const suggestion of params.dictionarySuggestions.slice(0, 5)) {
         menuTemplate.push({
           label: suggestion,
-          click: () => window.webContents.replaceMisspelling(suggestion),
+          click: () => appView.webContents.replaceMisspelling(suggestion),
         });
       }
       if (params.dictionarySuggestions.length === 0) {
@@ -1339,7 +1364,7 @@ function createWindow(): BrowserWindow {
     Menu.buildFromTemplate(menuTemplate).popup({ window });
   });
 
-  window.webContents.setWindowOpenHandler(({ url }) => {
+  appView.webContents.setWindowOpenHandler(({ url }) => {
     const externalUrl = getSafeExternalUrl(url);
     if (externalUrl) {
       void shell.openExternal(externalUrl);
@@ -1351,23 +1376,31 @@ function createWindow(): BrowserWindow {
     event.preventDefault();
     window.setTitle(APP_DISPLAY_NAME);
   });
-  window.webContents.on("did-finish-load", () => {
+  appView.webContents.on("did-finish-load", () => {
     window.setTitle(APP_DISPLAY_NAME);
     emitUpdateState();
-  });
-  window.once("ready-to-show", () => {
-    window.show();
+    if (!window.isVisible()) {
+      window.show();
+    }
   });
 
   if (isDevelopment) {
-    void window.loadURL(process.env.VITE_DEV_SERVER_URL as string);
-    window.webContents.openDevTools({ mode: "detach" });
+    void appView.webContents.loadURL(process.env.VITE_DEV_SERVER_URL as string);
+    appView.webContents.openDevTools({ mode: "detach" });
   } else {
-    void window.loadURL(`${DESKTOP_SCHEME}://app/index.html`);
+    void appView.webContents.loadURL(`${DESKTOP_SCHEME}://app/index.html`);
   }
 
   window.on("closed", () => {
+    window.removeListener("resize", resizeAppView);
+    appViewByWindowId.delete(window.id);
     void browserPaneManager?.destroyAll();
+    try {
+      rootContentView.removeChildView(appView);
+    } catch {
+      // Root view may already be tearing down.
+    }
+    appView.webContents.close({ waitForBeforeUnload: false });
     browserPaneManager = null;
     if (mainWindow === window) {
       mainWindow = null;

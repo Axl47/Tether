@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { BrowserWindow, WebContentsView, session as electronSession } from "electron";
+import {
+  BrowserWindow,
+  WebContentsView,
+  session as electronSession,
+  type View,
+  type WebContents,
+} from "electron";
 import type {
   BrowserPaneBounds,
   BrowserPaneCaptureScreenshotResult,
@@ -22,6 +28,7 @@ const MAX_NETWORK_ENTRIES = 200;
 interface ManagedBrowserPane {
   paneId: string;
   view: WebContentsView;
+  webContents: WebContents;
   visible: boolean;
   bounds: BrowserPaneBounds;
   url: string;
@@ -46,6 +53,10 @@ function pushBounded<T>(items: T[], item: T, limit: number): void {
   if (items.length > limit) items.splice(0, items.length - limit);
 }
 
+function requestKey(webContentsId: number, requestId: number): string {
+  return `${webContentsId}:${requestId}`;
+}
+
 function setPaneBoundsInternal(pane: ManagedBrowserPane, bounds: BrowserPaneBounds): void {
   pane.bounds = bounds;
   pane.view.setBounds({
@@ -58,10 +69,12 @@ function setPaneBoundsInternal(pane: ManagedBrowserPane, bounds: BrowserPaneBoun
 
 export function createBrowserPaneManager(input: {
   window: BrowserWindow;
+  parentView: View;
   emitEvent: (event: BrowserPaneEvent) => void;
   onOpenExternal: (url: string) => Promise<void> | void;
 }) {
   const panes = new Map<string, ManagedBrowserPane>();
+  const requestStartedAtByKey = new Map<string, number>();
   let shortcutState: BrowserPaneShortcutState = {
     keybindings: [],
     terminalOpen: false,
@@ -74,7 +87,7 @@ export function createBrowserPaneManager(input: {
 
   const ensureViewAttached = (pane: ManagedBrowserPane) => {
     try {
-      input.window.contentView.addChildView(pane.view);
+      input.parentView.addChildView(pane.view);
     } catch {
       // Already attached.
     }
@@ -104,9 +117,11 @@ export function createBrowserPaneManager(input: {
         contextIsolation: true,
       },
     });
+    const paneWebContents = view.webContents;
     const pane: ManagedBrowserPane = {
       paneId,
       view,
+      webContents: paneWebContents,
       visible: false,
       bounds: { left: 0, top: 0, width: 0, height: 0 },
       url,
@@ -120,17 +135,17 @@ export function createBrowserPaneManager(input: {
     view.setVisible(false);
     setPaneBoundsInternal(pane, pane.bounds);
 
-    view.webContents.setWindowOpenHandler(({ url: nextUrl }) => {
+    paneWebContents.setWindowOpenHandler(({ url: nextUrl }) => {
       void input.onOpenExternal(nextUrl);
       return { action: "deny" };
     });
-    view.webContents.on("will-navigate", (event, nextUrl) => {
+    paneWebContents.on("will-navigate", (event, nextUrl) => {
       if (!allowedPaneUrl(nextUrl)) {
         event.preventDefault();
         void input.onOpenExternal(nextUrl);
       }
     });
-    view.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+    paneWebContents.on("console-message", (_event, level, message, line, sourceId) => {
       const entry: BrowserPaneConsoleEntry = {
         id: randomUUID(),
         paneId,
@@ -143,7 +158,7 @@ export function createBrowserPaneManager(input: {
       pushBounded(pane.consoleEntries, entry, MAX_CONSOLE_ENTRIES);
       input.emitEvent({ type: "console", entry });
     });
-    view.webContents.on("before-input-event", (event, details) => {
+    paneWebContents.on("before-input-event", (event, details) => {
       const command = resolveShortcutCommand(
         {
           type: details.type,
@@ -175,28 +190,40 @@ export function createBrowserPaneManager(input: {
       event.preventDefault();
       input.emitEvent({ type: "shortcut", paneId, command: command as never });
     });
-    view.webContents.on("focus", () => input.emitEvent({ type: "focus", paneId }));
-    view.webContents.on("page-title-updated", (event, title) => {
+    paneWebContents.on("focus", () => input.emitEvent({ type: "focus", paneId }));
+    paneWebContents.on("page-title-updated", (event, title) => {
       event.preventDefault();
       pane.title = title;
       emitSnapshot(pane);
     });
-    view.webContents.on("did-start-loading", () => {
+    paneWebContents.on("did-start-loading", () => {
       pane.isLoading = true;
       emitSnapshot(pane);
     });
     const syncNavigation = () => {
-      pane.isLoading = view.webContents.isLoading();
-      pane.url = view.webContents.getURL() || pane.url;
-      pane.title = view.webContents.getTitle() || pane.title;
+      if (pane.webContents.isDestroyed()) {
+        pane.isLoading = false;
+        emitSnapshot(pane);
+        return;
+      }
+      pane.isLoading = pane.webContents.isLoading();
+      pane.url = pane.webContents.getURL() || pane.url;
+      pane.title = pane.webContents.getTitle() || pane.title;
       emitSnapshot(pane);
     };
-    view.webContents.on("did-stop-loading", syncNavigation);
-    view.webContents.on("did-navigate", syncNavigation);
-    view.webContents.on("did-navigate-in-page", syncNavigation);
+    paneWebContents.on("did-stop-loading", syncNavigation);
+    paneWebContents.on("did-navigate", syncNavigation);
+    paneWebContents.on("did-navigate-in-page", syncNavigation);
 
+    paneSession.webRequest.onBeforeRequest((details, callback) => {
+      requestStartedAtByKey.set(requestKey(paneWebContents.id, details.id), details.timestamp);
+      callback({});
+    });
     paneSession.webRequest.onCompleted((details) => {
-      if (details.webContentsId !== view.webContents.id) return;
+      if (details.webContentsId !== paneWebContents.id) return;
+      const key = requestKey(paneWebContents.id, details.id);
+      const startedAt = requestStartedAtByKey.get(key) ?? null;
+      requestStartedAtByKey.delete(key);
       const entry: BrowserPaneNetworkEntry = {
         id: randomUUID(),
         paneId,
@@ -205,14 +232,17 @@ export function createBrowserPaneManager(input: {
         url: details.url,
         status: details.statusCode,
         resourceType: details.resourceType ?? null,
-        durationMs: null,
+        durationMs: startedAt === null ? null : Math.max(0, details.timestamp - startedAt),
         failureReason: null,
       };
       pushBounded(pane.networkEntries, entry, MAX_NETWORK_ENTRIES);
       input.emitEvent({ type: "network", entry });
     });
     paneSession.webRequest.onErrorOccurred((details) => {
-      if (details.webContentsId !== view.webContents.id) return;
+      if (details.webContentsId !== paneWebContents.id) return;
+      const key = requestKey(paneWebContents.id, details.id);
+      const startedAt = requestStartedAtByKey.get(key) ?? null;
+      requestStartedAtByKey.delete(key);
       const entry: BrowserPaneNetworkEntry = {
         id: randomUUID(),
         paneId,
@@ -221,7 +251,7 @@ export function createBrowserPaneManager(input: {
         url: details.url,
         status: null,
         resourceType: details.resourceType ?? null,
-        durationMs: null,
+        durationMs: startedAt === null ? null : Math.max(0, details.timestamp - startedAt),
         failureReason: details.error,
       };
       pushBounded(pane.networkEntries, entry, MAX_NETWORK_ENTRIES);
@@ -229,15 +259,32 @@ export function createBrowserPaneManager(input: {
     });
 
     const safeUrl = allowedPaneUrl(url) ?? "about:blank";
-    await view.webContents.loadURL(safeUrl);
+    try {
+      await paneWebContents.loadURL(safeUrl);
+    } catch {
+      pane.url = safeUrl;
+      pane.isLoading = false;
+    }
     syncNavigation();
   };
 
   const destroyPane = async ({ paneId }: BrowserPaneCommandInput): Promise<void> => {
     const pane = panes.get(paneId);
     if (!pane) return;
-    input.window.contentView.removeChildView(pane.view);
-    pane.view.webContents.close({ waitForBeforeUnload: false });
+    try {
+      input.parentView.removeChildView(pane.view);
+    } catch {
+      // Parent view may already be tearing down.
+    }
+    const keyPrefix = `${pane.webContents.id}:`;
+    for (const key of requestStartedAtByKey.keys()) {
+      if (key.startsWith(keyPrefix)) {
+        requestStartedAtByKey.delete(key);
+      }
+    }
+    if (!pane.webContents.isDestroyed()) {
+      pane.webContents.close({ waitForBeforeUnload: false });
+    }
     panes.delete(paneId);
   };
 
@@ -249,23 +296,46 @@ export function createBrowserPaneManager(input: {
       return;
     }
     if (safeUrl === "about:blank") {
-      await pane.view.webContents.loadURL("about:blank");
-      pane.url = "about:blank";
+      try {
+        await pane.webContents.loadURL("about:blank");
+      } catch {
+        pane.url = "about:blank";
+        pane.isLoading = false;
+      }
       emitSnapshot(pane);
       return;
     }
-    await pane.view.webContents.loadURL(safeUrl);
+    try {
+      await pane.webContents.loadURL(safeUrl);
+    } catch {
+      pane.url = safeUrl;
+      pane.isLoading = false;
+      emitSnapshot(pane);
+    }
   };
 
   const getSnapshot = ({ paneId }: BrowserPaneCommandInput): BrowserPaneSnapshot => {
     const pane = getPane(paneId);
+    if (pane.webContents.isDestroyed()) {
+      return {
+        paneId,
+        url: pane.url,
+        title: pane.title,
+        canGoBack: false,
+        canGoForward: false,
+        isLoading: false,
+        visible: pane.visible,
+        consoleEntries: [...pane.consoleEntries],
+        networkEntries: [...pane.networkEntries],
+      };
+    }
     return {
       paneId,
-      url: pane.view.webContents.getURL() || pane.url,
-      title: pane.view.webContents.getTitle() || pane.title,
-      canGoBack: pane.view.webContents.navigationHistory.canGoBack(),
-      canGoForward: pane.view.webContents.navigationHistory.canGoForward(),
-      isLoading: pane.view.webContents.isLoading(),
+      url: pane.webContents.getURL() || pane.url,
+      title: pane.webContents.getTitle() || pane.title,
+      canGoBack: pane.webContents.navigationHistory.canGoBack(),
+      canGoForward: pane.webContents.navigationHistory.canGoForward(),
+      isLoading: pane.webContents.isLoading(),
       visible: pane.visible,
       consoleEntries: [...pane.consoleEntries],
       networkEntries: [...pane.networkEntries],
@@ -289,24 +359,30 @@ export function createBrowserPaneManager(input: {
     navigate,
     goBack: async ({ paneId }: BrowserPaneCommandInput) => {
       const pane = getPane(paneId);
-      if (pane.view.webContents.navigationHistory.canGoBack())
-        pane.view.webContents.navigationHistory.goBack();
+      if (!pane.webContents.isDestroyed() && pane.webContents.navigationHistory.canGoBack())
+        pane.webContents.navigationHistory.goBack();
     },
     goForward: async ({ paneId }: BrowserPaneCommandInput) => {
       const pane = getPane(paneId);
-      if (pane.view.webContents.navigationHistory.canGoForward())
-        pane.view.webContents.navigationHistory.goForward();
+      if (!pane.webContents.isDestroyed() && pane.webContents.navigationHistory.canGoForward())
+        pane.webContents.navigationHistory.goForward();
     },
     reload: async ({ paneId }: BrowserPaneCommandInput) => {
-      getPane(paneId).view.webContents.reload();
+      const pane = getPane(paneId);
+      if (!pane.webContents.isDestroyed()) pane.webContents.reload();
     },
     stop: async ({ paneId }: BrowserPaneCommandInput) => {
-      getPane(paneId).view.webContents.stop();
+      const pane = getPane(paneId);
+      if (!pane.webContents.isDestroyed()) pane.webContents.stop();
     },
     captureScreenshot: async ({
       paneId,
     }: BrowserPaneCommandInput): Promise<BrowserPaneCaptureScreenshotResult> => {
-      const image = await getPane(paneId).view.webContents.capturePage();
+      const pane = getPane(paneId);
+      if (pane.webContents.isDestroyed()) {
+        throw new Error(`Browser pane is not available: ${paneId}`);
+      }
+      const image = await pane.webContents.capturePage();
       const png = image.toPNG();
       return {
         paneId,
@@ -326,9 +402,12 @@ export function createBrowserPaneManager(input: {
       }
     },
     destroyAll: async () => {
-      for (const paneId of panes.keys()) {
+      while (panes.size > 0) {
+        const paneId = panes.keys().next().value;
+        if (!paneId) break;
         await destroyPane({ paneId });
       }
+      requestStartedAtByKey.clear();
     },
   };
 }

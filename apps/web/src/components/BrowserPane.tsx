@@ -1,11 +1,14 @@
-import type { BrowserPaneLeaf } from "../splitViewStore";
+import type { ThreadId } from "@t3tools/contracts";
+import { collectThreadIds, type BrowserPaneLeaf, useSplitViewStore } from "../splitViewStore";
 import { readNativeApi } from "../nativeApi";
 import { useBrowserPaneRuntimeStore } from "../browserPaneRuntimeStore";
-import { useSplitViewStore } from "../splitViewStore";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useComposerDraftStore, type ComposerImageAttachment } from "../composerDraftStore";
+import { formatDuration } from "../session-logic";
+import { useStore } from "../store";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { toastManager } from "./ui/toast";
 
 function intersectRects(
@@ -56,11 +59,13 @@ export function BrowserPane({ leaf }: { leaf: BrowserPaneLeaf }) {
   const [drawer, setDrawer] = useState<"console" | "network" | null>(null);
   const snapshot = useBrowserPaneRuntimeStore((state) => state.snapshotsByPaneId[leaf.paneId]);
   const setSnapshot = useBrowserPaneRuntimeStore((state) => state.setSnapshot);
+  const splitGroup = useSplitViewStore((state) => state.group);
   const updateBrowserPanePersistedState = useSplitViewStore(
     (state) => state.updateBrowserPanePersistedState,
   );
   const addImage = useComposerDraftStore((state) => state.addImage);
   const setPrompt = useComposerDraftStore((state) => state.setPrompt);
+  const threads = useStore((state) => state.threads);
 
   useEffect(() => {
     if (!api) return;
@@ -155,6 +160,17 @@ export function BrowserPane({ leaf }: { leaf: BrowserPaneLeaf }) {
   }, [api, leaf.paneId]);
 
   const title = snapshot?.title || "Browser";
+  const targetThreadOptions = useMemo(() => {
+    const openThreadIds = splitGroup ? collectThreadIds(splitGroup.root) : [leaf.targetThreadId];
+    const uniqueThreadIds = [...new Set(openThreadIds)];
+    return uniqueThreadIds.map((threadId) => {
+      const thread = threads.find((entry) => entry.id === threadId);
+      return {
+        id: threadId,
+        label: thread?.title?.trim() || threadId,
+      };
+    });
+  }, [leaf.targetThreadId, splitGroup, threads]);
   const consoleText = useMemo(
     () =>
       snapshot?.consoleEntries
@@ -165,9 +181,12 @@ export function BrowserPane({ leaf }: { leaf: BrowserPaneLeaf }) {
   const networkText = useMemo(
     () =>
       snapshot?.networkEntries
-        .map(
-          (entry) => `- ${entry.timestamp} ${entry.method} ${entry.url} ${entry.status ?? "ERR"}`,
-        )
+        .map((entry) => {
+          const status = entry.status ?? "ERR";
+          const duration = entry.durationMs === null ? null : formatDuration(entry.durationMs);
+          const failureReason = entry.failureReason ? ` (${entry.failureReason})` : "";
+          return `- ${entry.timestamp} ${entry.method} ${entry.url} ${status}${duration ? ` · ${duration}` : ""}${failureReason}`;
+        })
         .join("\n") ?? "",
     [snapshot],
   );
@@ -238,6 +257,27 @@ export function BrowserPane({ leaf }: { leaf: BrowserPaneLeaf }) {
         >
           Network
         </Button>
+        <Select
+          value={leaf.targetThreadId}
+          onValueChange={(value) =>
+            updateBrowserPanePersistedState(leaf.paneId, { targetThreadId: value as ThreadId })
+          }
+          items={targetThreadOptions.map((option) => ({
+            value: option.id,
+            label: option.label,
+          }))}
+        >
+          <SelectTrigger size="sm" className="max-w-56 min-w-40 shrink-0">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectPopup>
+            {targetThreadOptions.map((option) => (
+              <SelectItem key={option.id} value={option.id}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
         <Button
           size="sm"
           variant="outline"
