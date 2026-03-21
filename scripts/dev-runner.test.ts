@@ -176,6 +176,31 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         assert.equal(env.VITE_DEV_SERVER_URL, "http://100.88.10.4:5733");
       }),
     );
+
+    it.effect(
+      "uses wildcard websocket host by default so LAN and localhost clients both work",
+      () =>
+        Effect.gen(function* () {
+          const env = yield* createDevRunnerEnv({
+            mode: "dev",
+            baseEnv: {},
+            serverOffset: 0,
+            webOffset: 0,
+            stateDir: undefined,
+            authToken: undefined,
+            noBrowser: undefined,
+            autoBootstrapProjectFromCwd: undefined,
+            logWebSocketEvents: undefined,
+            host: undefined,
+            publicHost: undefined,
+            port: undefined,
+            devUrl: undefined,
+          });
+
+          assert.equal(env.VITE_WS_URL, "ws://0.0.0.0:3773");
+          assert.equal(env.VITE_DEV_SERVER_URL, "http://localhost:5733");
+        }),
+    );
   });
 
   describe("findFirstAvailableOffset", () => {

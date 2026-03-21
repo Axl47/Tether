@@ -57,6 +57,7 @@ import { APP_STAGE_LABEL, APP_VERSION } from "../branding";
 import { buildLocalDraftThread, hasDraftThreadContent } from "../draftThreads";
 import { copyTextToClipboard } from "../lib/clipboard";
 import { newCommandId, newProjectId, newThreadId } from "../lib/utils";
+import { resolveConfiguredWsUrl, resolveServerHttpOriginFromWsUrl } from "../lib/wsUrl";
 import { DEFAULT_SIDEBAR_THREAD_SORT, SIDEBAR_THREAD_SORT_OPTIONS } from "../sidebarThreadSort";
 import { useStore } from "../store";
 import { isChatNewLocalShortcut, isChatNewShortcut, shortcutLabelForCommand } from "../keybindings";
@@ -319,21 +320,8 @@ function SidebarThreadRow({
  * sources WsTransport uses, converting ws(s) to http(s).
  */
 function getServerHttpOrigin(): string {
-  const bridgeUrl = window.desktopBridge?.getWsUrl();
-  const envUrl = import.meta.env.VITE_WS_URL as string | undefined;
-  const wsUrl =
-    bridgeUrl && bridgeUrl.length > 0
-      ? bridgeUrl
-      : envUrl && envUrl.length > 0
-        ? envUrl
-        : `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.hostname}:${window.location.port}`;
-  // Parse to extract just the origin, dropping path/query (e.g. ?token=…)
-  const httpUrl = wsUrl.replace(/^wss:/, "https:").replace(/^ws:/, "http:");
-  try {
-    return new URL(httpUrl).origin;
-  } catch {
-    return httpUrl;
-  }
+  const wsUrl = resolveConfiguredWsUrl();
+  return resolveServerHttpOriginFromWsUrl(wsUrl);
 }
 
 const serverHttpOrigin = getServerHttpOrigin();
