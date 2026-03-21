@@ -12,6 +12,7 @@ import {
   ProjectScript,
   OrchestrationThread,
   ProjectCreateCommand,
+  ClientOrchestrationCommand,
   ThreadTurnStartCommand,
   ThreadCreatedPayload,
   ThreadTurnDiff,
@@ -21,6 +22,7 @@ import {
 const decodeTurnDiffInput = Schema.decodeUnknownEffect(OrchestrationGetTurnDiffInput);
 const decodeThreadTurnDiff = Schema.decodeUnknownEffect(ThreadTurnDiff);
 const decodeProjectCreateCommand = Schema.decodeUnknownEffect(ProjectCreateCommand);
+const decodeClientOrchestrationCommand = Schema.decodeUnknownEffect(ClientOrchestrationCommand);
 const decodeProjectScript = Schema.decodeUnknownEffect(ProjectScript);
 const decodeThreadTurnStartCommand = Schema.decodeUnknownEffect(ThreadTurnStartCommand);
 const decodeThreadTurnStartRequestedPayload = Schema.decodeUnknownEffect(
@@ -103,6 +105,24 @@ it.effect("rejects command fields that become empty after trim", () =>
       }),
     );
     assert.strictEqual(result._tag, "Failure");
+  }),
+);
+
+it.effect("accepts thread.proposed-plan.defer in client command schema", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeClientOrchestrationCommand({
+      type: "thread.proposed-plan.defer",
+      commandId: "cmd-plan-defer-1",
+      threadId: "thread-1",
+      planId: "plan:thread-1:turn:turn-1",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.strictEqual(parsed.type, "thread.proposed-plan.defer");
+    if (parsed.type !== "thread.proposed-plan.defer") {
+      return;
+    }
+    assert.strictEqual(parsed.threadId, "thread-1");
+    assert.strictEqual(parsed.planId, "plan:thread-1:turn:turn-1");
   }),
 );
 

@@ -84,6 +84,7 @@ import {
   type WorkLogEntry,
   PROVIDER_OPTIONS,
   deriveWorkLogEntries,
+  hasActionableProposedPlan,
   hasToolActivityForTurn,
   isLatestTurnSettled,
   formatElapsed,
@@ -1094,7 +1095,7 @@ export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) 
     pendingUserInputs.length === 0 &&
     interactionMode === "plan" &&
     latestTurnSettled &&
-    activeProposedPlan !== null;
+    hasActionableProposedPlan(activeProposedPlan);
   const showPlanSidebarToggle =
     activePlan !== null || activeProposedPlan !== null || planSidebarOpen;
   const activePendingApproval = pendingApprovals[0] ?? null;
@@ -3760,6 +3761,62 @@ export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) 
     syncServerReadModel,
   ]);
 
+  const onDeferProposedPlan = useCallback(async () => {
+    const api = readNativeApi();
+    if (
+      !api ||
+      !activeThread ||
+      !activeProposedPlan ||
+      !hasActionableProposedPlan(activeProposedPlan) ||
+      !isServerThread ||
+      isPendingThreadRun ||
+      isSendBusy ||
+      isConnecting ||
+      sendInFlightRef.current
+    ) {
+      return;
+    }
+
+    const createdAt = new Date().toISOString();
+    sendInFlightRef.current = true;
+    beginSendPhase("sending-turn");
+    const finish = () => {
+      sendInFlightRef.current = false;
+      resetSendPhase();
+    };
+
+    await api.orchestration
+      .dispatchCommand({
+        type: "thread.proposed-plan.defer",
+        commandId: newCommandId(),
+        threadId: activeThread.id,
+        planId: activeProposedPlan.id,
+        createdAt,
+      })
+      .then(() => api.orchestration.getSnapshot())
+      .then((snapshot) => {
+        syncServerReadModel(snapshot);
+      })
+      .catch((err) => {
+        toastManager.add({
+          type: "error",
+          title: "Could not defer plan",
+          description: err instanceof Error ? err.message : "An error occurred while deferring.",
+        });
+      })
+      .then(finish, finish);
+  }, [
+    activeProposedPlan,
+    activeThread,
+    beginSendPhase,
+    isConnecting,
+    isPendingThreadRun,
+    isSendBusy,
+    isServerThread,
+    resetSendPhase,
+    syncServerReadModel,
+  ]);
+
   const onProviderModelSelect = useCallback(
     (provider: ProviderKind, model: ModelSlug) => {
       if (!activeThread) return;
@@ -4798,6 +4855,12 @@ export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) 
                                     onClick={() => void onImplementPlanInNewThread()}
                                   >
                                     Implement in new thread
+                                  </MenuItem>
+                                  <MenuItem
+                                    disabled={composerLocked}
+                                    onClick={() => void onDeferProposedPlan()}
+                                  >
+                                    Defer plan
                                   </MenuItem>
                                 </MenuPopup>
                               </Menu>
