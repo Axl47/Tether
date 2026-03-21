@@ -188,16 +188,56 @@ export function shortcutLabelForCommand(
   return bestShortcut ? formatShortcutLabel(bestShortcut, platform) : null;
 }
 
-export const isTerminalToggleShortcut = (event: ShortcutEventLike, keybindings: ResolvedKeybindingsConfig, options?: ShortcutMatchOptions) => matchesCommandShortcut(event, keybindings, "terminal.toggle", options);
-export const isTerminalSplitShortcut = (event: ShortcutEventLike, keybindings: ResolvedKeybindingsConfig, options?: ShortcutMatchOptions) => matchesCommandShortcut(event, keybindings, "terminal.split", options);
-export const isTerminalNewShortcut = (event: ShortcutEventLike, keybindings: ResolvedKeybindingsConfig, options?: ShortcutMatchOptions) => matchesCommandShortcut(event, keybindings, "terminal.new", options);
-export const isTerminalCloseShortcut = (event: ShortcutEventLike, keybindings: ResolvedKeybindingsConfig, options?: ShortcutMatchOptions) => matchesCommandShortcut(event, keybindings, "terminal.close", options);
-export const isDiffToggleShortcut = (event: ShortcutEventLike, keybindings: ResolvedKeybindingsConfig, options?: ShortcutMatchOptions) => matchesCommandShortcut(event, keybindings, "diff.toggle", options);
-export const isCommandPaletteToggleShortcut = (event: ShortcutEventLike, keybindings: ResolvedKeybindingsConfig, options?: ShortcutMatchOptions) => matchesCommandShortcut(event, keybindings, "commandPalette.toggle", options);
-export const isChatNewShortcut = (event: ShortcutEventLike, keybindings: ResolvedKeybindingsConfig, options?: ShortcutMatchOptions) => matchesCommandShortcut(event, keybindings, "chat.new", options);
-export const isChatNewLocalShortcut = (event: ShortcutEventLike, keybindings: ResolvedKeybindingsConfig, options?: ShortcutMatchOptions) => matchesCommandShortcut(event, keybindings, "chat.newLocal", options);
-export const isChatReplaceFocusedPaneShortcut = (event: ShortcutEventLike, keybindings: ResolvedKeybindingsConfig, options?: ShortcutMatchOptions) => matchesCommandShortcut(event, keybindings, "chat.replaceFocusedPane", options);
-export const isOpenFavoriteEditorShortcut = (event: ShortcutEventLike, keybindings: ResolvedKeybindingsConfig, options?: ShortcutMatchOptions) => matchesCommandShortcut(event, keybindings, "editor.openFavorite", options);
+export const isTerminalToggleShortcut = (
+  event: ShortcutEventLike,
+  keybindings: ResolvedKeybindingsConfig,
+  options?: ShortcutMatchOptions,
+) => matchesCommandShortcut(event, keybindings, "terminal.toggle", options);
+export const isTerminalSplitShortcut = (
+  event: ShortcutEventLike,
+  keybindings: ResolvedKeybindingsConfig,
+  options?: ShortcutMatchOptions,
+) => matchesCommandShortcut(event, keybindings, "terminal.split", options);
+export const isTerminalNewShortcut = (
+  event: ShortcutEventLike,
+  keybindings: ResolvedKeybindingsConfig,
+  options?: ShortcutMatchOptions,
+) => matchesCommandShortcut(event, keybindings, "terminal.new", options);
+export const isTerminalCloseShortcut = (
+  event: ShortcutEventLike,
+  keybindings: ResolvedKeybindingsConfig,
+  options?: ShortcutMatchOptions,
+) => matchesCommandShortcut(event, keybindings, "terminal.close", options);
+export const isDiffToggleShortcut = (
+  event: ShortcutEventLike,
+  keybindings: ResolvedKeybindingsConfig,
+  options?: ShortcutMatchOptions,
+) => matchesCommandShortcut(event, keybindings, "diff.toggle", options);
+export const isCommandPaletteToggleShortcut = (
+  event: ShortcutEventLike,
+  keybindings: ResolvedKeybindingsConfig,
+  options?: ShortcutMatchOptions,
+) => matchesCommandShortcut(event, keybindings, "commandPalette.toggle", options);
+export const isChatNewShortcut = (
+  event: ShortcutEventLike,
+  keybindings: ResolvedKeybindingsConfig,
+  options?: ShortcutMatchOptions,
+) => matchesCommandShortcut(event, keybindings, "chat.new", options);
+export const isChatNewLocalShortcut = (
+  event: ShortcutEventLike,
+  keybindings: ResolvedKeybindingsConfig,
+  options?: ShortcutMatchOptions,
+) => matchesCommandShortcut(event, keybindings, "chat.newLocal", options);
+export const isChatReplaceFocusedPaneShortcut = (
+  event: ShortcutEventLike,
+  keybindings: ResolvedKeybindingsConfig,
+  options?: ShortcutMatchOptions,
+) => matchesCommandShortcut(event, keybindings, "chat.replaceFocusedPane", options);
+export const isOpenFavoriteEditorShortcut = (
+  event: ShortcutEventLike,
+  keybindings: ResolvedKeybindingsConfig,
+  options?: ShortcutMatchOptions,
+) => matchesCommandShortcut(event, keybindings, "editor.openFavorite", options);
 
 export function isTerminalClearShortcut(
   event: ShortcutEventLike,
@@ -205,8 +245,16 @@ export function isTerminalClearShortcut(
 ): boolean {
   if (event.type !== undefined && event.type !== "keydown") return false;
   const key = event.key.toLowerCase();
-  if (key === "l" && event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) return true;
-  return isMacPlatform(platform) && key === "k" && event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey;
+  if (key === "l" && event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey)
+    return true;
+  return (
+    isMacPlatform(platform) &&
+    key === "k" &&
+    event.metaKey &&
+    !event.ctrlKey &&
+    !event.altKey &&
+    !event.shiftKey
+  );
 }
 
 export function terminalNavigationShortcutData(

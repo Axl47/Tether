@@ -1848,9 +1848,12 @@ export default function Sidebar() {
                 const isExpanded = expandedWorkspaceIds.has(workspace.id);
                 const workspaceThreadIds = collectThreadIds(workspace.root);
                 const isWorkspaceActive = activeWorkspaceId === workspace.id && isSplitView;
+                const focusedWorkspaceLeaf =
+                  findLeaf(workspace.root, workspace.focusedLeafId) ?? firstLeaf(workspace.root);
                 const workspaceFocusedThreadId =
-                  findLeaf(workspace.root, workspace.focusedLeafId)?.threadId ??
-                  firstLeaf(workspace.root).threadId;
+                  focusedWorkspaceLeaf.paneType === "thread"
+                    ? focusedWorkspaceLeaf.threadId
+                    : focusedWorkspaceLeaf.targetThreadId;
 
                 return (
                   <SidebarMenuItem key={workspace.id}>

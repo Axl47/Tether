@@ -1,4 +1,4 @@
-import type { ThreadId } from "./model";
+import type { ThreadId } from "./baseSchemas";
 import type { KeybindingCommand, ResolvedKeybindingsConfig } from "./keybindings";
 
 export interface BrowserPaneBounds {

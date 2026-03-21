@@ -528,6 +528,7 @@ function OpenCommandPaletteDialog() {
     settings.defaultThreadEnvMode,
     splitGroup,
     splitSourceThreadId,
+    splitThreadWithBrowser,
     openReplaceFocusedSplitPalette,
     openSplitPalette,
   ]);

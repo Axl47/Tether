@@ -123,7 +123,9 @@ export interface DesktopBridge {
     goForward: (input: BrowserPaneCommandInput) => Promise<void>;
     reload: (input: BrowserPaneCommandInput) => Promise<void>;
     stop: (input: BrowserPaneCommandInput) => Promise<void>;
-    captureScreenshot: (input: BrowserPaneCommandInput) => Promise<BrowserPaneCaptureScreenshotResult>;
+    captureScreenshot: (
+      input: BrowserPaneCommandInput,
+    ) => Promise<BrowserPaneCaptureScreenshotResult>;
     getSnapshot: (input: BrowserPaneCommandInput) => Promise<BrowserPaneSnapshot>;
     onEvent: (listener: (event: BrowserPaneEvent) => void) => () => void;
     syncShortcutState: (state: BrowserPaneShortcutState) => Promise<void>;
@@ -207,7 +209,9 @@ export interface NativeApi {
     goForward: (input: BrowserPaneCommandInput) => Promise<void>;
     reload: (input: BrowserPaneCommandInput) => Promise<void>;
     stop: (input: BrowserPaneCommandInput) => Promise<void>;
-    captureScreenshot: (input: BrowserPaneCommandInput) => Promise<BrowserPaneCaptureScreenshotResult>;
+    captureScreenshot: (
+      input: BrowserPaneCommandInput,
+    ) => Promise<BrowserPaneCaptureScreenshotResult>;
     getSnapshot: (input: BrowserPaneCommandInput) => Promise<BrowserPaneSnapshot>;
     onEvent: (callback: (event: BrowserPaneEvent) => void) => () => void;
     syncShortcutState: (state: BrowserPaneShortcutState) => Promise<void>;

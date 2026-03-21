@@ -63,11 +63,13 @@ function makeWorkspace(
         {
           type: "leaf",
           id: `${id}-leaf-1`,
+          paneType: "thread",
           threadId: firstThreadId,
         },
         {
           type: "leaf",
           id: `${id}-leaf-2`,
+          paneType: "thread",
           threadId: secondThreadId,
         },
       ],

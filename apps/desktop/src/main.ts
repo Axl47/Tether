@@ -1268,8 +1268,12 @@ ipcMain.handle(BROWSER_RELOAD_CHANNEL, async (_event, input) => {
 ipcMain.handle(BROWSER_STOP_CHANNEL, async (_event, input) => {
   await browserPaneManager?.stop(input);
 });
-ipcMain.handle(BROWSER_CAPTURE_SCREENSHOT_CHANNEL, async (_event, input) => browserPaneManager?.captureScreenshot(input));
-ipcMain.handle(BROWSER_GET_SNAPSHOT_CHANNEL, async (_event, input) => browserPaneManager?.getSnapshot(input));
+ipcMain.handle(BROWSER_CAPTURE_SCREENSHOT_CHANNEL, async (_event, input) =>
+  browserPaneManager?.captureScreenshot(input),
+);
+ipcMain.handle(BROWSER_GET_SNAPSHOT_CHANNEL, async (_event, input) =>
+  browserPaneManager?.getSnapshot(input),
+);
 ipcMain.handle(BROWSER_SYNC_SHORTCUTS_CHANNEL, async (_event, input) => {
   await browserPaneManager?.syncShortcutState(input);
 });

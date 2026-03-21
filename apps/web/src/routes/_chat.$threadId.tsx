@@ -549,7 +549,9 @@ function ChatThreadRouteView() {
             <SplitPanelRoot
               renderLeaf={renderLeaf}
               onSplitDrop={handleSplitDrop}
-              onFocusLeaf={(leaf) => { if (leaf.paneType === "thread") focusSplitThread(leaf.threadId); }}
+              onFocusLeaf={(leaf) => {
+                if (leaf.paneType === "thread") focusSplitThread(leaf.threadId);
+              }}
             />
           </SidebarInset>
           {!shouldUseDiffSheet && (

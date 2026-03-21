@@ -87,5 +87,4 @@ Add a new contracts module at `packages/contracts/src/browser.ts` and re-export 
 
 Revision note: Created on 2026-03-21 at implementation start so the browser pane work can be tracked as a living ExecPlan.
 
-
 Revision note: Updated on 2026-03-21 after implementing the first end-to-end browser pane slice and recording the remaining environment validation limitation.

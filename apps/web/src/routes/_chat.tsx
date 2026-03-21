@@ -41,7 +41,6 @@ function ChatRouteGlobalShortcuts() {
   const { settings: appSettings } = useAppSettings();
   const handleBrowserEvent = useBrowserPaneRuntimeStore((state) => state.handleEvent);
 
-
   useEffect(() => {
     const api = readNativeApi();
     if (!api) return;
@@ -87,7 +86,14 @@ function ChatRouteGlobalShortcuts() {
     };
     window.addEventListener("tether-browser-shortcut", onBrowserShortcut);
     return () => window.removeEventListener("tether-browser-shortcut", onBrowserShortcut);
-  }, [activeDraftThread, activeThread, appSettings.defaultThreadEnvMode, handleNewThread, projects, toggleOpen]);
+  }, [
+    activeDraftThread,
+    activeThread,
+    appSettings.defaultThreadEnvMode,
+    handleNewThread,
+    projects,
+    toggleOpen,
+  ]);
 
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {

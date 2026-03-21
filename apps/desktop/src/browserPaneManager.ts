@@ -4,6 +4,7 @@ import type {
   BrowserPaneBounds,
   BrowserPaneCaptureScreenshotResult,
   BrowserPaneCommandInput,
+  BrowserPaneConsoleEntry,
   BrowserPaneEnsureInput,
   BrowserPaneEvent,
   BrowserPaneNetworkEntry,
@@ -26,7 +27,7 @@ interface ManagedBrowserPane {
   url: string;
   title: string;
   isLoading: boolean;
-  consoleEntries: BrowserPaneEvent[];
+  consoleEntries: BrowserPaneConsoleEntry[];
   networkEntries: BrowserPaneNetworkEntry[];
 }
 
@@ -45,13 +46,27 @@ function pushBounded<T>(items: T[], item: T, limit: number): void {
   if (items.length > limit) items.splice(0, items.length - limit);
 }
 
+function setPaneBoundsInternal(pane: ManagedBrowserPane, bounds: BrowserPaneBounds): void {
+  pane.bounds = bounds;
+  pane.view.setBounds({
+    x: Math.round(bounds.left),
+    y: Math.round(bounds.top),
+    width: Math.max(0, Math.round(bounds.width)),
+    height: Math.max(0, Math.round(bounds.height)),
+  });
+}
+
 export function createBrowserPaneManager(input: {
   window: BrowserWindow;
   emitEvent: (event: BrowserPaneEvent) => void;
   onOpenExternal: (url: string) => Promise<void> | void;
 }) {
   const panes = new Map<string, ManagedBrowserPane>();
-  let shortcutState: BrowserPaneShortcutState = { keybindings: [], terminalOpen: false, platform: process.platform };
+  let shortcutState: BrowserPaneShortcutState = {
+    keybindings: [],
+    terminalOpen: false,
+    platform: process.platform,
+  };
 
   const emitSnapshot = (pane: ManagedBrowserPane): void => {
     input.emitEvent({ type: "snapshot", snapshot: getSnapshot({ paneId: pane.paneId }) });
@@ -71,11 +86,6 @@ export function createBrowserPaneManager(input: {
     return pane;
   };
 
-  const setPaneBoundsInternal = (pane: ManagedBrowserPane, bounds: BrowserPaneBounds) => {
-    pane.bounds = bounds;
-    pane.view.setBounds({ x: Math.round(bounds.left), y: Math.round(bounds.top), width: Math.max(0, Math.round(bounds.width)), height: Math.max(0, Math.round(bounds.height)) });
-  };
-
   const ensurePane = async ({ paneId, url }: BrowserPaneEnsureInput): Promise<void> => {
     const existing = panes.get(paneId);
     if (existing) {
@@ -88,7 +98,6 @@ export function createBrowserPaneManager(input: {
     const view = new WebContentsView({
       webPreferences: {
         sandbox: true,
-        preload: undefined,
         nodeIntegration: false,
         session: paneSession,
         webviewTag: false,
@@ -122,20 +131,17 @@ export function createBrowserPaneManager(input: {
       }
     });
     view.webContents.on("console-message", (_event, level, message, line, sourceId) => {
-      const entry = {
-        type: "console" as const,
-        entry: {
-          id: randomUUID(),
-          paneId,
-          timestamp: new Date().toISOString(),
-          level: level >= 3 ? "error" : level === 2 ? "warning" : level === 1 ? "info" : "log",
-          message,
-          line,
-          sourceId,
-        },
+      const entry: BrowserPaneConsoleEntry = {
+        id: randomUUID(),
+        paneId,
+        timestamp: new Date().toISOString(),
+        level: level >= 3 ? "error" : level === 2 ? "warning" : level === 1 ? "info" : "log",
+        message,
+        line,
+        sourceId,
       };
       pushBounded(pane.consoleEntries, entry, MAX_CONSOLE_ENTRIES);
-      input.emitEvent(entry);
+      input.emitEvent({ type: "console", entry });
     });
     view.webContents.on("before-input-event", (event, details) => {
       const command = resolveShortcutCommand(
@@ -148,10 +154,24 @@ export function createBrowserPaneManager(input: {
           altKey: details.alt,
         },
         shortcutState.keybindings,
-        { context: { terminalFocus: false, terminalOpen: shortcutState.terminalOpen }, platform: shortcutState.platform },
+        {
+          context: { terminalFocus: false, terminalOpen: shortcutState.terminalOpen },
+          platform: shortcutState.platform,
+        },
       );
       if (!command) return;
-      if (!["commandPalette.toggle", "diff.toggle", "chat.splitRight", "chat.splitDown", "chat.new", "chat.newLocal", "editor.openFavorite"].includes(command)) return;
+      if (
+        ![
+          "commandPalette.toggle",
+          "diff.toggle",
+          "chat.splitRight",
+          "chat.splitDown",
+          "chat.new",
+          "chat.newLocal",
+          "editor.openFavorite",
+        ].includes(command)
+      )
+        return;
       event.preventDefault();
       input.emitEvent({ type: "shortcut", paneId, command: command as never });
     });
@@ -247,7 +267,7 @@ export function createBrowserPaneManager(input: {
       canGoForward: pane.view.webContents.navigationHistory.canGoForward(),
       isLoading: pane.view.webContents.isLoading(),
       visible: pane.visible,
-      consoleEntries: pane.consoleEntries.flatMap((event) => (event.type === "console" ? [event.entry] : [])),
+      consoleEntries: [...pane.consoleEntries],
       networkEntries: [...pane.networkEntries],
     };
   };
@@ -269,11 +289,13 @@ export function createBrowserPaneManager(input: {
     navigate,
     goBack: async ({ paneId }: BrowserPaneCommandInput) => {
       const pane = getPane(paneId);
-      if (pane.view.webContents.navigationHistory.canGoBack()) pane.view.webContents.navigationHistory.goBack();
+      if (pane.view.webContents.navigationHistory.canGoBack())
+        pane.view.webContents.navigationHistory.goBack();
     },
     goForward: async ({ paneId }: BrowserPaneCommandInput) => {
       const pane = getPane(paneId);
-      if (pane.view.webContents.navigationHistory.canGoForward()) pane.view.webContents.navigationHistory.goForward();
+      if (pane.view.webContents.navigationHistory.canGoForward())
+        pane.view.webContents.navigationHistory.goForward();
     },
     reload: async ({ paneId }: BrowserPaneCommandInput) => {
       getPane(paneId).view.webContents.reload();
@@ -281,7 +303,9 @@ export function createBrowserPaneManager(input: {
     stop: async ({ paneId }: BrowserPaneCommandInput) => {
       getPane(paneId).view.webContents.stop();
     },
-    captureScreenshot: async ({ paneId }: BrowserPaneCommandInput): Promise<BrowserPaneCaptureScreenshotResult> => {
+    captureScreenshot: async ({
+      paneId,
+    }: BrowserPaneCommandInput): Promise<BrowserPaneCaptureScreenshotResult> => {
       const image = await getPane(paneId).view.webContents.capturePage();
       const png = image.toPNG();
       return {
@@ -302,7 +326,7 @@ export function createBrowserPaneManager(input: {
       }
     },
     destroyAll: async () => {
-      for (const paneId of [...panes.keys()]) {
+      for (const paneId of panes.keys()) {
         await destroyPane({ paneId });
       }
     },
