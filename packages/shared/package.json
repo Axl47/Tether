@@ -40,7 +40,7 @@
   "scripts": {
     "prepare": "effect-language-service patch",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "bun --bun ./node_modules/.bin/vitest run"
   },
   "dependencies": {
     "@t3tools/contracts": "workspace:*",

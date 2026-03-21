@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import {
-  BrowserWindow,
+  BaseWindow,
+  View,
   WebContentsView,
   session as electronSession,
-  type View,
   type WebContents,
 } from "electron";
 import type {
@@ -27,6 +27,7 @@ const MAX_NETWORK_ENTRIES = 200;
 
 interface ManagedBrowserPane {
   paneId: string;
+  containerView: View;
   view: WebContentsView;
   webContents: WebContents;
   visible: boolean;
@@ -36,6 +37,33 @@ interface ManagedBrowserPane {
   isLoading: boolean;
   consoleEntries: BrowserPaneConsoleEntry[];
   networkEntries: BrowserPaneNetworkEntry[];
+}
+
+function buildSnapshot(pane: ManagedBrowserPane): BrowserPaneSnapshot {
+  if (pane.webContents.isDestroyed()) {
+    return {
+      paneId: pane.paneId,
+      url: pane.url,
+      title: pane.title,
+      canGoBack: false,
+      canGoForward: false,
+      isLoading: false,
+      visible: pane.visible,
+      consoleEntries: [...pane.consoleEntries],
+      networkEntries: [...pane.networkEntries],
+    };
+  }
+  return {
+    paneId: pane.paneId,
+    url: pane.webContents.getURL() || pane.url,
+    title: pane.webContents.getTitle() || pane.title,
+    canGoBack: pane.webContents.navigationHistory.canGoBack(),
+    canGoForward: pane.webContents.navigationHistory.canGoForward(),
+    isLoading: pane.webContents.isLoading(),
+    visible: pane.visible,
+    consoleEntries: [...pane.consoleEntries],
+    networkEntries: [...pane.networkEntries],
+  };
 }
 
 function allowedPaneUrl(rawUrl: string): string | null {
@@ -59,16 +87,22 @@ function requestKey(webContentsId: number, requestId: number): string {
 
 function setPaneBoundsInternal(pane: ManagedBrowserPane, bounds: BrowserPaneBounds): void {
   pane.bounds = bounds;
-  pane.view.setBounds({
+  pane.containerView.setBounds({
     x: Math.round(bounds.left),
     y: Math.round(bounds.top),
+    width: Math.max(0, Math.round(bounds.width)),
+    height: Math.max(0, Math.round(bounds.height)),
+  });
+  pane.view.setBounds({
+    x: 0,
+    y: 0,
     width: Math.max(0, Math.round(bounds.width)),
     height: Math.max(0, Math.round(bounds.height)),
   });
 }
 
 export function createBrowserPaneManager(input: {
-  window: BrowserWindow;
+  window: BaseWindow;
   parentView: View;
   emitEvent: (event: BrowserPaneEvent) => void;
   onOpenExternal: (url: string) => Promise<void> | void;
@@ -82,12 +116,17 @@ export function createBrowserPaneManager(input: {
   };
 
   const emitSnapshot = (pane: ManagedBrowserPane): void => {
-    input.emitEvent({ type: "snapshot", snapshot: getSnapshot({ paneId: pane.paneId }) });
+    input.emitEvent({ type: "snapshot", snapshot: buildSnapshot(pane) });
   };
 
   const ensureViewAttached = (pane: ManagedBrowserPane) => {
     try {
-      input.parentView.addChildView(pane.view);
+      input.parentView.addChildView(pane.containerView);
+    } catch {
+      // Already attached.
+    }
+    try {
+      pane.containerView.addChildView(pane.view);
     } catch {
       // Already attached.
     }
@@ -117,9 +156,12 @@ export function createBrowserPaneManager(input: {
         contextIsolation: true,
       },
     });
+    const containerView = new View();
+    containerView.setBackgroundColor("#00000000");
     const paneWebContents = view.webContents;
     const pane: ManagedBrowserPane = {
       paneId,
+      containerView,
       view,
       webContents: paneWebContents,
       visible: false,
@@ -132,6 +174,7 @@ export function createBrowserPaneManager(input: {
     };
     panes.set(paneId, pane);
     ensureViewAttached(pane);
+    containerView.setVisible(false);
     view.setVisible(false);
     setPaneBoundsInternal(pane, pane.bounds);
 
@@ -272,7 +315,12 @@ export function createBrowserPaneManager(input: {
     const pane = panes.get(paneId);
     if (!pane) return;
     try {
-      input.parentView.removeChildView(pane.view);
+      pane.containerView.removeChildView(pane.view);
+    } catch {
+      // Child may already be detached.
+    }
+    try {
+      input.parentView.removeChildView(pane.containerView);
     } catch {
       // Parent view may already be tearing down.
     }
@@ -316,30 +364,7 @@ export function createBrowserPaneManager(input: {
 
   const getSnapshot = ({ paneId }: BrowserPaneCommandInput): BrowserPaneSnapshot => {
     const pane = getPane(paneId);
-    if (pane.webContents.isDestroyed()) {
-      return {
-        paneId,
-        url: pane.url,
-        title: pane.title,
-        canGoBack: false,
-        canGoForward: false,
-        isLoading: false,
-        visible: pane.visible,
-        consoleEntries: [...pane.consoleEntries],
-        networkEntries: [...pane.networkEntries],
-      };
-    }
-    return {
-      paneId,
-      url: pane.webContents.getURL() || pane.url,
-      title: pane.webContents.getTitle() || pane.title,
-      canGoBack: pane.webContents.navigationHistory.canGoBack(),
-      canGoForward: pane.webContents.navigationHistory.canGoForward(),
-      isLoading: pane.webContents.isLoading(),
-      visible: pane.visible,
-      consoleEntries: [...pane.consoleEntries],
-      networkEntries: [...pane.networkEntries],
-    };
+    return buildSnapshot(pane);
   };
 
   return {
@@ -353,6 +378,7 @@ export function createBrowserPaneManager(input: {
       const pane = getPane(paneId);
       pane.visible = visible;
       ensureViewAttached(pane);
+      pane.containerView.setVisible(visible);
       pane.view.setVisible(visible);
       emitSnapshot(pane);
     },
@@ -398,6 +424,7 @@ export function createBrowserPaneManager(input: {
     hideAll: async () => {
       for (const pane of panes.values()) {
         pane.visible = false;
+        pane.containerView.setVisible(false);
         pane.view.setVisible(false);
       }
     },

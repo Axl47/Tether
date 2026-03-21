@@ -1,5 +1,6 @@
 import type { ThreadId } from "@t3tools/contracts";
 import { collectThreadIds, type BrowserPaneLeaf, useSplitViewStore } from "../splitViewStore";
+import { registerBrowserPaneHost } from "../browserPaneLayoutCoordinator";
 import { readNativeApi } from "../nativeApi";
 import { useBrowserPaneRuntimeStore } from "../browserPaneRuntimeStore";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -10,22 +11,6 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { toastManager } from "./ui/toast";
-
-function intersectRects(
-  a: DOMRect | { left: number; top: number; right: number; bottom: number },
-  b: DOMRect | { left: number; top: number; right: number; bottom: number },
-) {
-  const left = Math.max(a.left, b.left);
-  const top = Math.max(a.top, b.top);
-  const right = Math.min(a.right, b.right);
-  const bottom = Math.min(a.bottom, b.bottom);
-  return {
-    left,
-    top,
-    width: Math.max(0, right - left),
-    height: Math.max(0, bottom - top),
-  };
-}
 
 function makeAttachmentFromDataUrl(dataUrl: string, name: string): ComposerImageAttachment {
   const [header = "", payload = ""] = dataUrl.split(",", 2);
@@ -48,13 +33,6 @@ function makeAttachmentFromDataUrl(dataUrl: string, name: string): ComposerImage
 export function BrowserPane({ leaf }: { leaf: BrowserPaneLeaf }) {
   const api = readNativeApi();
   const hostRef = useRef<HTMLDivElement>(null);
-  const lastBoundsRef = useRef<{
-    left: number;
-    top: number;
-    width: number;
-    height: number;
-    visible: boolean;
-  } | null>(null);
   const [url, setUrl] = useState(leaf.url);
   const [drawer, setDrawer] = useState<"console" | "network" | null>(null);
   const snapshot = useBrowserPaneRuntimeStore((state) => state.snapshotsByPaneId[leaf.paneId]);
@@ -99,64 +77,11 @@ export function BrowserPane({ leaf }: { leaf: BrowserPaneLeaf }) {
 
   useLayoutEffect(() => {
     if (!api || !hostRef.current) return;
-    let frameId = 0;
-    const updateBounds = () => {
-      const host = hostRef.current;
-      const rect = host?.getBoundingClientRect();
-      if (!host || !rect) return;
-      const leafElement = host.closest("[data-split-leaf-id]");
-      const leafRect =
-        leafElement instanceof HTMLElement ? leafElement.getBoundingClientRect() : null;
-      const boundedRect = leafRect ? intersectRects(rect, leafRect) : rect;
-      const next = {
-        left: Math.round(boundedRect.left),
-        top: Math.round(boundedRect.top),
-        width: Math.max(0, Math.round(boundedRect.width)),
-        height: Math.max(0, Math.round(boundedRect.height)),
-        visible: boundedRect.width > 0 && boundedRect.height > 0,
-      };
-      const previous = lastBoundsRef.current;
-      if (
-        !previous ||
-        previous.left !== next.left ||
-        previous.top !== next.top ||
-        previous.width !== next.width ||
-        previous.height !== next.height
-      ) {
-        void api.browser.setBounds({
-          paneId: leaf.paneId,
-          bounds: {
-            left: next.left,
-            top: next.top,
-            width: next.width,
-            height: next.height,
-          },
-        });
-      }
-      if (!previous || previous.visible !== next.visible) {
-        void api.browser.setVisible({
-          paneId: leaf.paneId,
-          visible: next.visible,
-        });
-      }
-      lastBoundsRef.current = next;
-    };
-    const tick = () => {
-      updateBounds();
-      frameId = window.requestAnimationFrame(tick);
-    };
-    const observer = new ResizeObserver(updateBounds);
-    observer.observe(hostRef.current);
-    frameId = window.requestAnimationFrame(tick);
-    window.addEventListener("resize", updateBounds);
-    updateBounds();
-    return () => {
-      window.cancelAnimationFrame(frameId);
-      observer.disconnect();
-      window.removeEventListener("resize", updateBounds);
-      lastBoundsRef.current = null;
-      void api.browser.setVisible({ paneId: leaf.paneId, visible: false });
-    };
+    return registerBrowserPaneHost({
+      paneId: leaf.paneId,
+      api,
+      element: hostRef.current,
+    });
   }, [api, leaf.paneId]);
 
   const title = snapshot?.title || "Browser";
