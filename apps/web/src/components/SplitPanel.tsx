@@ -16,6 +16,13 @@ type SplitDropHandler = (
   zone: DropZone,
 ) => void;
 
+function supportsSplitDrop(dataTransfer: DataTransfer): boolean {
+  return (
+    dataTransfer.types.includes("application/t3-thread-id") ||
+    dataTransfer.types.includes("application/t3-project-id")
+  );
+}
+
 function ResizeHandle({
   branchId,
   direction,
@@ -132,7 +139,17 @@ function LeafPane({
         )
           clearDragOver();
       }}
+      onDragOver={(e) => {
+        if (!showDropZones || !supportsSplitDrop(e.dataTransfer)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setDragOver(
+          leaf.id,
+          computeClosestDropZone(e.clientX, e.clientY, e.currentTarget.getBoundingClientRect()),
+        );
+      }}
       onDrop={(e) => {
+        if (!supportsSplitDrop(e.dataTransfer)) return;
         e.preventDefault();
         const zone = activeZone;
         clearDragOver();
@@ -145,19 +162,6 @@ function LeafPane({
           onSplitDrop(leaf.id, droppedThreadId as ThreadId, droppedProjectId, zone);
       }}
     >
-      {showDropZones ? (
-        <div
-          className="absolute inset-0 z-30"
-          onDragOver={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            setDragOver(
-              leaf.id,
-              computeClosestDropZone(e.clientX, e.clientY, e.currentTarget.getBoundingClientRect()),
-            );
-          }}
-        />
-      ) : null}
       <SplitDropPreview zone={activeZone}>{renderLeaf(leaf)}</SplitDropPreview>
     </div>
   );
@@ -198,25 +202,29 @@ function SplitPanelNode({
     <div
       className={`flex min-h-0 min-w-0 flex-1 ${node.direction === "horizontal" ? "flex-row" : "flex-col"}`}
     >
-      <SplitPanelNode
-        node={node.children[0]}
-        focusedLeafId={focusedLeafId}
-        showDropZones={showDropZones}
-        renderLeaf={renderLeaf}
-        onSplitDrop={onSplitDrop}
-        onFocusLeaf={onFocusLeaf}
-        zoomedLeafId={zoomedLeafId}
-      />
+      <div className="flex min-h-0 min-w-0" style={{ flex: `${node.ratio} 1 0` }}>
+        <SplitPanelNode
+          node={node.children[0]}
+          focusedLeafId={focusedLeafId}
+          showDropZones={showDropZones}
+          renderLeaf={renderLeaf}
+          onSplitDrop={onSplitDrop}
+          onFocusLeaf={onFocusLeaf}
+          zoomedLeafId={zoomedLeafId}
+        />
+      </div>
       <ResizeHandle branchId={node.id} direction={node.direction} />
-      <SplitPanelNode
-        node={node.children[1]}
-        focusedLeafId={focusedLeafId}
-        showDropZones={showDropZones}
-        renderLeaf={renderLeaf}
-        onSplitDrop={onSplitDrop}
-        onFocusLeaf={onFocusLeaf}
-        zoomedLeafId={zoomedLeafId}
-      />
+      <div className="flex min-h-0 min-w-0" style={{ flex: `${1 - node.ratio} 1 0` }}>
+        <SplitPanelNode
+          node={node.children[1]}
+          focusedLeafId={focusedLeafId}
+          showDropZones={showDropZones}
+          renderLeaf={renderLeaf}
+          onSplitDrop={onSplitDrop}
+          onFocusLeaf={onFocusLeaf}
+          zoomedLeafId={zoomedLeafId}
+        />
+      </div>
     </div>
   );
 }
