@@ -4,102 +4,101 @@ import { Debouncer } from "@tanstack/react-pacer";
 
 export type SplitDirection = "horizontal" | "vertical";
 
-/** A leaf node displays a single thread. */
-export interface SplitLeaf {
+export interface ThreadPaneLeaf {
   readonly type: "leaf";
-  /** Stable identifier for this leaf (used for focus tracking & keying). */
   readonly id: string;
-  /** The thread displayed in this pane. */
+  readonly paneType: "thread";
   readonly threadId: ThreadId;
 }
 
-/** A branch node splits two children either horizontally or vertically. */
+export interface BrowserPaneLeaf {
+  readonly type: "leaf";
+  readonly id: string;
+  readonly paneType: "browser";
+  readonly paneId: string;
+  readonly url: string;
+  readonly targetThreadId: ThreadId;
+  readonly createdFromThreadId: ThreadId;
+}
+
+export type SplitLeaf = ThreadPaneLeaf | BrowserPaneLeaf;
+
 export interface SplitBranch {
   readonly type: "branch";
   readonly id: string;
-  /**
-   * `horizontal` → children sit side-by-side (left | right).
-   * `vertical`   → children are stacked (top / bottom).
-   */
   readonly direction: SplitDirection;
-  /** Two children; order matches visual order (first=left/top, second=right/bottom). */
   readonly children: readonly [SplitNode, SplitNode];
-  /**
-   * Proportion (0–1) of the first child's size.
-   * 0.5 = equal split. Persisted per-branch so resize is remembered.
-   */
   readonly ratio: number;
 }
 
 export type SplitNode = SplitLeaf | SplitBranch;
 
 export interface Workspace {
-  /** Stable id for the workspace. */
   readonly id: string;
-  /** Human-editable label shown in the sidebar. */
   readonly name: string;
-  /** Most recent time the workspace was activated or interacted with. */
   readonly lastVisitedAt?: string;
-  /** The root of the split tree. */
   readonly root: SplitNode;
-  /** The id of the leaf that currently has focus. */
   readonly focusedLeafId: string;
 }
 
-// Kept for backwards compatibility with existing call sites while the file name stays the same.
 export type SplitGroup = Workspace;
+export type PersistedBrowserPaneState = Pick<BrowserPaneLeaf, "paneId" | "url" | "targetThreadId" | "createdFromThreadId">;
 
 let _nextId = 0;
 export function splitNodeId(): string {
   return `split_${Date.now().toString(36)}_${(++_nextId).toString(36)}`;
 }
 
-/** Collect all thread IDs present in a split tree. */
+export function createThreadLeaf(threadId: ThreadId): ThreadPaneLeaf {
+  return { type: "leaf", id: splitNodeId(), paneType: "thread", threadId };
+}
+
+export function createBrowserLeaf(state: PersistedBrowserPaneState): BrowserPaneLeaf {
+  return { type: "leaf", id: splitNodeId(), paneType: "browser", ...state };
+}
+
 export function collectThreadIds(node: SplitNode): ThreadId[] {
-  if (node.type === "leaf") return [node.threadId];
+  if (node.type === "leaf") return node.paneType === "thread" ? [node.threadId] : [];
   return [...collectThreadIds(node.children[0]), ...collectThreadIds(node.children[1])];
 }
 
-/** Count the number of leaves. */
 export function countLeaves(node: SplitNode): number {
   if (node.type === "leaf") return 1;
   return countLeaves(node.children[0]) + countLeaves(node.children[1]);
 }
 
-/** Find the leaf with a given id. */
 export function findLeaf(node: SplitNode, leafId: string): SplitLeaf | null {
   if (node.type === "leaf") return node.id === leafId ? node : null;
   return findLeaf(node.children[0], leafId) ?? findLeaf(node.children[1], leafId);
 }
 
-/** Find a leaf by thread id. */
-export function findLeafByThreadId(node: SplitNode, threadId: ThreadId): SplitLeaf | null {
-  if (node.type === "leaf") return node.threadId === threadId ? node : null;
-  return (
-    findLeafByThreadId(node.children[0], threadId) ?? findLeafByThreadId(node.children[1], threadId)
-  );
+export function findLeafByThreadId(node: SplitNode, threadId: ThreadId): ThreadPaneLeaf | null {
+  if (node.type === "leaf") {
+    return node.paneType === "thread" && node.threadId === threadId ? node : null;
+  }
+  return findLeafByThreadId(node.children[0], threadId) ?? findLeafByThreadId(node.children[1], threadId);
 }
 
-/** Find the first leaf (top-left-most). */
+export function findBrowserLeafByPaneId(node: SplitNode, paneId: string): BrowserPaneLeaf | null {
+  if (node.type === "leaf") {
+    return node.paneType === "browser" && node.paneId === paneId ? node : null;
+  }
+  return findBrowserLeafByPaneId(node.children[0], paneId) ?? findBrowserLeafByPaneId(node.children[1], paneId);
+}
+
 export function firstLeaf(node: SplitNode): SplitLeaf {
   if (node.type === "leaf") return node;
   return firstLeaf(node.children[0]);
 }
 
-function replaceLeafThread(
-  node: SplitNode,
-  leafId: string,
-  newThreadId: ThreadId,
-): SplitNode | null {
-  if (node.type === "leaf") {
-    if (node.id === leafId) {
-      return { ...node, threadId: newThreadId };
-    }
-    return null;
-  }
-  const left = replaceLeafThread(node.children[0], leafId, newThreadId);
+export type FocusDirection = "up" | "down" | "left" | "right";
+export type DropZone = "top" | "bottom" | "left" | "right" | "center";
+
+function replaceLeaf(node: SplitNode, leafId: string, replacement: SplitLeaf): SplitNode | null {
+  if (node.type === "leaf") return node.id === leafId ? replacement : null;
+  const left = replaceLeaf(node.children[0], leafId, replacement);
   if (left) return { ...node, children: [left, node.children[1]] };
-  const right = replaceLeafThread(node.children[1], leafId, newThreadId);
+  const right = replaceLeaf(node.children[1], leafId, replacement);
   if (right) return { ...node, children: [node.children[0], right] };
   return null;
 }
@@ -107,47 +106,36 @@ function replaceLeafThread(
 function splitLeafNode(
   node: SplitNode,
   targetLeafId: string,
-  newThreadId: ThreadId,
+  newLeaf: SplitLeaf,
   direction: SplitDirection,
   insertBefore: boolean,
 ): SplitNode | null {
   if (node.type === "leaf") {
     if (node.id !== targetLeafId) return null;
-    const newLeaf: SplitLeaf = { type: "leaf", id: splitNodeId(), threadId: newThreadId };
     const first = insertBefore ? newLeaf : node;
     const second = insertBefore ? node : newLeaf;
-    return {
-      type: "branch",
-      id: splitNodeId(),
-      direction,
-      children: [first, second],
-      ratio: 0.5,
-    };
+    return { type: "branch", id: splitNodeId(), direction, children: [first, second], ratio: 0.5 };
   }
-  const left = splitLeafNode(node.children[0], targetLeafId, newThreadId, direction, insertBefore);
+  const left = splitLeafNode(node.children[0], targetLeafId, newLeaf, direction, insertBefore);
   if (left) return { ...node, children: [left, node.children[1]] };
-  const right = splitLeafNode(node.children[1], targetLeafId, newThreadId, direction, insertBefore);
+  const right = splitLeafNode(node.children[1], targetLeafId, newLeaf, direction, insertBefore);
   if (right) return { ...node, children: [node.children[0], right] };
   return null;
 }
 
 function removeLeaf(node: SplitNode, leafId: string): SplitNode | null {
-  if (node.type === "leaf") {
-    return node.id === leafId ? null : node;
-  }
-  const leftResult = removeLeaf(node.children[0], leafId);
-  const rightResult = removeLeaf(node.children[1], leafId);
-  if (leftResult === node.children[0] && rightResult === node.children[1]) return node;
-  if (leftResult === null) return rightResult;
-  if (rightResult === null) return leftResult;
-  return { ...node, children: [leftResult, rightResult] };
+  if (node.type === "leaf") return node.id === leafId ? null : node;
+  const left = removeLeaf(node.children[0], leafId);
+  const right = removeLeaf(node.children[1], leafId);
+  if (left === node.children[0] && right === node.children[1]) return node;
+  if (left === null) return right;
+  if (right === null) return left;
+  return { ...node, children: [left, right] };
 }
 
 function updateBranchRatio(node: SplitNode, branchId: string, ratio: number): SplitNode | null {
   if (node.type === "leaf") return null;
-  if (node.id === branchId) {
-    return { ...node, ratio: Math.max(0.1, Math.min(0.9, ratio)) };
-  }
+  if (node.id === branchId) return { ...node, ratio: Math.max(0.1, Math.min(0.9, ratio)) };
   const left = updateBranchRatio(node.children[0], branchId, ratio);
   if (left) return { ...node, children: [left, node.children[1]] };
   const right = updateBranchRatio(node.children[1], branchId, ratio);
@@ -155,263 +143,204 @@ function updateBranchRatio(node: SplitNode, branchId: string, ratio: number): Sp
   return null;
 }
 
-function pruneInvalidLeaves(
-  node: SplitNode,
-  validThreadIds: ReadonlySet<ThreadId>,
-): SplitNode | null {
-  if (node.type === "leaf") {
-    return validThreadIds.has(node.threadId) ? node : null;
-  }
+function hasThreadLeaf(node: SplitNode): boolean {
+  if (node.type === "leaf") return node.paneType === "thread";
+  return hasThreadLeaf(node.children[0]) || hasThreadLeaf(node.children[1]);
+}
 
-  const left = pruneInvalidLeaves(node.children[0], validThreadIds);
-  const right = pruneInvalidLeaves(node.children[1], validThreadIds);
+function pruneInvalidLeaves(node: SplitNode, validThreadIds: ReadonlySet<ThreadId>, allowBrowser: boolean): SplitNode | null {
+  if (node.type === "leaf") {
+    if (node.paneType === "thread") return validThreadIds.has(node.threadId) ? node : null;
+    return allowBrowser ? node : null;
+  }
+  const left = pruneInvalidLeaves(node.children[0], validThreadIds, allowBrowser);
+  const right = pruneInvalidLeaves(node.children[1], validThreadIds, allowBrowser);
   if (left === null) return right;
   if (right === null) return left;
   if (left === node.children[0] && right === node.children[1]) return node;
   return { ...node, children: [left, right] };
 }
 
-export type FocusDirection = "up" | "down" | "left" | "right";
-
-function computeLeafRects(
-  node: SplitNode,
-  x = 0,
-  y = 0,
-  w = 1,
-  h = 1,
-): Map<string, { x: number; y: number; w: number; h: number }> {
+function updateBrowserLeafState(node: SplitNode, paneId: string, state: Partial<PersistedBrowserPaneState>): SplitNode | null {
   if (node.type === "leaf") {
-    return new Map([[node.id, { x, y, w, h }]]);
+    if (node.paneType !== "browser" || node.paneId !== paneId) return null;
+    return { ...node, ...state };
   }
-  const r = node.ratio;
-  if (node.direction === "horizontal") {
-    const leftW = w * r;
-    const rightW = w * (1 - r);
-    const left = computeLeafRects(node.children[0], x, y, leftW, h);
-    const right = computeLeafRects(node.children[1], x + leftW, y, rightW, h);
-    return new Map([...left, ...right]);
-  }
-  const topH = h * r;
-  const bottomH = h * (1 - r);
-  const top = computeLeafRects(node.children[0], x, y, w, topH);
-  const bottom = computeLeafRects(node.children[1], x, y + topH, w, bottomH);
-  return new Map([...top, ...bottom]);
+  const left = updateBrowserLeafState(node.children[0], paneId, state);
+  if (left) return { ...node, children: [left, node.children[1]] };
+  const right = updateBrowserLeafState(node.children[1], paneId, state);
+  if (right) return { ...node, children: [node.children[0], right] };
+  return null;
 }
 
-export function findLeafInDirection(
-  root: SplitNode,
-  currentLeafId: string,
-  direction: FocusDirection,
-): SplitLeaf | null {
+function computeLeafRects(node: SplitNode, x = 0, y = 0, w = 1, h = 1): Map<string, { x: number; y: number; w: number; h: number }> {
+  if (node.type === "leaf") return new Map([[node.id, { x, y, w, h }]]);
+  if (node.direction === "horizontal") {
+    const leftW = w * node.ratio;
+    return new Map([
+      ...computeLeafRects(node.children[0], x, y, leftW, h),
+      ...computeLeafRects(node.children[1], x + leftW, y, w * (1 - node.ratio), h),
+    ]);
+  }
+  const topH = h * node.ratio;
+  return new Map([
+    ...computeLeafRects(node.children[0], x, y, w, topH),
+    ...computeLeafRects(node.children[1], x, y + topH, w, h * (1 - node.ratio)),
+  ]);
+}
+
+export function findLeafInDirection(root: SplitNode, currentLeafId: string, direction: FocusDirection): SplitLeaf | null {
   const rects = computeLeafRects(root);
   const cur = rects.get(currentLeafId);
   if (!cur) return null;
-
   const isVertical = direction === "up" || direction === "down";
-
   let bestId: string | null = null;
   let bestOverlaps = false;
   let bestPrimary = Infinity;
-
   for (const [id, rect] of rects) {
     if (id === currentLeafId) continue;
-
     let inDirection = false;
     let primaryDist = 0;
     if (isVertical) {
       if (direction === "down") {
         inDirection = rect.y + rect.h > cur.y + cur.h;
-        primaryDist = rect.y - (cur.y + cur.h);
-        if (primaryDist < 0) primaryDist = 0;
+        primaryDist = Math.max(0, rect.y - (cur.y + cur.h));
       } else {
         inDirection = rect.y < cur.y;
-        primaryDist = cur.y - (rect.y + rect.h);
-        if (primaryDist < 0) primaryDist = 0;
+        primaryDist = Math.max(0, cur.y - (rect.y + rect.h));
       }
+    } else if (direction === "right") {
+      inDirection = rect.x + rect.w > cur.x + cur.w;
+      primaryDist = Math.max(0, rect.x - (cur.x + cur.w));
     } else {
-      if (direction === "right") {
-        inDirection = rect.x + rect.w > cur.x + cur.w;
-        primaryDist = rect.x - (cur.x + cur.w);
-        if (primaryDist < 0) primaryDist = 0;
-      } else {
-        inDirection = rect.x < cur.x;
-        primaryDist = cur.x - (rect.x + rect.w);
-        if (primaryDist < 0) primaryDist = 0;
-      }
+      inDirection = rect.x < cur.x;
+      primaryDist = Math.max(0, cur.x - (rect.x + rect.w));
     }
     if (!inDirection) continue;
-
     const overlaps = isVertical
       ? rect.x < cur.x + cur.w - 0.001 && rect.x + rect.w > cur.x + 0.001
       : rect.y < cur.y + cur.h - 0.001 && rect.y + rect.h > cur.y + 0.001;
-
     if ((overlaps && !bestOverlaps) || (overlaps === bestOverlaps && primaryDist < bestPrimary)) {
       bestId = id;
       bestOverlaps = overlaps;
       bestPrimary = primaryDist;
     }
   }
-
-  if (!bestId) return null;
-  return findLeaf(root, bestId);
+  return bestId ? findLeaf(root, bestId) : null;
 }
 
-export type DropZone = "top" | "bottom" | "left" | "right" | "center";
-
-interface SplitRect {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-}
-
-export function computeClosestDropZone(
-  clientX: number,
-  clientY: number,
-  rect: SplitRect,
-): DropZone {
+interface SplitRect { left: number; top: number; width: number; height: number }
+export function computeClosestDropZone(clientX: number, clientY: number, rect: SplitRect): DropZone {
   const relX = (clientX - rect.left) / rect.width;
   const relY = (clientY - rect.top) / rect.height;
-
-  if (relX > 0.24 && relX < 0.76 && relY > 0.24 && relY < 0.76) {
-    return "center";
-  }
-
-  const distLeft = relX;
-  const distRight = 1 - relX;
-  const distTop = relY;
-  const distBottom = 1 - relY;
-  const minDist = Math.min(distLeft, distRight, distTop, distBottom);
-  if (minDist === distTop) return "top";
-  if (minDist === distBottom) return "bottom";
-  if (minDist === distLeft) return "left";
+  if (relX > 0.24 && relX < 0.76 && relY > 0.24 && relY < 0.76) return "center";
+  const minDist = Math.min(relX, 1 - relX, relY, 1 - relY);
+  if (minDist === relY) return "top";
+  if (minDist === 1 - relY) return "bottom";
+  if (minDist === relX) return "left";
   return "right";
 }
 
-export function dropZoneToSplit(zone: Exclude<DropZone, "center">): {
-  direction: SplitDirection;
-  insertBefore: boolean;
-} {
+export function dropZoneToSplit(zone: Exclude<DropZone, "center">): { direction: SplitDirection; insertBefore: boolean } {
   switch (zone) {
-    case "top":
-      return { direction: "vertical", insertBefore: true };
-    case "bottom":
-      return { direction: "vertical", insertBefore: false };
-    case "left":
-      return { direction: "horizontal", insertBefore: true };
-    case "right":
-      return { direction: "horizontal", insertBefore: false };
+    case "top": return { direction: "vertical", insertBefore: true };
+    case "bottom": return { direction: "vertical", insertBefore: false };
+    case "left": return { direction: "horizontal", insertBefore: true };
+    case "right": return { direction: "horizontal", insertBefore: false };
   }
 }
 
-const SPLIT_VIEW_STORAGE_KEY = "t3code:workspaces:v1";
-const LEGACY_SPLIT_VIEW_STORAGE_KEY = "t3code:split-view:v1";
+const SPLIT_VIEW_STORAGE_KEY = "t3code:workspaces:v2";
+const LEGACY_SPLIT_VIEW_STORAGE_KEY = "t3code:workspaces:v1";
+const LEGACY_SINGLE_SPLIT_VIEW_STORAGE_KEY = "t3code:split-view:v1";
 
-interface PersistedSplitViewState {
-  workspaces: Workspace[];
-  activeWorkspaceId: string | null;
+interface PersistedSplitViewState { workspaces: Workspace[]; activeWorkspaceId: string | null }
+interface LegacyPersistedSplitViewState { group: SplitGroup | null }
+
+function isDesktopMode(): boolean {
+  return typeof window !== "undefined" && window.desktopBridge !== undefined;
 }
 
-interface LegacyPersistedSplitViewState {
-  group: SplitGroup | null;
+function isValidLeaf(leaf: unknown): leaf is SplitLeaf {
+  if (!leaf || typeof leaf !== "object") return false;
+  const c = leaf as Record<string, unknown>;
+  if (c.type !== "leaf" || typeof c.id !== "string") return false;
+  if (c.paneType === "thread") return typeof c.threadId === "string";
+  if (c.paneType === "browser") {
+    return typeof c.paneId === "string" && typeof c.url === "string" && typeof c.targetThreadId === "string" && typeof c.createdFromThreadId === "string";
+  }
+  return false;
+}
+
+function isValidNode(node: unknown): node is SplitNode {
+  if (!node || typeof node !== "object") return false;
+  const c = node as Record<string, unknown>;
+  if (c.type === "leaf") return isValidLeaf(node);
+  if (c.type !== "branch") return false;
+  return typeof c.id === "string" && (c.direction === "horizontal" || c.direction === "vertical") && typeof c.ratio === "number" && Array.isArray(c.children) && c.children.length === 2 && isValidNode(c.children[0]) && isValidNode(c.children[1]);
 }
 
 function isValidWorkspace(workspace: unknown): workspace is Workspace {
   if (!workspace || typeof workspace !== "object") return false;
-  const candidate = workspace as Record<string, unknown>;
-  if (
-    typeof candidate.id !== "string" ||
-    typeof candidate.name !== "string" ||
-    typeof candidate.focusedLeafId !== "string"
-  ) {
-    return false;
-  }
-  if (!candidate.root || typeof candidate.root !== "object") return false;
-  try {
-    const root = candidate.root as SplitNode;
-    if (countLeaves(root) < 2) return false;
-    if (!findLeaf(root, candidate.focusedLeafId)) return false;
-  } catch {
-    return false;
-  }
-  return true;
+  const c = workspace as Record<string, unknown>;
+  if (typeof c.id !== "string" || typeof c.name !== "string" || typeof c.focusedLeafId !== "string" || !isValidNode(c.root)) return false;
+  const root = c.root as SplitNode;
+  return countLeaves(root) >= 2 && findLeaf(root, c.focusedLeafId) !== null && hasThreadLeaf(root);
 }
 
-function resolveActiveWorkspace(
-  workspaces: readonly Workspace[],
-  requestedId: string | null,
-): Workspace | null {
-  if (!requestedId) return null;
-  return workspaces.find((workspace) => workspace.id === requestedId) ?? null;
+function resolveActiveWorkspace(workspaces: readonly Workspace[], requestedId: string | null): Workspace | null {
+  return requestedId ? workspaces.find((workspace) => workspace.id === requestedId) ?? null : null;
 }
 
-function findWorkspaceContainingThread(
-  workspaces: readonly Workspace[],
-  threadId: ThreadId,
-): Workspace | null {
+function findWorkspaceContainingThread(workspaces: readonly Workspace[], threadId: ThreadId): Workspace | null {
   return workspaces.find((workspace) => findLeafByThreadId(workspace.root, threadId)) ?? null;
 }
 
 function touchWorkspace(workspace: Workspace, lastVisitedAt = new Date().toISOString()): Workspace {
-  if (workspace.lastVisitedAt === lastVisitedAt) {
-    return workspace;
-  }
-  return {
-    ...workspace,
-    lastVisitedAt,
-  };
+  return workspace.lastVisitedAt === lastVisitedAt ? workspace : { ...workspace, lastVisitedAt };
 }
 
 function buildNextWorkspaceName(workspaces: readonly Workspace[]): string {
   const prefix = "Workspace ";
-  let maxOrdinal = 0;
+  let max = 0;
   for (const workspace of workspaces) {
     if (!workspace.name.startsWith(prefix)) continue;
     const value = Number.parseInt(workspace.name.slice(prefix.length), 10);
-    if (!Number.isNaN(value)) {
-      maxOrdinal = Math.max(maxOrdinal, value);
-    }
+    if (!Number.isNaN(value)) max = Math.max(max, value);
   }
-  return `${prefix}${maxOrdinal + 1}`;
+  return `${prefix}${max + 1}`;
+}
+
+function sanitizeWorkspace(workspace: Workspace): Workspace | null {
+  const pruned = pruneInvalidLeaves(workspace.root, new Set(collectThreadIds(workspace.root)), isDesktopMode());
+  if (!pruned || pruned.type === "leaf" || !hasThreadLeaf(pruned)) return null;
+  const focusedLeaf = findLeaf(pruned, workspace.focusedLeafId) ?? firstLeaf(pruned);
+  return { ...workspace, root: pruned, focusedLeafId: focusedLeaf.id };
 }
 
 function readPersistedSplitView(): PersistedSplitViewState {
   if (typeof window === "undefined") return { workspaces: [], activeWorkspaceId: null };
-
-  const readModernState = (): PersistedSplitViewState | null => {
-    const raw = window.localStorage.getItem(SPLIT_VIEW_STORAGE_KEY);
+  const parseModern = (key: string): PersistedSplitViewState | null => {
+    const raw = window.localStorage.getItem(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as PersistedSplitViewState;
-    const workspaces = Array.isArray(parsed.workspaces)
-      ? parsed.workspaces.filter((workspace) => isValidWorkspace(workspace))
-      : [];
-    const activeWorkspace = resolveActiveWorkspace(workspaces, parsed.activeWorkspaceId ?? null);
-    return {
-      workspaces,
-      activeWorkspaceId: activeWorkspace?.id ?? null,
-    };
+    const workspaces = Array.isArray(parsed.workspaces) ? parsed.workspaces.flatMap((w) => {
+      if (!isValidWorkspace(w)) return [];
+      const sanitized = sanitizeWorkspace(w);
+      return sanitized ? [sanitized] : [];
+    }) : [];
+    return { workspaces, activeWorkspaceId: resolveActiveWorkspace(workspaces, parsed.activeWorkspaceId)?.id ?? null };
   };
-
-  const readLegacyState = (): PersistedSplitViewState | null => {
-    const raw = window.localStorage.getItem(LEGACY_SPLIT_VIEW_STORAGE_KEY);
+  const parseLegacySingle = (): PersistedSplitViewState | null => {
+    const raw = window.localStorage.getItem(LEGACY_SINGLE_SPLIT_VIEW_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as LegacyPersistedSplitViewState;
-    if (!parsed.group || !isValidWorkspace({ ...parsed.group, name: "Workspace 1" })) {
-      window.localStorage.removeItem(LEGACY_SPLIT_VIEW_STORAGE_KEY);
-      return null;
-    }
-    const migratedWorkspace: Workspace = {
-      ...parsed.group,
-      name: "Workspace 1",
-    };
-    return {
-      workspaces: [migratedWorkspace],
-      activeWorkspaceId: migratedWorkspace.id,
-    };
+    if (!parsed.group || !isValidWorkspace({ ...parsed.group, name: "Workspace 1" })) return null;
+    const workspace = sanitizeWorkspace({ ...parsed.group, name: "Workspace 1" });
+    return workspace ? { workspaces: [workspace], activeWorkspaceId: workspace.id } : null;
   };
-
   try {
-    return readModernState() ?? readLegacyState() ?? { workspaces: [], activeWorkspaceId: null };
+    return parseModern(SPLIT_VIEW_STORAGE_KEY) ?? parseModern(LEGACY_SPLIT_VIEW_STORAGE_KEY) ?? parseLegacySingle() ?? { workspaces: [], activeWorkspaceId: null };
   } catch {
     return { workspaces: [], activeWorkspaceId: null };
   }
@@ -419,93 +348,54 @@ function readPersistedSplitView(): PersistedSplitViewState {
 
 function persistSplitView(state: SplitViewState): void {
   if (typeof window === "undefined") return;
-  try {
-    const data: PersistedSplitViewState = {
-      workspaces: [...state.workspaces],
-      activeWorkspaceId: state.activeWorkspaceId,
-    };
-    window.localStorage.setItem(SPLIT_VIEW_STORAGE_KEY, JSON.stringify(data));
-    window.localStorage.removeItem(LEGACY_SPLIT_VIEW_STORAGE_KEY);
-  } catch {
-    // Ignore storage errors.
-  }
+  const data: PersistedSplitViewState = { workspaces: [...state.workspaces], activeWorkspaceId: state.activeWorkspaceId };
+  window.localStorage.setItem(SPLIT_VIEW_STORAGE_KEY, JSON.stringify(data));
+  window.localStorage.removeItem(LEGACY_SPLIT_VIEW_STORAGE_KEY);
+  window.localStorage.removeItem(LEGACY_SINGLE_SPLIT_VIEW_STORAGE_KEY);
 }
 
 const debouncedPersist = new Debouncer(persistSplitView, { wait: 300 });
 
-function withWorkspaceCollection(
-  workspaces: readonly Workspace[],
-  activeWorkspaceId: string | null,
-): Pick<SplitViewState, "workspaces" | "activeWorkspaceId" | "group"> {
+function withWorkspaceCollection(workspaces: readonly Workspace[], activeWorkspaceId: string | null) {
   const group = resolveActiveWorkspace(workspaces, activeWorkspaceId);
-  return {
-    workspaces: [...workspaces],
-    activeWorkspaceId: group?.id ?? null,
-    group,
-  };
+  return { workspaces: [...workspaces], activeWorkspaceId: group?.id ?? null, group };
 }
 
-function updateWorkspace(
-  workspaces: readonly Workspace[],
-  workspaceId: string,
-  updater: (workspace: Workspace) => Workspace | null,
-): readonly Workspace[] {
+function updateWorkspace(workspaces: readonly Workspace[], workspaceId: string, updater: (workspace: Workspace) => Workspace | null): readonly Workspace[] {
   let changed = false;
   const next: Workspace[] = [];
   for (const workspace of workspaces) {
-    if (workspace.id !== workspaceId) {
-      next.push(workspace);
-      continue;
-    }
-    const updatedWorkspace = updater(workspace);
-    if (updatedWorkspace === workspace) {
-      next.push(workspace);
-      continue;
-    }
+    if (workspace.id !== workspaceId) { next.push(workspace); continue; }
+    const updated = updater(workspace);
+    if (updated === workspace) { next.push(workspace); continue; }
     changed = true;
-    if (updatedWorkspace !== null) {
-      next.push(updatedWorkspace);
-    }
+    if (updated) next.push(updated);
   }
   return changed ? next : workspaces;
 }
 
 function workspaceFocusedThreadId(workspace: Workspace): ThreadId {
-  return (
-    findLeaf(workspace.root, workspace.focusedLeafId)?.threadId ??
-    firstLeaf(workspace.root).threadId
-  );
+  const focused = findLeaf(workspace.root, workspace.focusedLeafId) ?? firstLeaf(workspace.root);
+  if (focused.paneType === "thread") return focused.threadId;
+  return focused.targetThreadId;
 }
 
 export interface SplitViewState {
   workspaces: readonly Workspace[];
   activeWorkspaceId: string | null;
-  /**
-   * The active workspace. Kept as a first-class field so existing split-view
-   * consumers can stay simple while the app transitions to a workspace model.
-   */
   group: Workspace | null;
-  dragOver: {
-    leafId: string;
-    zone: DropZone;
-  } | null;
+  dragOver: { leafId: string; zone: DropZone } | null;
   zoomed: boolean;
 }
 
 export interface SplitViewActions {
-  splitThread: (
-    currentThreadId: ThreadId,
-    newThreadId: ThreadId,
-    direction: SplitDirection,
-    insertBefore: boolean,
-  ) => void;
-  splitLeaf: (
-    leafId: string,
-    newThreadId: ThreadId,
-    direction: SplitDirection,
-    insertBefore: boolean,
-  ) => void;
+  splitThread: (currentThreadId: ThreadId, newThreadId: ThreadId, direction: SplitDirection, insertBefore: boolean) => void;
+  splitLeaf: (leafId: string, newThreadId: ThreadId, direction: SplitDirection, insertBefore: boolean) => void;
+  splitThreadWithBrowser: (currentThreadId: ThreadId, direction: SplitDirection) => string | null;
+  splitLeafWithBrowser: (leafId: string, direction: SplitDirection) => string | null;
   closePane: (leafId: string) => ThreadId | null;
+  closeBrowserPane: (paneId: string) => ThreadId | null;
+  updateBrowserPanePersistedState: (paneId: string, state: Partial<PersistedBrowserPaneState>) => void;
   closeWorkspace: (workspaceId: string) => ThreadId | null;
   renameWorkspace: (workspaceId: string, name: string) => void;
   activateWorkspace: (workspaceId: string) => ThreadId | null;
@@ -525,542 +415,199 @@ export interface SplitViewActions {
 }
 
 export type SplitViewStore = SplitViewState & SplitViewActions;
-
 const persisted = readPersistedSplitView();
 
 export const useSplitViewStore = create<SplitViewStore>((set, get) => ({
   ...withWorkspaceCollection(persisted.workspaces, persisted.activeWorkspaceId),
   dragOver: null,
   zoomed: false,
-
   splitThread: (currentThreadId, newThreadId, direction, insertBefore) => {
     set((state) => {
       if (currentThreadId === newThreadId) return state;
-
-      const currentWorkspace = findWorkspaceContainingThread(state.workspaces, currentThreadId);
-      if (currentWorkspace) {
-        const currentLeaf = findLeafByThreadId(currentWorkspace.root, currentThreadId);
+      const workspace = findWorkspaceContainingThread(state.workspaces, currentThreadId);
+      const newLeaf = createThreadLeaf(newThreadId);
+      if (workspace) {
+        const currentLeaf = findLeafByThreadId(workspace.root, currentThreadId);
         if (!currentLeaf) return state;
-
-        const existingLeaf = findLeafByThreadId(currentWorkspace.root, newThreadId);
+        const existingLeaf = findLeafByThreadId(workspace.root, newThreadId);
         if (existingLeaf) {
-          const updatedWorkspace = touchWorkspace({
-            ...currentWorkspace,
-            focusedLeafId: existingLeaf.id,
-          });
-          return {
-            ...withWorkspaceCollection(
-              updateWorkspace(state.workspaces, currentWorkspace.id, () => updatedWorkspace),
-              currentWorkspace.id,
-            ),
-            zoomed: false,
-            dragOver: null,
-          };
+          const updated = touchWorkspace({ ...workspace, focusedLeafId: existingLeaf.id });
+          return { ...withWorkspaceCollection(updateWorkspace(state.workspaces, workspace.id, () => updated), workspace.id), zoomed: false, dragOver: null };
         }
-
-        const existingWorkspaceForNewThread = findWorkspaceContainingThread(
-          state.workspaces,
-          newThreadId,
-        );
-        if (existingWorkspaceForNewThread) {
-          const targetLeaf = findLeafByThreadId(existingWorkspaceForNewThread.root, newThreadId);
-          if (!targetLeaf) return state;
-          const updatedWorkspace = touchWorkspace({
-            ...existingWorkspaceForNewThread,
-            focusedLeafId: targetLeaf.id,
-          });
-          return {
-            ...withWorkspaceCollection(
-              updateWorkspace(
-                state.workspaces,
-                existingWorkspaceForNewThread.id,
-                () => updatedWorkspace,
-              ),
-              existingWorkspaceForNewThread.id,
-            ),
-            zoomed: false,
-            dragOver: null,
-          };
-        }
-
-        const newRoot = splitLeafNode(
-          currentWorkspace.root,
-          currentLeaf.id,
-          newThreadId,
-          direction,
-          insertBefore,
-        );
+        const newRoot = splitLeafNode(workspace.root, currentLeaf.id, newLeaf, direction, insertBefore);
         if (!newRoot) return state;
-        const newLeaf = findLeafByThreadId(newRoot, newThreadId);
-        const updatedWorkspace = touchWorkspace({
-          ...currentWorkspace,
-          root: newRoot,
-          focusedLeafId: newLeaf?.id ?? currentWorkspace.focusedLeafId,
-        });
-        return {
-          ...withWorkspaceCollection(
-            updateWorkspace(state.workspaces, currentWorkspace.id, () => updatedWorkspace),
-            currentWorkspace.id,
-          ),
-          zoomed: false,
-          dragOver: null,
-        };
+        const inserted = findLeafByThreadId(newRoot, newThreadId);
+        const updated = touchWorkspace({ ...workspace, root: newRoot, focusedLeafId: inserted?.id ?? workspace.focusedLeafId });
+        return { ...withWorkspaceCollection(updateWorkspace(state.workspaces, workspace.id, () => updated), workspace.id), zoomed: false, dragOver: null };
       }
-
-      const existingWorkspaceForNewThread = findWorkspaceContainingThread(
-        state.workspaces,
-        newThreadId,
-      );
-      if (existingWorkspaceForNewThread) {
-        const targetLeaf = findLeafByThreadId(existingWorkspaceForNewThread.root, newThreadId);
-        if (!targetLeaf) return state;
-        const updatedWorkspace = touchWorkspace({
-          ...existingWorkspaceForNewThread,
-          focusedLeafId: targetLeaf.id,
-        });
-        return {
-          ...withWorkspaceCollection(
-            updateWorkspace(
-              state.workspaces,
-              existingWorkspaceForNewThread.id,
-              () => updatedWorkspace,
-            ),
-            existingWorkspaceForNewThread.id,
-          ),
-          zoomed: false,
-          dragOver: null,
-        };
-      }
-
-      const existingLeaf: SplitLeaf = {
-        type: "leaf",
-        id: splitNodeId(),
-        threadId: currentThreadId,
-      };
-      const newLeaf: SplitLeaf = {
-        type: "leaf",
-        id: splitNodeId(),
-        threadId: newThreadId,
-      };
-      const first = insertBefore ? newLeaf : existingLeaf;
-      const second = insertBefore ? existingLeaf : newLeaf;
-      const root: SplitBranch = {
-        type: "branch",
-        id: splitNodeId(),
-        direction,
-        children: [first, second],
-        ratio: 0.5,
-      };
-      const workspace: Workspace = {
-        id: root.id,
-        name: buildNextWorkspaceName(state.workspaces),
-        lastVisitedAt: new Date().toISOString(),
-        root,
-        focusedLeafId: newLeaf.id,
-      };
-      return {
-        ...withWorkspaceCollection([...state.workspaces, workspace], workspace.id),
-        zoomed: false,
-      };
+      const existingLeaf = createThreadLeaf(currentThreadId);
+      const root: SplitBranch = { type: "branch", id: splitNodeId(), direction, children: insertBefore ? [newLeaf, existingLeaf] : [existingLeaf, newLeaf], ratio: 0.5 };
+      const ws: Workspace = { id: root.id, name: buildNextWorkspaceName(state.workspaces), lastVisitedAt: new Date().toISOString(), root, focusedLeafId: newLeaf.id };
+      return { ...withWorkspaceCollection([...state.workspaces, ws], ws.id), zoomed: false };
     });
   },
-
   splitLeaf: (leafId, newThreadId, direction, insertBefore) => {
     set((state) => {
       if (!state.group) return state;
       const targetLeaf = findLeaf(state.group.root, leafId);
-      if (!targetLeaf || targetLeaf.threadId === newThreadId) return state;
+      if (!targetLeaf || (targetLeaf.paneType === "thread" && targetLeaf.threadId === newThreadId)) return state;
       const existingLeaf = findLeafByThreadId(state.group.root, newThreadId);
       if (existingLeaf) {
-        const updatedWorkspace = touchWorkspace({
-          ...state.group,
-          focusedLeafId: existingLeaf.id,
-        });
-        return {
-          ...withWorkspaceCollection(
-            updateWorkspace(state.workspaces, state.group.id, () => updatedWorkspace),
-            state.group.id,
-          ),
-          zoomed: false,
-          dragOver: null,
-        };
+        const updated = touchWorkspace({ ...state.group, focusedLeafId: existingLeaf.id });
+        return { ...withWorkspaceCollection(updateWorkspace(state.workspaces, state.group.id, () => updated), state.group.id), zoomed: false, dragOver: null };
       }
-      const existingWorkspace = findWorkspaceContainingThread(state.workspaces, newThreadId);
-      if (existingWorkspace && existingWorkspace.id !== state.group.id) {
-        const targetWorkspaceLeaf = findLeafByThreadId(existingWorkspace.root, newThreadId);
-        if (!targetWorkspaceLeaf) return state;
-        const updatedWorkspace = touchWorkspace({
-          ...existingWorkspace,
-          focusedLeafId: targetWorkspaceLeaf.id,
-        });
-        return {
-          ...withWorkspaceCollection(
-            updateWorkspace(state.workspaces, existingWorkspace.id, () => updatedWorkspace),
-            existingWorkspace.id,
-          ),
-          zoomed: false,
-          dragOver: null,
-        };
-      }
-
-      const newRoot = splitLeafNode(state.group.root, leafId, newThreadId, direction, insertBefore);
+      const newRoot = splitLeafNode(state.group.root, leafId, createThreadLeaf(newThreadId), direction, insertBefore);
       if (!newRoot) return state;
-      const newLeaf = findLeafByThreadId(newRoot, newThreadId);
-      const updatedWorkspace: Workspace = {
-        ...touchWorkspace(state.group),
-        root: newRoot,
-        focusedLeafId: newLeaf?.id ?? state.group.focusedLeafId,
-      };
-      return {
-        ...withWorkspaceCollection(
-          updateWorkspace(state.workspaces, state.group.id, () => updatedWorkspace),
-          state.group.id,
-        ),
-      };
+      const inserted = findLeafByThreadId(newRoot, newThreadId);
+      const updated = touchWorkspace({ ...state.group, root: newRoot, focusedLeafId: inserted?.id ?? state.group.focusedLeafId });
+      return { ...withWorkspaceCollection(updateWorkspace(state.workspaces, state.group.id, () => updated), state.group.id), zoomed: false, dragOver: null };
     });
   },
-
+  splitThreadWithBrowser: (currentThreadId, direction) => {
+    const workspace = findWorkspaceContainingThread(get().workspaces, currentThreadId);
+    if (!workspace) return null;
+    const currentLeaf = findLeafByThreadId(workspace.root, currentThreadId);
+    if (!currentLeaf) return null;
+    const paneId = splitNodeId();
+    set((state) => {
+      const group = state.workspaces.find((w) => w.id === workspace.id) ?? workspace;
+      const root = splitLeafNode(group.root, currentLeaf.id, createBrowserLeaf({ paneId, url: "about:blank", targetThreadId: currentThreadId, createdFromThreadId: currentThreadId }), direction, false);
+      if (!root) return state;
+      const browserLeaf = findBrowserLeafByPaneId(root, paneId);
+      const updated = touchWorkspace({ ...group, root, focusedLeafId: browserLeaf?.id ?? group.focusedLeafId });
+      return { ...withWorkspaceCollection(updateWorkspace(state.workspaces, group.id, () => updated), group.id), zoomed: false, dragOver: null };
+    });
+    return paneId;
+  },
+  splitLeafWithBrowser: (leafId, direction) => {
+    const state = get();
+    if (!state.group) return null;
+    const sourceLeaf = findLeaf(state.group.root, leafId);
+    if (!sourceLeaf || sourceLeaf.paneType !== "thread") return null;
+    return get().splitThreadWithBrowser(sourceLeaf.threadId, direction);
+  },
   closePane: (leafId) => {
     const state = get();
     if (!state.group) return null;
-
     const remaining = removeLeaf(state.group.root, leafId);
     if (!remaining || remaining.type === "leaf") {
-      const fallbackThreadId = remaining?.threadId ?? null;
-      const nextWorkspaces = state.workspaces.filter(
-        (workspace) => workspace.id !== state.group?.id,
-      );
-      set({
-        ...withWorkspaceCollection(nextWorkspaces, null),
-        zoomed: false,
-        dragOver: null,
-      });
-      return fallbackThreadId;
+      let fallback: ThreadId | null = null;
+      if (remaining && remaining.type === "leaf") {
+        fallback = remaining.paneType === "thread" ? remaining.threadId : remaining.targetThreadId;
+      }
+      set({ ...withWorkspaceCollection(state.workspaces.filter((w) => w.id !== state.group?.id), null), zoomed: false, dragOver: null });
+      return fallback;
     }
-
-    const needNewFocus = state.group.focusedLeafId === leafId;
-    const newFocused = needNewFocus ? firstLeaf(remaining).id : state.group.focusedLeafId;
-    const updatedWorkspace: Workspace = {
-      ...touchWorkspace(state.group),
-      root: remaining,
-      focusedLeafId: newFocused,
-    };
-    set({
-      ...withWorkspaceCollection(
-        updateWorkspace(state.workspaces, state.group.id, () => updatedWorkspace),
-        state.group.id,
-      ),
-      zoomed: false,
-    });
+    const focusedLeaf = state.group.focusedLeafId === leafId ? firstLeaf(remaining) : findLeaf(remaining, state.group.focusedLeafId) ?? firstLeaf(remaining);
+    const updated = touchWorkspace({ ...state.group, root: remaining, focusedLeafId: focusedLeaf.id });
+    set({ ...withWorkspaceCollection(updateWorkspace(state.workspaces, state.group.id, () => updated), state.group.id), zoomed: false, dragOver: null });
     return null;
   },
-
+  closeBrowserPane: (paneId) => {
+    const state = get();
+    const leaf = state.group ? findBrowserLeafByPaneId(state.group.root, paneId) : null;
+    return leaf ? get().closePane(leaf.id) : null;
+  },
+  updateBrowserPanePersistedState: (paneId, paneState) => {
+    set((state) => {
+      if (!state.group) return state;
+      const root = updateBrowserLeafState(state.group.root, paneId, paneState);
+      if (!root) return state;
+      const updated = touchWorkspace({ ...state.group, root });
+      return { ...withWorkspaceCollection(updateWorkspace(state.workspaces, state.group.id, () => updated), state.group.id) };
+    });
+  },
   closeWorkspace: (workspaceId) => {
     const state = get();
     const workspace = state.workspaces.find((entry) => entry.id === workspaceId);
     if (!workspace) return null;
     const nextWorkspaces = state.workspaces.filter((entry) => entry.id !== workspaceId);
-    const fallbackThreadId =
-      state.activeWorkspaceId === workspaceId ? workspaceFocusedThreadId(workspace) : null;
-    set({
-      ...withWorkspaceCollection(
-        nextWorkspaces,
-        state.activeWorkspaceId === workspaceId ? null : state.activeWorkspaceId,
-      ),
-      zoomed: state.activeWorkspaceId === workspaceId ? false : state.zoomed,
-      dragOver: state.activeWorkspaceId === workspaceId ? null : state.dragOver,
-    });
+    const fallbackThreadId = state.activeWorkspaceId === workspaceId ? workspaceFocusedThreadId(workspace) : null;
+    set({ ...withWorkspaceCollection(nextWorkspaces, state.activeWorkspaceId === workspaceId ? null : state.activeWorkspaceId), zoomed: state.activeWorkspaceId === workspaceId ? false : state.zoomed, dragOver: state.activeWorkspaceId === workspaceId ? null : state.dragOver });
     return fallbackThreadId;
   },
-
   renameWorkspace: (workspaceId, name) => {
-    const trimmedName = name.trim();
-    if (trimmedName.length === 0) return;
-    set((state) => {
-      const nextWorkspaces = updateWorkspace(state.workspaces, workspaceId, (workspace) =>
-        workspace.name === trimmedName ? workspace : { ...workspace, name: trimmedName },
-      );
-      if (nextWorkspaces === state.workspaces) return state;
-      return {
-        ...withWorkspaceCollection(nextWorkspaces, state.activeWorkspaceId),
-      };
-    });
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    set((state) => ({ ...withWorkspaceCollection(updateWorkspace(state.workspaces, workspaceId, (workspace) => workspace.name === trimmed ? workspace : { ...workspace, name: trimmed }), state.activeWorkspaceId) }));
   },
-
   activateWorkspace: (workspaceId) => {
     const state = get();
     const workspace = state.workspaces.find((entry) => entry.id === workspaceId) ?? null;
     if (!workspace) return null;
     const lastVisitedAt = new Date().toISOString();
-    set({
-      ...withWorkspaceCollection(
-        updateWorkspace(state.workspaces, workspaceId, (entry) =>
-          touchWorkspace(entry, lastVisitedAt),
-        ),
-        workspaceId,
-      ),
-      zoomed: false,
-      dragOver: null,
-    });
+    set({ ...withWorkspaceCollection(updateWorkspace(state.workspaces, workspaceId, (entry) => touchWorkspace(entry, lastVisitedAt)), workspaceId), zoomed: false, dragOver: null });
     return workspaceFocusedThreadId(touchWorkspace(workspace, lastVisitedAt));
   },
-
-  deactivateWorkspace: () => {
-    set((state) => {
-      if (state.activeWorkspaceId === null && state.group === null) return state;
-      return {
-        ...withWorkspaceCollection(state.workspaces, null),
-        zoomed: false,
-        dragOver: null,
-      };
-    });
-  },
-
-  setFocusedLeaf: (leafId) => {
-    set((state) => {
-      if (!state.group || state.group.focusedLeafId === leafId) return state;
-      const updatedWorkspace: Workspace = {
-        ...touchWorkspace(state.group),
-        focusedLeafId: leafId,
-      };
-      return {
-        ...withWorkspaceCollection(
-          updateWorkspace(state.workspaces, state.group.id, () => updatedWorkspace),
-          state.group.id,
-        ),
-      };
-    });
-  },
-
-  setRatio: (branchId, ratio) => {
-    set((state) => {
-      if (!state.group) return state;
-      const newRoot = updateBranchRatio(state.group.root, branchId, ratio);
-      if (!newRoot) return state;
-      const updatedWorkspace: Workspace = { ...touchWorkspace(state.group), root: newRoot };
-      return {
-        ...withWorkspaceCollection(
-          updateWorkspace(state.workspaces, state.group.id, () => updatedWorkspace),
-          state.group.id,
-        ),
-      };
-    });
-  },
-
+  deactivateWorkspace: () => set((state) => state.activeWorkspaceId === null && state.group === null ? state : { ...withWorkspaceCollection(state.workspaces, null), zoomed: false, dragOver: null }),
+  setFocusedLeaf: (leafId) => set((state) => !state.group || state.group.focusedLeafId === leafId ? state : { ...withWorkspaceCollection(updateWorkspace(state.workspaces, state.group.id, () => touchWorkspace({ ...state.group!, focusedLeafId: leafId })), state.group.id) }),
+  setRatio: (branchId, ratio) => set((state) => {
+    if (!state.group) return state;
+    const root = updateBranchRatio(state.group.root, branchId, ratio);
+    if (!root) return state;
+    return { ...withWorkspaceCollection(updateWorkspace(state.workspaces, state.group.id, () => ({ ...touchWorkspace(state.group!), root })), state.group.id) };
+  }),
   replaceThreadInFocusedLeaf: (newThreadId) => {
-    set((state) => {
-      if (!state.group) return state;
-      const existing = findLeafByThreadId(state.group.root, newThreadId);
-      if (existing && existing.id !== state.group.focusedLeafId) {
-        const updatedWorkspace = touchWorkspace({
-          ...state.group,
-          focusedLeafId: existing.id,
-        });
-        return {
-          ...withWorkspaceCollection(
-            updateWorkspace(state.workspaces, state.group.id, () => updatedWorkspace),
-            state.group.id,
-          ),
-          zoomed: false,
-          dragOver: null,
-        };
-      }
-      const existingWorkspace = findWorkspaceContainingThread(state.workspaces, newThreadId);
-      if (existingWorkspace && existingWorkspace.id !== state.group.id) {
-        const targetLeaf = findLeafByThreadId(existingWorkspace.root, newThreadId);
-        if (!targetLeaf) return state;
-        const updatedWorkspace = touchWorkspace({
-          ...existingWorkspace,
-          focusedLeafId: targetLeaf.id,
-        });
-        return {
-          ...withWorkspaceCollection(
-            updateWorkspace(state.workspaces, existingWorkspace.id, () => updatedWorkspace),
-            existingWorkspace.id,
-          ),
-          zoomed: false,
-          dragOver: null,
-        };
-      }
-      const newRoot = replaceLeafThread(state.group.root, state.group.focusedLeafId, newThreadId);
-      if (!newRoot) return state;
-      const updatedWorkspace: Workspace = { ...touchWorkspace(state.group), root: newRoot };
-      return {
-        ...withWorkspaceCollection(
-          updateWorkspace(state.workspaces, state.group.id, () => updatedWorkspace),
-          state.group.id,
-        ),
-      };
-    });
+    const state = get();
+    if (!state.group) return;
+    get().replaceThreadInLeaf(state.group.focusedLeafId, newThreadId);
   },
-
-  replaceThreadInLeaf: (leafId, newThreadId) => {
-    set((state) => {
-      if (!state.group) return state;
-      const existing = findLeafByThreadId(state.group.root, newThreadId);
-      if (existing && existing.id !== leafId) {
-        const updatedWorkspace = touchWorkspace({
-          ...state.group,
-          focusedLeafId: existing.id,
-        });
-        return {
-          ...withWorkspaceCollection(
-            updateWorkspace(state.workspaces, state.group.id, () => updatedWorkspace),
-            state.group.id,
-          ),
-          zoomed: false,
-          dragOver: null,
-        };
-      }
-      const existingWorkspace = findWorkspaceContainingThread(state.workspaces, newThreadId);
-      if (existingWorkspace && existingWorkspace.id !== state.group.id) {
-        const targetLeaf = findLeafByThreadId(existingWorkspace.root, newThreadId);
-        if (!targetLeaf) return state;
-        const updatedWorkspace = touchWorkspace({
-          ...existingWorkspace,
-          focusedLeafId: targetLeaf.id,
-        });
-        return {
-          ...withWorkspaceCollection(
-            updateWorkspace(state.workspaces, existingWorkspace.id, () => updatedWorkspace),
-            existingWorkspace.id,
-          ),
-          zoomed: false,
-          dragOver: null,
-        };
-      }
-      const newRoot = replaceLeafThread(state.group.root, leafId, newThreadId);
-      if (!newRoot) return state;
-      const updatedWorkspace: Workspace = { ...touchWorkspace(state.group), root: newRoot };
-      return {
-        ...withWorkspaceCollection(
-          updateWorkspace(state.workspaces, state.group.id, () => updatedWorkspace),
-          state.group.id,
-        ),
-      };
-    });
-  },
-
+  replaceThreadInLeaf: (leafId, newThreadId) => set((state) => {
+    if (!state.group) return state;
+    const leaf = findLeaf(state.group.root, leafId);
+    if (!leaf || leaf.paneType !== "thread") return state;
+    const root = replaceLeaf(state.group.root, leafId, { ...leaf, threadId: newThreadId });
+    if (!root) return state;
+    return { ...withWorkspaceCollection(updateWorkspace(state.workspaces, state.group.id, () => ({ ...touchWorkspace(state.group!), root })), state.group.id) };
+  }),
   unsplit: () => {
     const state = get();
     if (!state.group) return [];
     const threadIds = collectThreadIds(state.group.root);
-    const nextWorkspaces = state.workspaces.filter((workspace) => workspace.id !== state.group?.id);
-    set({
-      ...withWorkspaceCollection(nextWorkspaces, null),
-      zoomed: false,
-      dragOver: null,
-    });
+    set({ ...withWorkspaceCollection(state.workspaces.filter((workspace) => workspace.id !== state.group?.id), null), zoomed: false, dragOver: null });
     return threadIds;
   },
-
-  setDragOver: (leafId, zone) => {
-    set({ dragOver: { leafId, zone } });
-  },
-
-  clearDragOver: () => {
-    set((state) => (state.dragOver ? { dragOver: null } : state));
-  },
-
+  setDragOver: (leafId, zone) => set({ dragOver: { leafId, zone } }),
+  clearDragOver: () => set((state) => state.dragOver ? { dragOver: null } : state),
   isSplit: () => get().group !== null,
-
   getFocusedThreadId: () => {
     const state = get();
     if (!state.group) return null;
     const leaf = findLeaf(state.group.root, state.group.focusedLeafId);
-    return leaf?.threadId ?? null;
+    if (!leaf) return null;
+    return leaf.paneType === "thread" ? leaf.threadId : leaf.targetThreadId;
   },
-
   focusDirection: (direction) => {
     const state = get();
     if (!state.group) return null;
     const target = findLeafInDirection(state.group.root, state.group.focusedLeafId, direction);
     if (!target) return null;
-    const updatedWorkspace: Workspace = {
-      ...touchWorkspace(state.group),
-      focusedLeafId: target.id,
-    };
-    set({
-      ...withWorkspaceCollection(
-        updateWorkspace(state.workspaces, state.group.id, () => updatedWorkspace),
-        state.group.id,
-      ),
-      zoomed: false,
-    });
+    set({ ...withWorkspaceCollection(updateWorkspace(state.workspaces, state.group.id, () => touchWorkspace({ ...state.group!, focusedLeafId: target.id })), state.group.id), zoomed: false });
     return target.id;
   },
-
-  toggleZoom: () => {
-    set((state) => {
-      if (!state.group) return state;
-      return { zoomed: !state.zoomed };
-    });
-  },
-
+  toggleZoom: () => set((state) => !state.group ? state : { zoomed: !state.zoomed }),
   reconcileThreads: (validThreadIds) => {
     const state = get();
-    if (state.workspaces.length === 0) {
-      if (state.group === null && state.activeWorkspaceId === null) return null;
-      set({
-        ...withWorkspaceCollection([], null),
-        zoomed: false,
-        dragOver: null,
-      });
-      return null;
-    }
-
     let activeFallbackThreadId: ThreadId | null = null;
     const nextWorkspaces: Workspace[] = [];
-    let changed = false;
-
     for (const workspace of state.workspaces) {
-      const nextRoot = pruneInvalidLeaves(workspace.root, validThreadIds);
-      if (!nextRoot) {
-        changed = true;
+      const root = pruneInvalidLeaves(workspace.root, validThreadIds, isDesktopMode());
+      if (!root) continue;
+      if (root.type === "leaf") {
+        activeFallbackThreadId = root.paneType === "thread" ? root.threadId : root.targetThreadId;
         continue;
       }
-      if (nextRoot.type === "leaf") {
-        if (workspace.id === state.activeWorkspaceId) {
-          activeFallbackThreadId = nextRoot.threadId;
-        }
-        changed = true;
-        continue;
-      }
-      const focusedLeaf = findLeaf(nextRoot, workspace.focusedLeafId) ?? firstLeaf(nextRoot);
-      if (nextRoot !== workspace.root || focusedLeaf.id !== workspace.focusedLeafId) {
-        changed = true;
-      }
-      nextWorkspaces.push({
-        ...workspace,
-        root: nextRoot,
-        focusedLeafId: focusedLeaf.id,
-      });
+      if (!hasThreadLeaf(root)) continue;
+      const focused = findLeaf(root, workspace.focusedLeafId) ?? firstLeaf(root);
+      nextWorkspaces.push({ ...workspace, root, focusedLeafId: focused.id });
     }
-
-    const nextActiveWorkspace = resolveActiveWorkspace(nextWorkspaces, state.activeWorkspaceId);
-    if (!changed && nextActiveWorkspace?.id === state.activeWorkspaceId) {
-      return nextActiveWorkspace
-        ? workspaceFocusedThreadId(nextActiveWorkspace)
-        : activeFallbackThreadId;
-    }
-
-    set({
-      ...withWorkspaceCollection(nextWorkspaces, nextActiveWorkspace?.id ?? null),
-      zoomed: false,
-      dragOver: null,
-    });
-
-    if (nextActiveWorkspace) {
-      return workspaceFocusedThreadId(nextActiveWorkspace);
-    }
-    return activeFallbackThreadId;
+    const nextActive = resolveActiveWorkspace(nextWorkspaces, state.activeWorkspaceId);
+    set({ ...withWorkspaceCollection(nextWorkspaces, nextActive?.id ?? null), zoomed: false, dragOver: null });
+    return nextActive ? workspaceFocusedThreadId(nextActive) : activeFallbackThreadId;
   },
 }));
 
 useSplitViewStore.subscribe((state) => debouncedPersist.maybeExecute(state));
-
 if (typeof window !== "undefined") {
-  window.addEventListener("beforeunload", () => {
-    debouncedPersist.flush();
-  });
+  window.addEventListener("beforeunload", () => debouncedPersist.flush());
 }

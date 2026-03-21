@@ -166,6 +166,7 @@ function OpenCommandPaletteDialog() {
   const openPalette = useCommandPaletteStore((store) => store.openPalette);
   const splitGroup = useSplitViewStore((store) => store.group);
   const createDraftThread = useComposerDraftStore((store) => store.createDraftThread);
+  const splitThreadWithBrowser = useSplitViewStore((store) => store.splitThreadWithBrowser);
 
   const projectCwdById = useMemo(
     () => new Map(projects.map((project) => [project.id, project.cwd] as const)),
@@ -423,6 +424,33 @@ function OpenCommandPaletteDialog() {
         await navigate({ to: "/settings" });
       },
     });
+
+    if (splitSourceThreadId && window.desktopBridge) {
+      actionItems.push({
+        kind: "action",
+        value: "action:browser-right",
+        label: "open browser right pane desktop",
+        title: "Open browser right",
+        searchText: "open browser right split page panel desktop",
+        icon: <ColumnsIcon className={ITEM_ICON_CLASS} />,
+        keepOpen: false,
+        run: async () => {
+          splitThreadWithBrowser(splitSourceThreadId, "horizontal");
+        },
+      });
+      actionItems.push({
+        kind: "action",
+        value: "action:browser-down",
+        label: "open browser down pane desktop",
+        title: "Open browser down",
+        searchText: "open browser down split page panel desktop",
+        icon: <ColumnsIcon className={ITEM_ICON_CLASS} />,
+        keepOpen: false,
+        run: async () => {
+          splitThreadWithBrowser(splitSourceThreadId, "vertical");
+        },
+      });
+    }
 
     if (splitSourceThreadId) {
       actionItems.push({

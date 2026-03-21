@@ -43,6 +43,7 @@ import {
   reduceDesktopUpdateStateOnUpdateAvailable,
 } from "./updateMachine";
 import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch";
+import { createBrowserPaneManager } from "./browserPaneManager";
 
 syncShellEnvironment();
 
@@ -56,6 +57,19 @@ const UPDATE_STATE_CHANNEL = "desktop:update-state";
 const UPDATE_GET_STATE_CHANNEL = "desktop:update-get-state";
 const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
 const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
+const BROWSER_SYNC_SHORTCUTS_CHANNEL = "desktop:browser-sync-shortcuts";
+const BROWSER_EVENT_CHANNEL = "desktop:browser-event";
+const BROWSER_GET_SNAPSHOT_CHANNEL = "desktop:browser-get-snapshot";
+const BROWSER_CAPTURE_SCREENSHOT_CHANNEL = "desktop:browser-capture-screenshot";
+const BROWSER_STOP_CHANNEL = "desktop:browser-stop";
+const BROWSER_RELOAD_CHANNEL = "desktop:browser-reload";
+const BROWSER_GO_FORWARD_CHANNEL = "desktop:browser-go-forward";
+const BROWSER_GO_BACK_CHANNEL = "desktop:browser-go-back";
+const BROWSER_NAVIGATE_CHANNEL = "desktop:browser-navigate";
+const BROWSER_SET_VISIBLE_CHANNEL = "desktop:browser-set-visible";
+const BROWSER_SET_BOUNDS_CHANNEL = "desktop:browser-set-bounds";
+const BROWSER_DESTROY_CHANNEL = "desktop:browser-destroy";
+const BROWSER_ENSURE_CHANNEL = "desktop:browser-ensure";
 const STATE_DIR =
   process.env.TETHER_STATE_DIR?.trim() || Path.join(OS.homedir(), ".t3", "userdata");
 const DESKTOP_SCHEME = "t3";
@@ -95,6 +109,7 @@ let aboutCommitHashCache: string | null | undefined;
 let desktopLogSink: RotatingFileSink | null = null;
 let backendLogSink: RotatingFileSink | null = null;
 let restoreStdIoCapture: (() => void) | null = null;
+let browserPaneManager: ReturnType<typeof createBrowserPaneManager> | null = null;
 
 let destructiveMenuIconCache: Electron.NativeImage | null | undefined;
 const desktopRuntimeInfo = resolveDesktopRuntimeInfo({
@@ -1226,6 +1241,39 @@ function registerIpcHandlers(): void {
   });
 }
 
+ipcMain.handle(BROWSER_ENSURE_CHANNEL, async (_event, input) => {
+  await browserPaneManager?.ensurePane(input);
+});
+ipcMain.handle(BROWSER_DESTROY_CHANNEL, async (_event, input) => {
+  await browserPaneManager?.destroyPane(input);
+});
+ipcMain.handle(BROWSER_SET_BOUNDS_CHANNEL, async (_event, input) => {
+  await browserPaneManager?.setBounds(input);
+});
+ipcMain.handle(BROWSER_SET_VISIBLE_CHANNEL, async (_event, input) => {
+  await browserPaneManager?.setVisible(input);
+});
+ipcMain.handle(BROWSER_NAVIGATE_CHANNEL, async (_event, input) => {
+  await browserPaneManager?.navigate(input);
+});
+ipcMain.handle(BROWSER_GO_BACK_CHANNEL, async (_event, input) => {
+  await browserPaneManager?.goBack(input);
+});
+ipcMain.handle(BROWSER_GO_FORWARD_CHANNEL, async (_event, input) => {
+  await browserPaneManager?.goForward(input);
+});
+ipcMain.handle(BROWSER_RELOAD_CHANNEL, async (_event, input) => {
+  await browserPaneManager?.reload(input);
+});
+ipcMain.handle(BROWSER_STOP_CHANNEL, async (_event, input) => {
+  await browserPaneManager?.stop(input);
+});
+ipcMain.handle(BROWSER_CAPTURE_SCREENSHOT_CHANNEL, async (_event, input) => browserPaneManager?.captureScreenshot(input));
+ipcMain.handle(BROWSER_GET_SNAPSHOT_CHANNEL, async (_event, input) => browserPaneManager?.getSnapshot(input));
+ipcMain.handle(BROWSER_SYNC_SHORTCUTS_CHANNEL, async (_event, input) => {
+  await browserPaneManager?.syncShortcutState(input);
+});
+
 function getIconOption(): { icon: string } | Record<string, never> {
   if (process.platform === "darwin") return {}; // macOS uses .icns from app bundle
   const ext = process.platform === "win32" ? "ico" : "png";
@@ -1251,6 +1299,12 @@ function createWindow(): BrowserWindow {
       nodeIntegration: false,
       sandbox: true,
     },
+  });
+
+  browserPaneManager = createBrowserPaneManager({
+    window,
+    emitEvent: (event) => window.webContents.send(BROWSER_EVENT_CHANNEL, event),
+    onOpenExternal: (url) => shell.openExternal(url),
   });
 
   window.webContents.on("context-menu", (event, params) => {
@@ -1309,6 +1363,8 @@ function createWindow(): BrowserWindow {
   }
 
   window.on("closed", () => {
+    void browserPaneManager?.destroyAll();
+    browserPaneManager = null;
     if (mainWindow === window) {
       mainWindow = null;
     }
