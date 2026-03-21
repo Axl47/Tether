@@ -11,6 +11,7 @@ import {
   type DiffPanelMode,
 } from "../components/DiffPanelShell";
 import { SplitPanelRoot, SplitDropPreview, SplitPlaceholder } from "../components/SplitPanel";
+import { BrowserPane } from "../components/BrowserPane";
 import { useComposerDraftStore } from "../composerDraftStore";
 import {
   clearDiffSearchParams,
@@ -26,6 +27,7 @@ import {
   computeClosestDropZone,
   dropZoneToSplit,
   type DropZone,
+  type SplitLeaf,
   findLeaf,
   findLeafByThreadId,
   firstLeaf,
@@ -397,7 +399,10 @@ function ChatThreadRouteView() {
   const routeFallbackThreadId = useMemo(() => {
     if (!splitGroup) return null;
     const focusedLeaf = findLeaf(splitGroup.root, splitGroup.focusedLeafId);
-    return focusedLeaf?.threadId ?? firstLeaf(splitGroup.root).threadId;
+    if (focusedLeaf?.paneType === "thread") return focusedLeaf.threadId;
+    if (focusedLeaf?.paneType === "browser") return focusedLeaf.targetThreadId;
+    const first = firstLeaf(splitGroup.root);
+    return first.paneType === "thread" ? first.threadId : first.targetThreadId;
   }, [splitGroup]);
   const focusedThreadId = routeFallbackThreadId ?? threadId;
 
@@ -506,11 +511,15 @@ function ChatThreadRouteView() {
 
   // ── Split view mode ──────────────────────────────────────────────
   if (isSplitView) {
-    const renderThread = (tid: ThreadId, leafId: string) => {
+    const renderLeaf = (leaf: SplitLeaf) => {
+      if (leaf.paneType === "browser") {
+        return <BrowserPane leaf={leaf} />;
+      }
+      const tid = leaf.threadId;
       const isPaletteSplitPreview =
         commandPaletteOpen &&
         commandPaletteMode !== "default" &&
-        commandPalettePreviewLeafId === leafId &&
+        commandPalettePreviewLeafId === leaf.id &&
         commandPalettePreviewThreadId === tid;
 
       if (isPaletteSplitPreview) {
@@ -522,7 +531,7 @@ function ChatThreadRouteView() {
       }
 
       const onClose = () => {
-        const remaining = useSplitViewStore.getState().closePane(leafId);
+        const remaining = useSplitViewStore.getState().closePane(leaf.id);
         if (remaining) {
           void navigate({
             to: "/$threadId",
@@ -538,9 +547,9 @@ function ChatThreadRouteView() {
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <SidebarInset className="min-h-0 flex-1 overflow-hidden overscroll-y-none bg-muted py-3 pl-2 pr-3 text-foreground dark:bg-card">
             <SplitPanelRoot
-              renderThread={renderThread}
+              renderLeaf={renderLeaf}
               onSplitDrop={handleSplitDrop}
-              onFocusThread={focusSplitThread}
+              onFocusLeaf={(leaf) => { if (leaf.paneType === "thread") focusSplitThread(leaf.threadId); }}
             />
           </SidebarInset>
           {!shouldUseDiffSheet && (

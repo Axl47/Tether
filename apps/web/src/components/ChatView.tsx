@@ -2765,6 +2765,23 @@ export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) 
     toggleTerminalVisibility,
   ]);
 
+  useEffect(() => {
+    const onBrowserCommand = (rawEvent: Event) => {
+      const event = rawEvent as CustomEvent<{ command: string }>;
+      const command = event.detail?.command;
+      if (command === "diff.toggle") {
+        onToggleDiff(!diffOpen);
+        return;
+      }
+      if (command === "chat.splitRight" || command === "chat.splitDown") {
+        openSplitCommandPalette(command === "chat.splitRight" ? "split-right" : "split-down");
+        return;
+      }
+    };
+    window.addEventListener("tether-browser-command", onBrowserCommand);
+    return () => window.removeEventListener("tether-browser-command", onBrowserCommand);
+  }, [diffOpen, onToggleDiff, openSplitCommandPalette]);
+
   const addComposerImages = (files: File[]) => {
     if (!activeThreadId || files.length === 0) return;
 

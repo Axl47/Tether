@@ -150,6 +150,57 @@ export function createWsNativeApi(): NativeApi {
       preparePullRequestThread: (input) =>
         transport.request(WS_METHODS.gitPreparePullRequestThread, input),
     },
+    browser: {
+      ensurePane: async (input) => {
+        if (!window.desktopBridge) throw new Error("Browser panes require desktop mode.");
+        await window.desktopBridge.browser.ensurePane(input);
+      },
+      destroyPane: async (input) => {
+        if (!window.desktopBridge) return;
+        await window.desktopBridge.browser.destroyPane(input);
+      },
+      setBounds: async (input) => {
+        if (!window.desktopBridge) return;
+        await window.desktopBridge.browser.setBounds(input);
+      },
+      setVisible: async (input) => {
+        if (!window.desktopBridge) return;
+        await window.desktopBridge.browser.setVisible(input);
+      },
+      navigate: async (input) => {
+        if (!window.desktopBridge) throw new Error("Browser panes require desktop mode.");
+        await window.desktopBridge.browser.navigate(input);
+      },
+      goBack: async (input) => {
+        if (!window.desktopBridge) return;
+        await window.desktopBridge.browser.goBack(input);
+      },
+      goForward: async (input) => {
+        if (!window.desktopBridge) return;
+        await window.desktopBridge.browser.goForward(input);
+      },
+      reload: async (input) => {
+        if (!window.desktopBridge) return;
+        await window.desktopBridge.browser.reload(input);
+      },
+      stop: async (input) => {
+        if (!window.desktopBridge) return;
+        await window.desktopBridge.browser.stop(input);
+      },
+      captureScreenshot: async (input) => {
+        if (!window.desktopBridge) throw new Error("Browser panes require desktop mode.");
+        return window.desktopBridge.browser.captureScreenshot(input);
+      },
+      getSnapshot: async (input) => {
+        if (!window.desktopBridge) throw new Error("Browser panes require desktop mode.");
+        return window.desktopBridge.browser.getSnapshot(input);
+      },
+      onEvent: (callback) => window.desktopBridge?.browser.onEvent(callback) ?? (() => {}),
+      syncShortcutState: async (state) => {
+        if (!window.desktopBridge) return;
+        await window.desktopBridge.browser.syncShortcutState(state);
+      },
+    },
     contextMenu: {
       show: async <T extends string>(
         items: readonly ContextMenuItem<T>[],
