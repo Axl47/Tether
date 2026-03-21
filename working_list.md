@@ -2,7 +2,15 @@
 
 ## Pending
 
+- [ ] Inspect the fetched `noojuno/chat-thread-split-view-2` branch and map its split-view changes onto current `main`
+- [ ] Port the split-thread view and workspace-aware navigation into `codex/chat-thread-split-view-port`
+- [ ] Resolve overlaps with the already-merged command palette/filesystem browsing work
+- [ ] Run `bun fmt`, `bun -b lint`, `bun typecheck`, and focused split-view/browser coverage
+- [ ] Commit the port as a new local commit authored in this repository
+
 ## In Progress
+
+- [ ] Create the ExecPlan and start the split-view port branch from current `main`
 
 ## Done
 
