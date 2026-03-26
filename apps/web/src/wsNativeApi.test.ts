@@ -233,6 +233,32 @@ describe("wsNativeApi", () => {
     });
   });
 
+  it("delivers and caches valid server.desktopContextUpdated payloads", async () => {
+    const { createWsNativeApi, onServerDesktopContextUpdated } = await import("./wsNativeApi");
+
+    createWsNativeApi();
+    const listener = vi.fn();
+    onServerDesktopContextUpdated(listener);
+
+    const payload = {
+      projectId: ProjectId.makeUnsafe("project-1"),
+      projectTitle: "Nexus",
+      workspaceRoot: "/tmp/nexus",
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      threadTitle: "Focused thread",
+      updatedAt: "2026-03-21T00:00:00.000Z",
+    } as const;
+    emitPush(WS_CHANNELS.serverDesktopContextUpdated, payload);
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenCalledWith(payload);
+
+    const lateListener = vi.fn();
+    onServerDesktopContextUpdated(lateListener);
+    expect(lateListener).toHaveBeenCalledTimes(1);
+    expect(lateListener).toHaveBeenCalledWith(payload);
+  });
+
   it("forwards valid terminal and orchestration events", async () => {
     const { createWsNativeApi } = await import("./wsNativeApi");
 
@@ -369,6 +395,37 @@ describe("wsNativeApi", () => {
 
     expect(requestMock).toHaveBeenCalledWith(WS_METHODS.filesystemBrowse, {
       partialPath: "/tmp/project",
+    });
+  });
+
+  it("forwards desktop context requests to the websocket server methods", async () => {
+    requestMock.mockResolvedValue({
+      projectId: null,
+      projectTitle: null,
+      workspaceRoot: null,
+      threadId: null,
+      threadTitle: null,
+      updatedAt: "2026-03-21T00:00:00.000Z",
+    });
+    const { createWsNativeApi } = await import("./wsNativeApi");
+
+    const api = createWsNativeApi();
+    await api.server.getDesktopContext();
+    expect(requestMock).toHaveBeenCalledWith(WS_METHODS.serverGetDesktopContext);
+
+    await api.server.setDesktopContext({
+      projectId: ProjectId.makeUnsafe("project-1"),
+      projectTitle: "Nexus",
+      workspaceRoot: "/tmp/nexus",
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      threadTitle: "Focused thread",
+    });
+    expect(requestMock).toHaveBeenCalledWith(WS_METHODS.serverSetDesktopContext, {
+      projectId: "project-1",
+      projectTitle: "Nexus",
+      workspaceRoot: "/tmp/nexus",
+      threadId: "thread-1",
+      threadTitle: "Focused thread",
     });
   });
 

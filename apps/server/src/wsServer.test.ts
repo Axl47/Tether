@@ -284,6 +284,8 @@ function asWebSocketResponse(message: unknown): WebSocketResponse | null {
   return message as WebSocketResponse;
 }
 
+const ignoreSocketError = () => {};
+
 function connectWsOnce(port: number, token?: string): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
     const query = token ? `?token=${encodeURIComponent(token)}` : "";
@@ -293,6 +295,7 @@ function connectWsOnce(port: number, token?: string): Promise<WebSocket> {
       response: { queue: [], waiters: [] },
     };
     channelsBySocket.set(ws, channels);
+    ws.on("error", ignoreSocketError);
 
     ws.on("message", (raw) => {
       const parsed = JSON.parse(String(raw));
@@ -444,6 +447,17 @@ function compileKeybindings(bindings: KeybindingsConfig): ResolvedKeybindingsCon
   return resolved;
 }
 
+async function closeSocket(ws: WebSocket): Promise<void> {
+  if (ws.readyState === WebSocket.CLOSED) {
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    ws.once("close", () => resolve());
+    ws.terminate();
+  });
+}
+
 const DEFAULT_RESOLVED_KEYBINDINGS = compileKeybindings([...DEFAULT_KEYBINDINGS]);
 const VALID_EDITOR_IDS = new Set(EDITORS.map((editor) => editor.id));
 
@@ -572,6 +586,20 @@ describe("WebSocket Server", () => {
   }
 
   async function closeTestServer() {
+    if (server) {
+      await new Promise<void>((resolve, reject) => {
+        server?.closeAllConnections?.();
+        server?.closeIdleConnections?.();
+        server?.close((error) => {
+          if (error && (error as NodeJS.ErrnoException).code !== "ERR_SERVER_NOT_RUNNING") {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+    }
+
     if (!serverScope) return;
     const scope = serverScope;
     serverScope = null;
@@ -579,9 +607,7 @@ describe("WebSocket Server", () => {
   }
 
   afterEach(async () => {
-    for (const ws of connections) {
-      ws.close();
-    }
+    await Promise.all(connections.map((ws) => closeSocket(ws)));
     connections.length = 0;
     await closeTestServer();
     server = null;
@@ -605,6 +631,58 @@ describe("WebSocket Server", () => {
       cwd: "/test/project",
       projectName: "project",
     });
+  });
+
+  it("stores and broadcasts desktop context updates", async () => {
+    server = await createTestServer({ cwd: "/test/project" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    expect(port).toBeGreaterThan(0);
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const initialResponse = await sendRequest(ws, WS_METHODS.serverGetDesktopContext);
+    expect(initialResponse.error).toBeUndefined();
+    expect(initialResponse.result).toEqual(
+      expect.objectContaining({
+        projectId: null,
+        threadId: null,
+      }),
+    );
+
+    const updateResponse = await sendRequest(ws, WS_METHODS.serverSetDesktopContext, {
+      projectId: "project-1",
+      projectTitle: "Nexus",
+      workspaceRoot: "/tmp/nexus",
+      threadId: "thread-1",
+      threadTitle: "Focused thread",
+    });
+    expect(updateResponse.error).toBeUndefined();
+    expect(updateResponse.result).toEqual(
+      expect.objectContaining({
+        projectId: "project-1",
+        threadId: "thread-1",
+      }),
+    );
+
+    const push = await waitForPush(ws, WS_CHANNELS.serverDesktopContextUpdated);
+    expect(push.data).toEqual(
+      expect.objectContaining({
+        projectId: "project-1",
+        projectTitle: "Nexus",
+        threadId: "thread-1",
+      }),
+    );
+
+    const getResponse = await sendRequest(ws, WS_METHODS.serverGetDesktopContext);
+    expect(getResponse.error).toBeUndefined();
+    expect(getResponse.result).toEqual(
+      expect.objectContaining({
+        projectId: "project-1",
+        workspaceRoot: "/tmp/nexus",
+      }),
+    );
   });
 
   it("serves persisted attachments from stateDir", async () => {

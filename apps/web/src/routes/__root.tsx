@@ -28,6 +28,7 @@ import { providerQueryKeys } from "../lib/providerReactQuery";
 import { projectQueryKeys } from "../lib/projectReactQuery";
 import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
 import { useAppViewportHeight } from "../hooks/useAppViewportHeight";
+import { deriveDesktopContextFromRoute } from "../desktopContext";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -58,6 +59,7 @@ function RootRouteView() {
     <ToastProvider>
       <AnchoredToastProvider>
         <EventRouter />
+        <DesktopContextReporter />
         <QueuedTurnDispatcher />
         <DesktopProjectBootstrap />
         <Outlet />
@@ -370,5 +372,34 @@ function EventRouter() {
 
 function DesktopProjectBootstrap() {
   // Desktop hydration runs through EventRouter project + orchestration sync.
+  return null;
+}
+
+function DesktopContextReporter() {
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const projects = useStore((store) => store.projects);
+  const threads = useStore((store) => store.threads);
+  const lastSerializedContextRef = useRef<string>("");
+
+  useEffect(() => {
+    const api = readNativeApi();
+    if (!api) return;
+
+    const nextContext = deriveDesktopContextFromRoute(pathname, projects, threads);
+    const serialized = JSON.stringify(nextContext);
+    if (serialized === lastSerializedContextRef.current) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      lastSerializedContextRef.current = serialized;
+      void api.server.setDesktopContext(nextContext).catch(() => undefined);
+    }, 120);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [pathname, projects, threads]);
+
   return null;
 }

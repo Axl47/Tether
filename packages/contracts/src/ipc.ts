@@ -38,7 +38,7 @@ import type {
   ProjectWriteFileResult,
 } from "./project";
 import type { FilesystemBrowseInput, FilesystemBrowseResult } from "./filesystem";
-import type { ServerConfig } from "./server";
+import type { ServerConfig, ServerDesktopContext, ServerSetDesktopContextInput } from "./server";
 import type {
   TerminalClearInput,
   TerminalCloseInput,
@@ -197,6 +197,8 @@ export interface NativeApi {
   };
   server: {
     getConfig: () => Promise<ServerConfig>;
+    getDesktopContext: () => Promise<ServerDesktopContext>;
+    setDesktopContext: (input: ServerSetDesktopContextInput) => Promise<ServerDesktopContext>;
     upsertKeybinding: (input: ServerUpsertKeybindingInput) => Promise<ServerUpsertKeybindingResult>;
   };
   browser: {

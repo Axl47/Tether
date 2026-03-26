@@ -105,6 +105,28 @@ it.effect("accepts filesystem browse requests and trims the partial path", () =>
   }),
 );
 
+it.effect("accepts server.setDesktopContext requests", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeWebSocketRequest({
+      id: "req-desktop-context",
+      body: {
+        _tag: WS_METHODS.serverSetDesktopContext,
+        projectId: "project-1",
+        projectTitle: "Nexus",
+        workspaceRoot: "/tmp/nexus",
+        threadId: "thread-1",
+        threadTitle: "Follow context",
+      },
+    });
+
+    assert.strictEqual(parsed.body._tag, WS_METHODS.serverSetDesktopContext);
+    if (parsed.body._tag === WS_METHODS.serverSetDesktopContext) {
+      assert.strictEqual(parsed.body.projectId, "project-1");
+      assert.strictEqual(parsed.body.threadId, "thread-1");
+    }
+  }),
+);
+
 it.effect("accepts typed websocket push envelopes with sequence", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeWsResponse({
@@ -124,6 +146,30 @@ it.effect("accepts typed websocket push envelopes with sequence", () =>
     assert.strictEqual(parsed.type, "push");
     assert.strictEqual(parsed.sequence, 1);
     assert.strictEqual(parsed.channel, WS_CHANNELS.serverWelcome);
+  }),
+);
+
+it.effect("accepts typed desktop-context push envelopes", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeWsResponse({
+      type: "push",
+      sequence: 2,
+      channel: WS_CHANNELS.serverDesktopContextUpdated,
+      data: {
+        projectId: "project-1",
+        projectTitle: "Nexus",
+        workspaceRoot: "/tmp/nexus",
+        threadId: "thread-1",
+        threadTitle: "Follow context",
+        updatedAt: "2026-03-21T00:00:00.000Z",
+      },
+    });
+
+    if (!("type" in parsed) || parsed.type !== "push") {
+      assert.fail("expected websocket response to decode as a push envelope");
+    }
+
+    assert.strictEqual(parsed.channel, WS_CHANNELS.serverDesktopContextUpdated);
   }),
 );
 

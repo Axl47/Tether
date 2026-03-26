@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { IsoDateTime, TrimmedNonEmptyString } from "./baseSchemas";
+import { IsoDateTime, ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas";
 import { KeybindingRule, ResolvedKeybindingsConfig } from "./keybindings";
 import { EditorId } from "./editor";
 import { ProviderKind } from "./orchestration";
@@ -69,3 +69,28 @@ export const ServerConfigUpdatedPayload = Schema.Struct({
   providers: ServerProviderStatuses,
 });
 export type ServerConfigUpdatedPayload = typeof ServerConfigUpdatedPayload.Type;
+
+export const ServerDesktopContext = Schema.Struct({
+  projectId: Schema.NullOr(ProjectId),
+  projectTitle: Schema.NullOr(TrimmedNonEmptyString),
+  workspaceRoot: Schema.NullOr(TrimmedNonEmptyString),
+  threadId: Schema.NullOr(ThreadId),
+  threadTitle: Schema.NullOr(TrimmedNonEmptyString),
+  updatedAt: IsoDateTime,
+});
+export type ServerDesktopContext = typeof ServerDesktopContext.Type;
+
+export const ServerGetDesktopContextResult = ServerDesktopContext;
+export type ServerGetDesktopContextResult = typeof ServerGetDesktopContextResult.Type;
+
+export const ServerSetDesktopContextInput = Schema.Struct({
+  projectId: Schema.NullOr(ProjectId),
+  projectTitle: Schema.NullOr(TrimmedNonEmptyString),
+  workspaceRoot: Schema.NullOr(TrimmedNonEmptyString),
+  threadId: Schema.NullOr(ThreadId),
+  threadTitle: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type ServerSetDesktopContextInput = typeof ServerSetDesktopContextInput.Type;
+
+export const ServerDesktopContextUpdatedPayload = ServerDesktopContext;
+export type ServerDesktopContextUpdatedPayload = typeof ServerDesktopContextUpdatedPayload.Type;

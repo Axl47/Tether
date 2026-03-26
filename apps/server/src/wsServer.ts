@@ -26,6 +26,7 @@ import {
   type WsResponse as WsResponseMessage,
   WsResponse,
   type WsPushEnvelopeBase,
+  type ServerDesktopContext,
 } from "@t3tools/contracts";
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import {
@@ -252,6 +253,27 @@ function decodeWorkspaceTextFile(contents: Uint8Array): Effect.Effect<string, Ro
 
 function stripRequestTag<T extends { _tag: string }>(body: T) {
   return Struct.omit(body, ["_tag"]);
+}
+
+function makeEmptyDesktopContext(): ServerDesktopContext {
+  return {
+    projectId: null,
+    projectTitle: null,
+    workspaceRoot: null,
+    threadId: null,
+    threadTitle: null,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function desktopContextEquals(left: ServerDesktopContext, right: ServerDesktopContext): boolean {
+  return (
+    left.projectId === right.projectId &&
+    left.projectTitle === right.projectTitle &&
+    left.workspaceRoot === right.workspaceRoot &&
+    left.threadId === right.threadId &&
+    left.threadTitle === right.threadTitle
+  );
 }
 
 const encodeWsResponse = Schema.encodeEffect(Schema.fromJsonString(WsResponse));
@@ -649,7 +671,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   });
 
   const closeAllClients = Ref.get(clients).pipe(
-    Effect.flatMap(Effect.forEach((client) => Effect.sync(() => client.close()))),
+    Effect.flatMap(Effect.forEach((client) => Effect.sync(() => client.terminate()))),
     Effect.flatMap(() => Ref.set(clients, new Set())),
   );
 
@@ -747,6 +769,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     ServerRuntimeServices | ServerConfig | FileSystem.FileSystem | Path.Path
   >();
   const runPromise = Effect.runPromiseWith(runtimeServices);
+  let desktopContext = makeEmptyDesktopContext();
 
   const unsubscribeTerminalEvents = yield* terminalManager.subscribe(
     (event) => void Effect.runPromise(pushBus.publishAll(WS_CHANNELS.terminalEvent, event)),
@@ -760,7 +783,9 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   yield* readiness.markHttpListening;
 
   yield* Effect.addFinalizer(() =>
-    Effect.all([closeAllClients, closeWebSocketServer.pipe(Effect.ignoreCause({ log: true }))]),
+    closeAllClients.pipe(
+      Effect.flatMap(() => closeWebSocketServer.pipe(Effect.ignoreCause({ log: true }))),
+    ),
   );
 
   const routeRequest = Effect.fnUntraced(function* (request: WebSocketRequest) {
@@ -1049,6 +1074,23 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           providers: providerStatuses,
           availableEditors,
         };
+
+      case WS_METHODS.serverGetDesktopContext:
+        return desktopContext;
+
+      case WS_METHODS.serverSetDesktopContext: {
+        const body = stripRequestTag(request.body);
+        const nextDesktopContext: ServerDesktopContext = {
+          ...body,
+          updatedAt: new Date().toISOString(),
+        };
+        const changed = desktopContextEquals(desktopContext, nextDesktopContext) === false;
+        desktopContext = nextDesktopContext;
+        if (changed) {
+          yield* pushBus.publishAll(WS_CHANNELS.serverDesktopContextUpdated, desktopContext);
+        }
+        return desktopContext;
+      }
 
       case WS_METHODS.serverUpsertKeybinding: {
         const body = stripRequestTag(request.body);

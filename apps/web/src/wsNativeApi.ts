@@ -4,6 +4,7 @@ import {
   type ContextMenuItem,
   type NativeApi,
   ServerConfigUpdatedPayload,
+  type ServerDesktopContextUpdatedPayload,
   WS_CHANNELS,
   WS_METHODS,
   type WsWelcomePayload,
@@ -15,6 +16,9 @@ import { WsTransport } from "./wsTransport";
 let instance: { api: NativeApi; transport: WsTransport } | null = null;
 const welcomeListeners = new Set<(payload: WsWelcomePayload) => void>();
 const serverConfigUpdatedListeners = new Set<(payload: ServerConfigUpdatedPayload) => void>();
+const serverDesktopContextUpdatedListeners = new Set<
+  (payload: ServerDesktopContextUpdatedPayload) => void
+>();
 
 /**
  * Subscribe to the server welcome message. If a welcome was already received
@@ -62,6 +66,26 @@ export function onServerConfigUpdated(
   };
 }
 
+export function onServerDesktopContextUpdated(
+  listener: (payload: ServerDesktopContextUpdatedPayload) => void,
+): () => void {
+  serverDesktopContextUpdatedListeners.add(listener);
+
+  const latestDesktopContext =
+    instance?.transport.getLatestPush(WS_CHANNELS.serverDesktopContextUpdated)?.data ?? null;
+  if (latestDesktopContext) {
+    try {
+      listener(latestDesktopContext);
+    } catch {
+      // Swallow listener errors
+    }
+  }
+
+  return () => {
+    serverDesktopContextUpdatedListeners.delete(listener);
+  };
+}
+
 export function createWsNativeApi(): NativeApi {
   if (instance) return instance.api;
 
@@ -80,6 +104,16 @@ export function createWsNativeApi(): NativeApi {
   transport.subscribe(WS_CHANNELS.serverConfigUpdated, (message) => {
     const payload = message.data;
     for (const listener of serverConfigUpdatedListeners) {
+      try {
+        listener(payload);
+      } catch {
+        // Swallow listener errors
+      }
+    }
+  });
+  transport.subscribe(WS_CHANNELS.serverDesktopContextUpdated, (message) => {
+    const payload = message.data;
+    for (const listener of serverDesktopContextUpdatedListeners) {
       try {
         listener(payload);
       } catch {
@@ -214,6 +248,8 @@ export function createWsNativeApi(): NativeApi {
     },
     server: {
       getConfig: () => transport.request(WS_METHODS.serverGetConfig),
+      getDesktopContext: () => transport.request(WS_METHODS.serverGetDesktopContext),
+      setDesktopContext: (input) => transport.request(WS_METHODS.serverSetDesktopContext, input),
       upsertKeybinding: (input) => transport.request(WS_METHODS.serverUpsertKeybinding, input),
     },
     orchestration: {
