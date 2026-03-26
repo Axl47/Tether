@@ -1,4 +1,5 @@
 import { DiffsHighlighter, getSharedHighlighter, SupportedLanguages } from "@pierre/diffs";
+import { type ThreadId } from "@t3tools/contracts";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import React, {
   Children,
@@ -17,13 +18,16 @@ import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { openInPreferredEditor } from "../editorPreferences";
+import { isElectron } from "../env";
 import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
 import { fnv1a32 } from "../lib/diffRendering";
 import { copyTextToClipboard } from "../lib/clipboard";
 import { LRUCache } from "../lib/lruCache";
+import { isExternalHttpUrl, openUrlInBrowserPane } from "../lib/openUrlInBrowserPane";
 import { useTheme } from "../hooks/useTheme";
 import { normalizeMarkdownFileLinks, resolveMarkdownFileLinkTarget } from "../markdown-links";
 import { readNativeApi } from "../nativeApi";
+import { toastManager } from "./ui/toast";
 
 class CodeHighlightErrorBoundary extends React.Component<
   { fallback: ReactNode; children: ReactNode },
@@ -50,6 +54,7 @@ interface ChatMarkdownProps {
   text: string;
   cwd: string | undefined;
   isStreaming?: boolean;
+  threadId?: ThreadId;
 }
 
 const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
@@ -232,16 +237,93 @@ function SuspenseShikiCodeBlock({
   );
 }
 
-function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
+function ChatMarkdown({ text, cwd, isStreaming = false, threadId }: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
   const normalizedText = useMemo(() => normalizeMarkdownFileLinks(text, cwd), [cwd, text]);
   const markdownComponents = useMemo<Components>(
     () => ({
-      a({ node: _node, href, ...props }) {
+      a({ node: _node, href, onContextMenu, ...props }) {
         const targetPath = resolveMarkdownFileLinkTarget(href, cwd);
         if (!targetPath) {
-          return <a {...props} href={href} target="_blank" rel="noreferrer" />;
+          const url = href ?? "";
+          const shouldUseDesktopContextMenu =
+            threadId !== undefined && isElectron && isExternalHttpUrl(url);
+
+          return (
+            <a
+              {...props}
+              href={href}
+              target="_blank"
+              rel="noreferrer"
+              onContextMenu={
+                !shouldUseDesktopContextMenu
+                  ? onContextMenu
+                  : async (event) => {
+                      onContextMenu?.(event);
+                      if (event.defaultPrevented) return;
+                      const api = readNativeApi();
+                      if (!api) return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      const clicked = await api.contextMenu.show(
+                        [
+                          { id: "open-external", label: "Open link externally" },
+                          { id: "open-browser-panel", label: "Open in Browser Panel" },
+                          { id: "copy-link", label: "Copy link" },
+                        ],
+                        { x: event.clientX, y: event.clientY },
+                      );
+
+                      if (clicked === "open-external") {
+                        await api.shell.openExternal(url).catch((error) => {
+                          toastManager.add({
+                            type: "error",
+                            title: "Couldn't open link",
+                            description:
+                              error instanceof Error ? error.message : "Unable to open link.",
+                          });
+                        });
+                        return;
+                      }
+
+                      if (clicked === "open-browser-panel") {
+                        try {
+                          const result = await openUrlInBrowserPane({ url, threadId });
+                          toastManager.add({
+                            type: "success",
+                            title:
+                              result.kind === "reused-existing-pane"
+                                ? "Opened in focused browser pane"
+                                : "Opened in new browser pane",
+                          });
+                        } catch (error) {
+                          toastManager.add({
+                            type: "error",
+                            title: "Couldn't open in browser pane",
+                            description:
+                              error instanceof Error
+                                ? error.message
+                                : "Unable to open the browser pane.",
+                          });
+                        }
+                        return;
+                      }
+
+                      if (clicked === "copy-link") {
+                        await copyTextToClipboard(url).catch((error) => {
+                          toastManager.add({
+                            type: "error",
+                            title: "Couldn't copy link",
+                            description:
+                              error instanceof Error ? error.message : "Clipboard write failed.",
+                          });
+                        });
+                      }
+                    }
+              }
+            />
+          );
         }
 
         return (
@@ -283,7 +365,7 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
         );
       },
     }),
-    [cwd, diffThemeName, isStreaming],
+    [cwd, diffThemeName, isStreaming, threadId],
   );
 
   return (

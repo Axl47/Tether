@@ -4275,6 +4275,7 @@ export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) 
             >
               <MessagesTimeline
                 key={activeThread.id}
+                threadId={activeThread.id}
                 hasMessages={timelineEntries.length > 0}
                 isWorking={isWorking}
                 activeTurnInProgress={isWorking || !latestTurnSettled}
@@ -6019,6 +6020,7 @@ const ProposedPlanCard = memo(function ProposedPlanCard({
 });
 
 interface MessagesTimelineProps {
+  threadId: ThreadId;
   hasMessages: boolean;
   isWorking: boolean;
   activeTurnInProgress: boolean;
@@ -6300,11 +6302,13 @@ const CompactChangedFilesSummary = memo(function CompactChangedFilesSummary(prop
 const AnimatedAssistantMessage = memo(function AnimatedAssistantMessage({
   message,
   cwd,
+  threadId,
   animate,
   onComplete,
 }: {
   message: TimelineMessage;
   cwd: string | undefined;
+  threadId: ThreadId;
   animate: boolean;
   onComplete: () => void;
 }) {
@@ -6346,6 +6350,7 @@ const AnimatedAssistantMessage = memo(function AnimatedAssistantMessage({
     <ChatMarkdown
       text={animate ? targetText.slice(0, visibleLength) : targetText}
       cwd={cwd}
+      threadId={threadId}
       isStreaming={Boolean(message.streaming) || (animate && visibleLength < targetText.length)}
     />
   );
@@ -6485,6 +6490,7 @@ const TimelineFlaggerRail = memo(function TimelineFlaggerRail(props: {
 });
 
 const MessagesTimeline = memo(function MessagesTimeline({
+  threadId,
   hasMessages,
   isWorking,
   activeTurnInProgress,
@@ -7154,6 +7160,7 @@ const MessagesTimeline = memo(function MessagesTimeline({
                 <AnimatedAssistantMessage
                   message={{ ...row.message, text: messageText }}
                   cwd={markdownCwd}
+                  threadId={threadId}
                   animate={
                     !row.message.streaming &&
                     animatedAssistantMessageId === row.message.id &&

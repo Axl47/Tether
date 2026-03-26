@@ -14,6 +14,8 @@ import {
 import { Popover, PopoverPopup, PopoverTrigger } from "~/components/ui/popover";
 import { type TerminalContextSelection } from "~/lib/terminalContext";
 import { openInPreferredEditor } from "../editorPreferences";
+import { copyTextToClipboard } from "../lib/clipboard";
+import { openUrlInBrowserPane } from "../lib/openUrlInBrowserPane";
 import {
   extractTerminalLinks,
   isTerminalLinkActivation,
@@ -27,6 +29,7 @@ import {
   type ThreadTerminalGroup,
 } from "../types";
 import { readNativeApi } from "~/nativeApi";
+import { toastManager } from "./ui/toast";
 
 const MIN_DRAWER_HEIGHT = 180;
 const MAX_DRAWER_HEIGHT_RATIO = 0.75;
@@ -219,6 +222,7 @@ function TerminalViewport({
   const selectionActionRequestIdRef = useRef(0);
   const selectionActionOpenRef = useRef(false);
   const selectionActionTimerRef = useRef<number | null>(null);
+  const hoveredUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
     onSessionExitedRef.current = onSessionExited;
@@ -380,37 +384,54 @@ function TerminalViewport({
         }
 
         callback(
-          matches.map((match) => ({
-            text: match.text,
-            range: {
-              start: { x: match.start + 1, y: bufferLineNumber },
-              end: { x: match.end, y: bufferLineNumber },
-            },
-            activate: (event: MouseEvent) => {
-              if (!isTerminalLinkActivation(event)) return;
+          matches.map((match) => {
+            const link = {
+              text: match.text,
+              range: {
+                start: { x: match.start + 1, y: bufferLineNumber },
+                end: { x: match.end, y: bufferLineNumber },
+              },
+              activate: (event: MouseEvent) => {
+                if (!isTerminalLinkActivation(event)) return;
 
-              const latestTerminal = terminalRef.current;
-              if (!latestTerminal) return;
+                const latestTerminal = terminalRef.current;
+                if (!latestTerminal) return;
 
-              if (match.kind === "url") {
-                void api.shell.openExternal(match.text).catch((error) => {
+                if (match.kind === "url") {
+                  void api.shell.openExternal(match.text).catch((error) => {
+                    writeSystemMessage(
+                      latestTerminal,
+                      error instanceof Error ? error.message : "Unable to open link",
+                    );
+                  });
+                  return;
+                }
+
+                const target = resolvePathLinkTarget(match.text, cwd);
+                void openInPreferredEditor(api, target).catch((error) => {
                   writeSystemMessage(
                     latestTerminal,
-                    error instanceof Error ? error.message : "Unable to open link",
+                    error instanceof Error ? error.message : "Unable to open path",
                   );
                 });
-                return;
-              }
+              },
+            };
 
-              const target = resolvePathLinkTarget(match.text, cwd);
-              void openInPreferredEditor(api, target).catch((error) => {
-                writeSystemMessage(
-                  latestTerminal,
-                  error instanceof Error ? error.message : "Unable to open path",
-                );
+            if (match.kind === "url") {
+              Object.assign(link, {
+                hover: () => {
+                  hoveredUrlRef.current = match.text;
+                },
+                leave: () => {
+                  if (hoveredUrlRef.current === match.text) {
+                    hoveredUrlRef.current = null;
+                  }
+                },
               });
-            },
-          })),
+            }
+
+            return link;
+          }),
         );
       },
     });
@@ -455,8 +476,67 @@ function TerminalViewport({
       clearSelectionAction();
       selectionGestureActiveRef.current = event.button === 0;
     };
+    const handleContextMenu = (event: MouseEvent) => {
+      const hoveredUrl = hoveredUrlRef.current;
+      if (!hoveredUrl || window.desktopBridge === undefined) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      void (async () => {
+        const clicked = await api.contextMenu.show(
+          [
+            { id: "open-external", label: "Open link externally" },
+            { id: "open-browser-panel", label: "Open in Browser Panel" },
+            { id: "copy-link", label: "Copy link" },
+          ],
+          { x: event.clientX, y: event.clientY },
+        );
+
+        if (clicked === "open-external") {
+          await api.shell.openExternal(hoveredUrl).catch((error) => {
+            writeSystemMessage(
+              terminal,
+              error instanceof Error ? error.message : "Unable to open link",
+            );
+          });
+          return;
+        }
+
+        if (clicked === "open-browser-panel") {
+          try {
+            const result = await openUrlInBrowserPane({ url: hoveredUrl, threadId });
+            toastManager.add({
+              type: "success",
+              title:
+                result.kind === "reused-existing-pane"
+                  ? "Opened in focused browser pane"
+                  : "Opened in new browser pane",
+            });
+          } catch (error) {
+            toastManager.add({
+              type: "error",
+              title: "Couldn't open in browser pane",
+              description:
+                error instanceof Error ? error.message : "Unable to open the browser pane.",
+            });
+          }
+          return;
+        }
+
+        if (clicked === "copy-link") {
+          await copyTextToClipboard(hoveredUrl).catch((error) => {
+            writeSystemMessage(
+              terminal,
+              error instanceof Error ? error.message : "Clipboard write failed",
+            );
+          });
+        }
+      })();
+    };
     window.addEventListener("mouseup", handleMouseUp);
     mount.addEventListener("pointerdown", handlePointerDown);
+    mount.addEventListener("contextmenu", handleContextMenu);
 
     const themeObserver = new MutationObserver(() => {
       const activeTerminal = terminalRef.current;
@@ -592,7 +672,9 @@ function TerminalViewport({
       }
       window.removeEventListener("mouseup", handleMouseUp);
       mount.removeEventListener("pointerdown", handlePointerDown);
+      mount.removeEventListener("contextmenu", handleContextMenu);
       themeObserver.disconnect();
+      hoveredUrlRef.current = null;
       terminalRef.current = null;
       fitAddonRef.current = null;
       terminal.dispose();

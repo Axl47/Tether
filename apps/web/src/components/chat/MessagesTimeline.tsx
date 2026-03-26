@@ -1,4 +1,4 @@
-import { type MessageId, type TurnId } from "@t3tools/contracts";
+import { type MessageId, type ThreadId, type TurnId } from "@t3tools/contracts";
 import {
   memo,
   useCallback,
@@ -60,6 +60,7 @@ const MAX_VISIBLE_WORK_LOG_ENTRIES = 6;
 const ALWAYS_UNVIRTUALIZED_TAIL_ROWS = 8;
 
 interface MessagesTimelineProps {
+  threadId: ThreadId;
   hasMessages: boolean;
   isWorking: boolean;
   activeTurnInProgress: boolean;
@@ -83,6 +84,7 @@ interface MessagesTimelineProps {
 }
 
 export const MessagesTimeline = memo(function MessagesTimeline({
+  threadId,
   hasMessages,
   isWorking,
   activeTurnInProgress,
@@ -450,6 +452,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                 <ChatMarkdown
                   text={messageText}
                   cwd={markdownCwd}
+                  threadId={threadId}
                   isStreaming={Boolean(row.message.streaming)}
                 />
                 {(() => {
