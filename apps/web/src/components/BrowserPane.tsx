@@ -1,4 +1,5 @@
 import type { ThreadId } from "@t3tools/contracts";
+import { XIcon } from "lucide-react";
 import { collectThreadIds, type BrowserPaneLeaf, useSplitViewStore } from "../splitViewStore";
 import { registerBrowserPaneHost } from "../browserPaneLayoutCoordinator";
 import { readNativeApi } from "../nativeApi";
@@ -38,6 +39,7 @@ export function BrowserPane({ leaf }: { leaf: BrowserPaneLeaf }) {
   const snapshot = useBrowserPaneRuntimeStore((state) => state.snapshotsByPaneId[leaf.paneId]);
   const setSnapshot = useBrowserPaneRuntimeStore((state) => state.setSnapshot);
   const splitGroup = useSplitViewStore((state) => state.group);
+  const closeBrowserPane = useSplitViewStore((state) => state.closeBrowserPane);
   const updateBrowserPanePersistedState = useSplitViewStore(
     (state) => state.updateBrowserPanePersistedState,
   );
@@ -261,6 +263,18 @@ export function BrowserPane({ leaf }: { leaf: BrowserPaneLeaf }) {
           }}
         >
           Insert Network Logs
+        </Button>
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          className="shrink-0"
+          onClick={() => {
+            closeBrowserPane(leaf.paneId);
+          }}
+          aria-label="Close browser pane"
+          title="Close browser pane"
+        >
+          <XIcon className="size-3.5" />
         </Button>
       </div>
       <div className="rounded border border-border px-3 py-1 text-xs text-muted-foreground">
