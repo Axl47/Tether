@@ -206,6 +206,7 @@ import {
 } from "./ui/dialog";
 import { toastManager } from "./ui/toast";
 import { decodeProjectScriptKeybindingRule } from "~/lib/projectScriptKeybindings";
+import { canScrollElementForDelta } from "~/lib/scrolling";
 import ProjectScriptsControl, { type NewProjectScriptInput } from "./ProjectScriptsControl";
 import {
   commandForProjectScript,
@@ -2191,6 +2192,13 @@ export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) 
   const onComposerWheel = useCallback(
     (event: React.WheelEvent<HTMLDivElement>) => {
       if (event.ctrlKey) {
+        return;
+      }
+      const composerEditor =
+        event.target instanceof Element
+          ? event.target.closest<HTMLElement>("[data-testid='composer-editor']")
+          : null;
+      if (composerEditor && canScrollElementForDelta(composerEditor, event.deltaY)) {
         return;
       }
       const scrollContainer = noteThreadWheelIntent(event.deltaY);
