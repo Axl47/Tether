@@ -12,6 +12,10 @@
 
 - [x] Capture current websocket, snapshot, and desktop-context behavior
 - [x] Write ExecPlan for Pragma desktop integration
+- [x] Implement Tether local instance discovery publishing and tests
+- [x] Implement Pragma auto-discovery, reconnect resolution, and settings UX
+- [x] Add follow-project regression tests across Tether and Pragma
+- [x] Run final verification for Tether and Pragma
 - [x] Harden web desktop-context derivation edge cases and add coverage
 - [x] Verify `server.desktopContextUpdated` only broadcasts on effective changes
 - [x] Confirm populated desktop context is shared by the server-side in-memory store

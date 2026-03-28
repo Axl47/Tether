@@ -26,6 +26,7 @@ import { Server } from "./wsServer";
 import { ServerLoggerLive } from "./serverLogger";
 import { AnalyticsServiceLayerLive } from "./telemetry/Layers/AnalyticsService";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService";
+import { publishLocalTetherDiscovery } from "./localTetherDiscovery";
 
 export class StartupError extends Data.TaggedError("StartupError")<{
   readonly message: string;
@@ -259,6 +260,7 @@ const makeServerProgram = (input: CliInput) =>
     }
 
     yield* start;
+    yield* publishLocalTetherDiscovery();
     yield* Effect.forkChild(recordStartupHeartbeat);
 
     const localUrl = `http://localhost:${config.port}`;
