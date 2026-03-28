@@ -7,11 +7,11 @@ export function deriveDesktopContextFromRoute(
   projects: Project[],
   threads: Thread[],
 ): ServerSetDesktopContextInput {
-  if (pathname === "/" || pathname === "/settings") {
+  const routeThreadId = routeThreadIdFromPathname(pathname);
+  if (!routeThreadId) {
     return emptyDesktopContext();
   }
 
-  const routeThreadId = pathname.startsWith("/") ? pathname.slice(1) : pathname;
   const activeThread = threads.find((thread) => thread.id === routeThreadId) ?? null;
   if (!activeThread) {
     return emptyDesktopContext();
@@ -25,6 +25,13 @@ export function deriveDesktopContextFromRoute(
     threadId: activeThread.id,
     threadTitle: activeThread.title,
   };
+}
+
+function routeThreadIdFromPathname(pathname: string): string | null {
+  if (pathname === "/" || pathname === "/settings") {
+    return null;
+  }
+  return pathname.startsWith("/") ? pathname.slice(1) : pathname;
 }
 
 function emptyDesktopContext(): ServerSetDesktopContextInput {

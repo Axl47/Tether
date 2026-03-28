@@ -633,7 +633,7 @@ describe("WebSocket Server", () => {
     });
   });
 
-  it("stores and broadcasts desktop context updates", async () => {
+  it("returns an empty desktop context before any updates", async () => {
     server = await createTestServer({ cwd: "/test/project" });
     const addr = server.address();
     const port = typeof addr === "object" && addr !== null ? addr.port : 0;
@@ -644,14 +644,26 @@ describe("WebSocket Server", () => {
 
     const initialResponse = await sendRequest(ws, WS_METHODS.serverGetDesktopContext);
     expect(initialResponse.error).toBeUndefined();
-    expect(initialResponse.result).toEqual(
-      expect.objectContaining({
-        projectId: null,
-        threadId: null,
-      }),
-    );
+    expect(initialResponse.result).toEqual({
+      projectId: null,
+      projectTitle: null,
+      workspaceRoot: null,
+      threadId: null,
+      threadTitle: null,
+      updatedAt: expect.any(String),
+    });
+  });
 
-    const updateResponse = await sendRequest(ws, WS_METHODS.serverSetDesktopContext, {
+  it("stores populated desktop context for subsequent websocket requests", async () => {
+    server = await createTestServer({ cwd: "/test/project" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    expect(port).toBeGreaterThan(0);
+
+    const [writerWs] = await connectAndAwaitWelcome(port);
+    connections.push(writerWs);
+
+    const updateResponse = await sendRequest(writerWs, WS_METHODS.serverSetDesktopContext, {
       projectId: "project-1",
       projectTitle: "Nexus",
       workspaceRoot: "/tmp/nexus",
@@ -662,25 +674,105 @@ describe("WebSocket Server", () => {
     expect(updateResponse.result).toEqual(
       expect.objectContaining({
         projectId: "project-1",
+        projectTitle: "Nexus",
+        workspaceRoot: "/tmp/nexus",
         threadId: "thread-1",
+        threadTitle: "Focused thread",
+        updatedAt: expect.any(String),
       }),
     );
 
-    const push = await waitForPush(ws, WS_CHANNELS.serverDesktopContextUpdated);
+    const push = await waitForPush(writerWs, WS_CHANNELS.serverDesktopContextUpdated);
     expect(push.data).toEqual(
       expect.objectContaining({
         projectId: "project-1",
         projectTitle: "Nexus",
+        workspaceRoot: "/tmp/nexus",
         threadId: "thread-1",
+        threadTitle: "Focused thread",
+        updatedAt: expect.any(String),
       }),
     );
 
-    const getResponse = await sendRequest(ws, WS_METHODS.serverGetDesktopContext);
+    const [readerWs] = await connectAndAwaitWelcome(port);
+    connections.push(readerWs);
+
+    const getResponse = await sendRequest(readerWs, WS_METHODS.serverGetDesktopContext);
     expect(getResponse.error).toBeUndefined();
-    expect(getResponse.result).toEqual(
+    expect(getResponse.result).toEqual(updateResponse.result);
+  });
+
+  it("does not rebroadcast desktop context updates when the effective context is unchanged", async () => {
+    server = await createTestServer({ cwd: "/test/project" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    expect(port).toBeGreaterThan(0);
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const payload = {
+      projectId: "project-1",
+      projectTitle: "Nexus",
+      workspaceRoot: "/tmp/nexus",
+      threadId: "thread-1",
+      threadTitle: "Focused thread",
+    };
+
+    const firstResponse = await sendRequest(ws, WS_METHODS.serverSetDesktopContext, payload);
+    expect(firstResponse.error).toBeUndefined();
+    await waitForPush(ws, WS_CHANNELS.serverDesktopContextUpdated);
+
+    const secondResponse = await sendRequest(ws, WS_METHODS.serverSetDesktopContext, payload);
+    expect(secondResponse.error).toBeUndefined();
+    expect(secondResponse.result).toEqual(
+      expect.objectContaining({
+        ...payload,
+        updatedAt: expect.any(String),
+      }),
+    );
+
+    await expect(
+      waitForPush(ws, WS_CHANNELS.serverDesktopContextUpdated, undefined, 1, 150),
+    ).rejects.toThrow(/Timed out waiting/);
+  });
+
+  it("rebroadcasts desktop context updates when the effective context changes", async () => {
+    server = await createTestServer({ cwd: "/test/project" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    expect(port).toBeGreaterThan(0);
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    await sendRequest(ws, WS_METHODS.serverSetDesktopContext, {
+      projectId: "project-1",
+      projectTitle: "Nexus",
+      workspaceRoot: "/tmp/nexus",
+      threadId: "thread-1",
+      threadTitle: "Focused thread",
+    });
+    await waitForPush(ws, WS_CHANNELS.serverDesktopContextUpdated);
+
+    const changedResponse = await sendRequest(ws, WS_METHODS.serverSetDesktopContext, {
+      projectId: "project-1",
+      projectTitle: "Nexus Prime",
+      workspaceRoot: "/tmp/nexus",
+      threadId: "thread-2",
+      threadTitle: "Focused thread 2",
+    });
+    expect(changedResponse.error).toBeUndefined();
+
+    const changedPush = await waitForPush(ws, WS_CHANNELS.serverDesktopContextUpdated);
+    expect(changedPush.data).toEqual(
       expect.objectContaining({
         projectId: "project-1",
+        projectTitle: "Nexus Prime",
         workspaceRoot: "/tmp/nexus",
+        threadId: "thread-2",
+        threadTitle: "Focused thread 2",
+        updatedAt: expect.any(String),
       }),
     );
   });
