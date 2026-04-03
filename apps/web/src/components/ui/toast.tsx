@@ -1,7 +1,7 @@
 "use client";
 
-import { Toast } from "@base-ui/react/toast";
-import { useEffect, type CSSProperties } from "react";
+import { Toast, type ToastObject } from "@base-ui/react/toast";
+import { useEffect, type CSSProperties, type ReactNode } from "react";
 import { useParams } from "@tanstack/react-router";
 import { ThreadId } from "@t3tools/contracts";
 import {
@@ -20,6 +20,11 @@ type ThreadToastData = {
   threadId?: ThreadId | null;
   tooltipStyle?: boolean;
   dismissAfterVisibleMs?: number;
+  actions?: ReadonlyArray<{
+    id: string;
+    label: ReactNode;
+    onClick: () => void;
+  }>;
 };
 
 const toastManager = Toast.createToastManager<ThreadToastData>();
@@ -148,6 +153,36 @@ function ToastProvider({ children, position = "top-right", ...props }: ToastProv
       {children}
       <Toasts position={position} />
     </Toast.Provider>
+  );
+}
+
+function ToastActions({ toast }: { toast: ToastObject<ThreadToastData> }) {
+  const extraActions = toast.data?.actions ?? [];
+  if (!toast.actionProps && extraActions.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+      {extraActions.map((action) => (
+        <button
+          className={cn(buttonVariants({ size: "xs", variant: "outline" }), "shrink-0")}
+          key={`${String(toast.id)}-action-${action.id}`}
+          onClick={action.onClick}
+          type="button"
+        >
+          {action.label}
+        </button>
+      ))}
+      {toast.actionProps && (
+        <Toast.Action
+          className={cn(buttonVariants({ size: "xs" }), "shrink-0")}
+          data-slot="toast-action"
+        >
+          {toast.actionProps.children}
+        </Toast.Action>
+      )}
+    </div>
   );
 }
 
@@ -294,14 +329,7 @@ function Toasts({ position = "top-right" }: { position: ToastPosition }) {
                     />
                   </div>
                 </div>
-                {toast.actionProps && (
-                  <Toast.Action
-                    className={cn(buttonVariants({ size: "xs" }), "shrink-0")}
-                    data-slot="toast-action"
-                  >
-                    {toast.actionProps.children}
-                  </Toast.Action>
-                )}
+                <ToastActions toast={toast} />
               </Toast.Content>
             </Toast.Root>
           );
@@ -383,14 +411,7 @@ function AnchoredToasts() {
                           />
                         </div>
                       </div>
-                      {toast.actionProps && (
-                        <Toast.Action
-                          className={cn(buttonVariants({ size: "xs" }), "shrink-0")}
-                          data-slot="toast-action"
-                        >
-                          {toast.actionProps.children}
-                        </Toast.Action>
-                      )}
+                      <ToastActions toast={toast} />
                     </Toast.Content>
                   )}
                 </Toast.Root>

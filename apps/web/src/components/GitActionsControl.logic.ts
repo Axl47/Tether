@@ -83,11 +83,17 @@ const withDescription = (title: string, description: string | undefined) =>
 export function summarizeGitResult(result: GitRunStackedActionResult): {
   title: string;
   description?: string;
+  copyCommitSha?: string;
 } {
+  const copyCommitSha = result.commit.status === "created" ? result.commit.commitSha : undefined;
+
   if (result.pr.status === "created" || result.pr.status === "opened_existing") {
     const prNumber = result.pr.number ? ` #${result.pr.number}` : "";
     const title = `${result.pr.status === "created" ? "Created PR" : "Opened PR"}${prNumber}`;
-    return withDescription(title, truncateText(result.pr.title));
+    return {
+      ...withDescription(title, truncateText(result.pr.title)),
+      ...(copyCommitSha ? { copyCommitSha } : {}),
+    };
   }
 
   if (result.push.status === "pushed") {
@@ -95,19 +101,25 @@ export function summarizeGitResult(result: GitRunStackedActionResult): {
     const branch = result.push.upstreamBranch ?? result.push.branch;
     const pushedCommitPart = shortSha ? ` ${shortSha}` : "";
     const branchPart = branch ? ` to ${branch}` : "";
-    return withDescription(
-      `Pushed${pushedCommitPart}${branchPart}`,
-      truncateText(result.commit.subject),
-    );
+    return {
+      ...withDescription(
+        `Pushed${pushedCommitPart}${branchPart}`,
+        truncateText(result.commit.subject),
+      ),
+      ...(copyCommitSha ? { copyCommitSha } : {}),
+    };
   }
 
   if (result.commit.status === "created") {
     const shortSha = shortenSha(result.commit.commitSha);
     const title = shortSha ? `Committed ${shortSha}` : "Committed changes";
-    return withDescription(title, truncateText(result.commit.subject));
+    return {
+      ...withDescription(title, truncateText(result.commit.subject)),
+      ...(copyCommitSha ? { copyCommitSha } : {}),
+    };
   }
 
-  return { title: "Done" };
+  return copyCommitSha ? { title: "Done", copyCommitSha } : { title: "Done" };
 }
 
 export function buildMenuItems(

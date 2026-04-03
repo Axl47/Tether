@@ -31,6 +31,7 @@ import { Popover, PopoverPopup, PopoverTrigger } from "~/components/ui/popover";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { Textarea } from "~/components/ui/textarea";
 import { toastManager } from "~/components/ui/toast";
+import { copyTextToClipboard } from "~/lib/clipboard";
 import {
   gitBranchesQueryOptions,
   gitInitMutationOptions,
@@ -350,6 +351,7 @@ export default function GitActionsControl({
         const result = await promise;
         stopProgressUpdates();
         const resultToast = summarizeGitResult(result);
+        const copyCommitSha = resultToast.copyCommitSha;
 
         const existingOpenPrUrl =
           actionStatus?.pr?.state === "open" ? actionStatus.pr.url : undefined;
@@ -378,6 +380,36 @@ export default function GitActionsControl({
           data: {
             ...threadToastData,
             dismissAfterVisibleMs: 10_000,
+            ...(copyCommitSha
+              ? {
+                  actions: [
+                    {
+                      id: "copy-commit-id",
+                      label: "Copy",
+                      onClick: () => {
+                        void copyTextToClipboard(copyCommitSha)
+                          .then(() => {
+                            toastManager.add({
+                              type: "success",
+                              title: "Commit ID copied",
+                              description: copyCommitSha,
+                              data: threadToastData,
+                            });
+                          })
+                          .catch((error) => {
+                            toastManager.add({
+                              type: "error",
+                              title: "Couldn't copy commit ID",
+                              description:
+                                error instanceof Error ? error.message : "An error occurred.",
+                              data: threadToastData,
+                            });
+                          });
+                      },
+                    },
+                  ],
+                }
+              : {}),
           },
           ...(shouldOfferPushCta
             ? {

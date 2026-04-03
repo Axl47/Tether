@@ -909,6 +909,7 @@ describe("summarizeGitResult", () => {
     assert.deepEqual(result, {
       title: "Committed 0123456",
       description: "feat: add optimistic UI for git action button",
+      copyCommitSha: "0123456789abcdef",
     });
   });
 
@@ -932,6 +933,7 @@ describe("summarizeGitResult", () => {
     assert.deepEqual(result, {
       title: "Pushed abcdef0 to origin/foo",
       description: "fix: tighten quick action tooltip hover handling",
+      copyCommitSha: "abcdef0123456789",
     });
   });
 
@@ -958,6 +960,7 @@ describe("summarizeGitResult", () => {
     assert.deepEqual(result, {
       title: "Created PR #42",
       description: "feat: ship github shortcuts and improve PR CTA in success toast",
+      copyCommitSha: "89abcdef01234567",
     });
   });
 
@@ -982,6 +985,7 @@ describe("summarizeGitResult", () => {
     assert.deepEqual(result, {
       title: "Created PR #99",
       description: "feat: this title is intentionally extremely long so we can validate t...",
+      copyCommitSha: "89abcdef01234567",
     });
   });
 });
