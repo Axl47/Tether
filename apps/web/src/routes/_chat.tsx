@@ -1,104 +1,36 @@
-import { type ResolvedKeybindingsConfig } from "@t3tools/contracts";
-import { useQuery } from "@tanstack/react-query";
-import { Outlet, createFileRoute, useNavigate } from "@tanstack/react-router";
+import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
 import { useEffect } from "react";
 
-import { CommandPalette } from "../components/CommandPalette";
-import { DiffWorkerPoolProvider } from "../components/DiffWorkerPoolProvider";
 import { useCommandPaletteStore } from "../commandPaletteStore";
-import ThreadSidebar from "../components/Sidebar";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import {
   startNewLocalThreadFromContext,
   startNewThreadFromContext,
 } from "../lib/chatThreadActions";
 import { isTerminalFocused } from "../lib/terminalFocus";
-import { serverConfigQueryOptions } from "../lib/serverReactQuery";
 import { resolveShortcutCommand } from "../keybindings";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
-import { Sidebar, SidebarProvider } from "~/components/ui/sidebar";
-import { useAppSettings } from "~/appSettings";
-import { useBrowserPaneRuntimeStore } from "../browserPaneRuntimeStore";
-import { readNativeApi } from "../nativeApi";
-
-const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
+import { resolveSidebarNewThreadEnvMode } from "~/components/Sidebar.logic";
+import { useSettings } from "~/hooks/useSettings";
+import { useServerKeybindings } from "~/rpc/serverState";
 
 function ChatRouteGlobalShortcuts() {
   const clearSelection = useThreadSelectionStore((state) => state.clearSelection);
-  const selectedThreadIdsSize = useThreadSelectionStore((state) => state.selectedThreadIds.size);
-  const { activeDraftThread, activeThread, handleNewThread, projects, routeThreadId } =
+  const selectedThreadKeysSize = useThreadSelectionStore((state) => state.selectedThreadKeys.size);
+  const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread, routeThreadRef } =
     useHandleNewThread();
-  const commandPaletteOpen = useCommandPaletteStore((s) => s.open);
-  const toggleOpen = useCommandPaletteStore((s) => s.toggleOpen);
-  const serverConfigQuery = useQuery(serverConfigQueryOptions());
-  const keybindings = serverConfigQuery.data?.keybindings ?? EMPTY_KEYBINDINGS;
+  const keybindings = useServerKeybindings();
   const terminalOpen = useTerminalStateStore((state) =>
-    routeThreadId
-      ? selectThreadTerminalState(state.terminalStateByThreadId, routeThreadId).terminalOpen
+    routeThreadRef
+      ? selectThreadTerminalState(state.terminalStateByThreadId, routeThreadRef.threadId).terminalOpen
       : false,
   );
-  const { settings: appSettings } = useAppSettings();
-  const handleBrowserEvent = useBrowserPaneRuntimeStore((state) => state.handleEvent);
-
-  useEffect(() => {
-    const api = readNativeApi();
-    if (!api) return;
-    void api.browser.syncShortcutState({ keybindings, terminalOpen, platform: navigator.platform });
-    const unsubscribe = api.browser.onEvent((event) => {
-      handleBrowserEvent(event);
-    });
-    return () => {
-      unsubscribe();
-    };
-  }, [handleBrowserEvent, keybindings, terminalOpen]);
-
-  useEffect(() => {
-    const onBrowserShortcut = (rawEvent: Event) => {
-      const event = rawEvent as CustomEvent<{ command: string }>;
-      const command = event.detail?.command;
-      if (!command) return;
-      if (command === "commandPalette.toggle") {
-        toggleOpen();
-        return;
-      }
-      if (command === "chat.newLocal") {
-        void startNewLocalThreadFromContext({
-          activeDraftThread,
-          activeThread,
-          defaultThreadEnvMode: appSettings.defaultThreadEnvMode,
-          handleNewThread,
-          projects,
-        });
-        return;
-      }
-      if (command === "chat.new") {
-        void startNewThreadFromContext({
-          activeDraftThread,
-          activeThread,
-          defaultThreadEnvMode: appSettings.defaultThreadEnvMode,
-          handleNewThread,
-          projects,
-        });
-        return;
-      }
-      window.dispatchEvent(new CustomEvent("tether-browser-command", { detail: { command } }));
-    };
-    window.addEventListener("tether-browser-shortcut", onBrowserShortcut);
-    return () => window.removeEventListener("tether-browser-shortcut", onBrowserShortcut);
-  }, [
-    activeDraftThread,
-    activeThread,
-    appSettings.defaultThreadEnvMode,
-    handleNewThread,
-    projects,
-    toggleOpen,
-  ]);
+  const appSettings = useSettings();
 
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
-
       const command = resolveShortcutCommand(event, keybindings, {
         context: {
           terminalFocus: isTerminalFocused(),
@@ -106,18 +38,11 @@ function ChatRouteGlobalShortcuts() {
         },
       });
 
-      if (command === "commandPalette.toggle") {
-        event.preventDefault();
-        event.stopPropagation();
-        toggleOpen();
+      if (useCommandPaletteStore.getState().open) {
         return;
       }
 
-      if (commandPaletteOpen) {
-        return;
-      }
-
-      if (event.key === "Escape" && selectedThreadIdsSize > 0) {
+      if (event.key === "Escape" && selectedThreadKeysSize > 0) {
         event.preventDefault();
         clearSelection();
         return;
@@ -129,23 +54,28 @@ function ChatRouteGlobalShortcuts() {
         void startNewLocalThreadFromContext({
           activeDraftThread,
           activeThread,
-          defaultThreadEnvMode: appSettings.defaultThreadEnvMode,
+          defaultProjectRef,
+          defaultThreadEnvMode: resolveSidebarNewThreadEnvMode({
+            defaultEnvMode: appSettings.defaultThreadEnvMode,
+          }),
           handleNewThread,
-          projects,
         });
         return;
       }
 
-      if (command !== "chat.new") return;
-      event.preventDefault();
-      event.stopPropagation();
-      void startNewThreadFromContext({
-        activeDraftThread,
-        activeThread,
-        defaultThreadEnvMode: appSettings.defaultThreadEnvMode,
-        handleNewThread,
-        projects,
-      });
+      if (command === "chat.new") {
+        event.preventDefault();
+        event.stopPropagation();
+        void startNewThreadFromContext({
+          activeDraftThread,
+          activeThread,
+          defaultProjectRef,
+          defaultThreadEnvMode: resolveSidebarNewThreadEnvMode({
+            defaultEnvMode: appSettings.defaultThreadEnvMode,
+          }),
+          handleNewThread,
+        });
+      }
     };
 
     window.addEventListener("keydown", onWindowKeyDown);
@@ -156,59 +86,31 @@ function ChatRouteGlobalShortcuts() {
     activeDraftThread,
     activeThread,
     clearSelection,
-    commandPaletteOpen,
     handleNewThread,
     keybindings,
-    projects,
-    selectedThreadIdsSize,
+    defaultProjectRef,
+    selectedThreadKeysSize,
     terminalOpen,
-    toggleOpen,
     appSettings.defaultThreadEnvMode,
   ]);
 
   return null;
 }
 
-const CHAT_SIDEBAR_STORAGE_KEY = "tether:chat-sidebar-open";
-
 function ChatRouteLayout() {
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    const onMenuAction = window.desktopBridge?.onMenuAction;
-    if (typeof onMenuAction !== "function") {
-      return;
-    }
-
-    const unsubscribe = onMenuAction((action) => {
-      if (action !== "open-settings") return;
-      void navigate({ to: "/settings" });
-    });
-
-    return () => {
-      unsubscribe?.();
-    };
-  }, [navigate]);
-
   return (
-    <CommandPalette>
-      <SidebarProvider defaultOpen storageKey={CHAT_SIDEBAR_STORAGE_KEY}>
-        <ChatRouteGlobalShortcuts />
-        <Sidebar
-          side="left"
-          collapsible="offcanvas"
-          className="border-r border-border bg-card text-foreground"
-        >
-          <ThreadSidebar />
-        </Sidebar>
-        <DiffWorkerPoolProvider>
-          <Outlet />
-        </DiffWorkerPoolProvider>
-      </SidebarProvider>
-    </CommandPalette>
+    <>
+      <ChatRouteGlobalShortcuts />
+      <Outlet />
+    </>
   );
 }
 
 export const Route = createFileRoute("/_chat")({
+  beforeLoad: async ({ context }) => {
+    if (context.authGateState.status !== "authenticated") {
+      throw redirect({ to: "/pair", replace: true });
+    }
+  },
   component: ChatRouteLayout,
 });

@@ -1,14 +1,35 @@
-import { assert, it } from "@effect/vitest";
-import { Effect, Schema } from "effect";
+import { Schema } from "effect";
+import { describe, expect, it } from "vitest";
 
-import { ServerDesktopContext, ServerSetDesktopContextInput } from "./server";
+import { ServerDesktopContext, ServerProvider, ServerSetDesktopContextInput } from "./server.ts";
 
-const decodeDesktopContext = Schema.decodeUnknownEffect(ServerDesktopContext);
-const decodeDesktopContextInput = Schema.decodeUnknownEffect(ServerSetDesktopContextInput);
+const decodeServerProvider = Schema.decodeUnknownSync(ServerProvider);
+const decodeDesktopContext = Schema.decodeUnknownSync(ServerDesktopContext);
+const decodeDesktopContextInput = Schema.decodeUnknownSync(ServerSetDesktopContextInput);
 
-it.effect("accepts server desktop context payloads", () =>
-  Effect.gen(function* () {
-    const parsed = yield* decodeDesktopContext({
+describe("ServerProvider", () => {
+  it("defaults capability arrays when decoding legacy snapshots", () => {
+    const parsed = decodeServerProvider({
+      provider: "codex",
+      enabled: true,
+      installed: true,
+      version: "1.0.0",
+      status: "ready",
+      auth: {
+        status: "authenticated",
+      },
+      checkedAt: "2026-04-10T00:00:00.000Z",
+      models: [],
+    });
+
+    expect(parsed.slashCommands).toEqual([]);
+    expect(parsed.skills).toEqual([]);
+  });
+});
+
+describe("ServerDesktopContext", () => {
+  it("accepts server desktop context payloads", () => {
+    const parsed = decodeDesktopContext({
       projectId: "project-1",
       projectTitle: "Nexus",
       workspaceRoot: "/tmp/nexus",
@@ -17,14 +38,12 @@ it.effect("accepts server desktop context payloads", () =>
       updatedAt: "2026-03-21T00:00:00.000Z",
     });
 
-    assert.strictEqual(parsed.projectId, "project-1");
-    assert.strictEqual(parsed.threadId, "thread-1");
-  }),
-);
+    expect(parsed.projectId).toBe("project-1");
+    expect(parsed.threadId).toBe("thread-1");
+  });
 
-it.effect("accepts empty desktop context updates", () =>
-  Effect.gen(function* () {
-    const parsed = yield* decodeDesktopContextInput({
+  it("accepts empty desktop context updates", () => {
+    const parsed = decodeDesktopContextInput({
       projectId: null,
       projectTitle: null,
       workspaceRoot: null,
@@ -32,7 +51,7 @@ it.effect("accepts empty desktop context updates", () =>
       threadTitle: null,
     });
 
-    assert.strictEqual(parsed.projectId, null);
-    assert.strictEqual(parsed.threadId, null);
-  }),
-);
+    expect(parsed.projectId).toBeNull();
+    expect(parsed.threadId).toBeNull();
+  });
+});

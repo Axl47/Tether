@@ -1,16 +1,9 @@
 import type { RuntimeMode, ThreadId } from "@t3tools/contracts";
 import { FolderIcon, GitForkIcon } from "lucide-react";
-import { useCallback } from "react";
 
 import { useComposerDraftStore } from "../composerDraftStore";
-import { newCommandId } from "../lib/utils";
-import { readNativeApi } from "../nativeApi";
 import { useStore } from "../store";
-import {
-  EnvMode,
-  resolveDraftEnvModeAfterBranchChange,
-  resolveEffectiveEnvMode,
-} from "./BranchToolbar.logic";
+import { EnvMode, resolveEffectiveEnvMode } from "./BranchToolbar.logic";
 import { BranchToolbarBranchSelector } from "./BranchToolbarBranchSelector";
 import RuntimeModeToggle from "./RuntimeModeToggle";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
@@ -40,76 +33,19 @@ export default function BranchToolbar({
   onComposerFocusRequest,
 }: BranchToolbarProps) {
   const threads = useStore((store) => store.threads);
-  const projects = useStore((store) => store.projects);
-  const setThreadBranchAction = useStore((store) => store.setThreadBranch);
   const draftThread = useComposerDraftStore((store) => store.getDraftThread(threadId));
-  const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
 
   const serverThread = threads.find((thread) => thread.id === threadId);
-  const activeProjectId = serverThread?.projectId ?? draftThread?.projectId ?? null;
-  const activeProject = projects.find((project) => project.id === activeProjectId);
-  const activeThreadId = serverThread?.id ?? (draftThread ? threadId : undefined);
-  const activeThreadBranch = serverThread?.branch ?? draftThread?.branch ?? null;
   const activeWorktreePath = serverThread?.worktreePath ?? draftThread?.worktreePath ?? null;
-  const branchCwd = activeWorktreePath ?? activeProject?.cwd ?? null;
   const hasServerThread = serverThread !== undefined;
   const effectiveEnvMode = resolveEffectiveEnvMode({
     activeWorktreePath,
     hasServerThread,
     draftThreadEnvMode: draftThread?.envMode,
   });
+  const activeEnvironmentId = serverThread?.environmentId ?? draftThread?.environmentId ?? null;
 
-  const setThreadBranch = useCallback(
-    (branch: string | null, worktreePath: string | null) => {
-      if (!activeThreadId) return;
-      const api = readNativeApi();
-      if (serverThread?.session && worktreePath !== activeWorktreePath && api) {
-        void api.orchestration
-          .dispatchCommand({
-            type: "thread.session.stop",
-            commandId: newCommandId(),
-            threadId: activeThreadId,
-            createdAt: new Date().toISOString(),
-          })
-          .catch(() => undefined);
-      }
-      if (api && hasServerThread) {
-        void api.orchestration.dispatchCommand({
-          type: "thread.meta.update",
-          commandId: newCommandId(),
-          threadId: activeThreadId,
-          branch,
-          worktreePath,
-        });
-      }
-      if (hasServerThread) {
-        setThreadBranchAction(activeThreadId, branch, worktreePath);
-        return;
-      }
-      const nextDraftEnvMode = resolveDraftEnvModeAfterBranchChange({
-        nextWorktreePath: worktreePath,
-        currentWorktreePath: activeWorktreePath,
-        effectiveEnvMode,
-      });
-      setDraftThreadContext(threadId, {
-        branch,
-        worktreePath,
-        envMode: nextDraftEnvMode,
-      });
-    },
-    [
-      activeThreadId,
-      serverThread?.session,
-      activeWorktreePath,
-      hasServerThread,
-      setThreadBranchAction,
-      setDraftThreadContext,
-      threadId,
-      effectiveEnvMode,
-    ],
-  );
-
-  if (!activeThreadId || !activeProject) return null;
+  if (!activeEnvironmentId) return null;
 
   return (
     <div className="mx-auto flex w-full max-w-3xl items-center justify-between px-5 pb-3 pt-1">
@@ -171,13 +107,10 @@ export default function BranchToolbar({
       </div>
 
       <BranchToolbarBranchSelector
-        activeProjectCwd={activeProject.cwd}
-        activeThreadBranch={activeThreadBranch}
-        activeWorktreePath={activeWorktreePath}
-        branchCwd={branchCwd}
-        effectiveEnvMode={effectiveEnvMode}
+        environmentId={activeEnvironmentId}
+        threadId={threadId}
         envLocked={envLocked}
-        onSetThreadBranch={setThreadBranch}
+        {...(!hasServerThread ? { effectiveEnvModeOverride: effectiveEnvMode } : {})}
         {...(onCheckoutPullRequestRequest ? { onCheckoutPullRequestRequest } : {})}
         {...(onComposerFocusRequest ? { onComposerFocusRequest } : {})}
       />

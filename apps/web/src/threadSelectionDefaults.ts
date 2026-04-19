@@ -14,7 +14,7 @@ export function inferProviderForThreadModel(input: {
 }): ProviderKind {
   if (
     input.sessionProviderName === "codex" ||
-    input.sessionProviderName === "claudeCode" ||
+    input.sessionProviderName === "claudeAgent" ||
     input.sessionProviderName === "gemini"
   ) {
     return input.sessionProviderName;
@@ -22,7 +22,7 @@ export function inferProviderForThreadModel(input: {
 
   const trimmedModel = input.model?.trim().toLowerCase() ?? "";
   const fallbackProvider = trimmedModel.startsWith("claude-")
-    ? "claudeCode"
+    ? "claudeAgent"
     : trimmedModel.startsWith("gemini")
       ? "gemini"
       : "codex";
@@ -53,7 +53,7 @@ function compareThreadsByCreatedAtDesc(
 }
 
 export function getLatestStartedThreadSelection(
-  threads: ReadonlyArray<Pick<Thread, "id" | "createdAt" | "model" | "session">>,
+  threads: ReadonlyArray<Pick<Thread, "id" | "createdAt" | "modelSelection" | "session">>,
 ): ThreadSelectionDefaults | null {
   const latestThread = [...threads].toSorted(compareThreadsByCreatedAtDesc)[0];
   if (!latestThread) {
@@ -61,12 +61,12 @@ export function getLatestStartedThreadSelection(
   }
 
   const provider = inferProviderForThreadModel({
-    model: latestThread.model,
+    model: latestThread.modelSelection?.model,
     sessionProviderName: latestThread.session?.provider ?? null,
   });
 
   return {
     provider,
-    model: resolveModelSlugForProvider(provider, latestThread.model),
+    model: resolveModelSlugForProvider(provider, latestThread.modelSelection?.model),
   };
 }

@@ -21,15 +21,15 @@ function makeEvent(input: {
 }): OrchestrationEvent {
   return {
     sequence: input.sequence,
-    eventId: EventId.makeUnsafe(`event-${input.sequence}`),
+    eventId: EventId.make(`event-${input.sequence}`),
     type: input.type,
     aggregateKind: input.aggregateKind,
     aggregateId:
       input.aggregateKind === "project"
-        ? ProjectId.makeUnsafe(input.aggregateId)
-        : ThreadId.makeUnsafe(input.aggregateId),
+        ? ProjectId.make(input.aggregateId)
+        : ThreadId.make(input.aggregateId),
     occurredAt: input.occurredAt,
-    commandId: input.commandId === null ? null : CommandId.makeUnsafe(input.commandId),
+    commandId: input.commandId === null ? null : CommandId.make(input.commandId),
     causationEventId: null,
     correlationId: null,
     metadata: {},
@@ -56,7 +56,10 @@ describe("orchestration projector", () => {
             threadId: "thread-1",
             projectId: "project-1",
             title: "demo",
-            model: "gpt-5-codex",
+            modelSelection: {
+              provider: "codex",
+              model: "gpt-5-codex",
+            },
             runtimeMode: "full-access",
             branch: null,
             worktreePath: null,
@@ -73,7 +76,10 @@ describe("orchestration projector", () => {
         id: "thread-1",
         projectId: "project-1",
         title: "demo",
-        model: "gpt-5-codex",
+        modelSelection: {
+          provider: "codex",
+          model: "gpt-5-codex",
+        },
         runtimeMode: "full-access",
         interactionMode: "default",
         branch: null,
@@ -82,6 +88,7 @@ describe("orchestration projector", () => {
         lastAutoRenameUserMessageId: null,
         createdAt: now,
         updatedAt: now,
+        archivedAt: null,
         deletedAt: null,
         messages: [],
         proposedPlans: [],
@@ -112,7 +119,10 @@ describe("orchestration projector", () => {
               // missing required threadId
               projectId: "project-1",
               title: "demo",
-              model: "gpt-5-codex",
+              modelSelection: {
+                provider: "codex",
+                model: "gpt-5-codex",
+              },
               branch: null,
               worktreePath: null,
               createdAt: now,
@@ -122,6 +132,78 @@ describe("orchestration projector", () => {
         ),
       ),
     ).rejects.toBeDefined();
+  });
+
+  it("applies thread.archived and thread.unarchived events", async () => {
+    const now = new Date().toISOString();
+    const later = new Date(Date.parse(now) + 1_000).toISOString();
+    const created = await Effect.runPromise(
+      projectEvent(
+        createEmptyReadModel(now),
+        makeEvent({
+          sequence: 1,
+          type: "thread.created",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: now,
+          commandId: "cmd-thread-create",
+          payload: {
+            threadId: "thread-1",
+            projectId: "project-1",
+            title: "demo",
+            modelSelection: {
+              provider: "codex",
+              model: "gpt-5-codex",
+            },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        }),
+      ),
+    );
+
+    const archived = await Effect.runPromise(
+      projectEvent(
+        created,
+        makeEvent({
+          sequence: 2,
+          type: "thread.archived",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: later,
+          commandId: "cmd-thread-archive",
+          payload: {
+            threadId: "thread-1",
+            archivedAt: later,
+            updatedAt: later,
+          },
+        }),
+      ),
+    );
+    expect(archived.threads[0]?.archivedAt).toBe(later);
+
+    const unarchived = await Effect.runPromise(
+      projectEvent(
+        archived,
+        makeEvent({
+          sequence: 3,
+          type: "thread.unarchived",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: later,
+          commandId: "cmd-thread-unarchive",
+          payload: {
+            threadId: "thread-1",
+            updatedAt: later,
+          },
+        }),
+      ),
+    );
+    expect(unarchived.threads[0]?.archivedAt).toBeNull();
   });
 
   it("keeps projector forward-compatible for unhandled event types", async () => {
@@ -173,7 +255,10 @@ describe("orchestration projector", () => {
             threadId: "thread-1",
             projectId: "project-1",
             title: "demo",
-            model: "gpt-5.3-codex",
+            modelSelection: {
+              provider: "codex",
+              model: "gpt-5.3-codex",
+            },
             runtimeMode: "full-access",
             branch: null,
             worktreePath: null,
@@ -393,7 +478,10 @@ describe("orchestration projector", () => {
             threadId: "thread-1",
             projectId: "project-1",
             title: "demo",
-            model: "gpt-5.3-codex",
+            modelSelection: {
+              provider: "codex",
+              model: "gpt-5.3-codex",
+            },
             runtimeMode: "full-access",
             branch: null,
             worktreePath: null,
@@ -447,7 +535,10 @@ describe("orchestration projector", () => {
             threadId: "thread-1",
             projectId: "project-1",
             title: "demo",
-            model: "gpt-5.3-codex",
+            modelSelection: {
+              provider: "codex",
+              model: "gpt-5.3-codex",
+            },
             runtimeMode: "full-access",
             branch: null,
             worktreePath: null,
@@ -531,7 +622,10 @@ describe("orchestration projector", () => {
             threadId: "thread-1",
             projectId: "project-1",
             title: "demo",
-            model: "gpt-5.3-codex",
+            modelSelection: {
+              provider: "codex",
+              model: "gpt-5.3-codex",
+            },
             runtimeMode: "full-access",
             branch: null,
             worktreePath: null,
@@ -743,7 +837,10 @@ describe("orchestration projector", () => {
             threadId: "thread-revert",
             projectId: "project-1",
             title: "demo",
-            model: "gpt-5.3-codex",
+            modelSelection: {
+              provider: "codex",
+              model: "gpt-5.3-codex",
+            },
             runtimeMode: "full-access",
             branch: null,
             worktreePath: null,
@@ -893,7 +990,10 @@ describe("orchestration projector", () => {
             threadId: "thread-capped",
             projectId: "project-1",
             title: "capped",
-            model: "gpt-5-codex",
+            modelSelection: {
+              provider: "codex",
+              model: "gpt-5-codex",
+            },
             runtimeMode: "full-access",
             branch: null,
             worktreePath: null,

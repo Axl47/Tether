@@ -14,20 +14,27 @@ import {
   type ProviderApprovalDecision,
   type ProviderEvent,
   type ProviderSession,
-  type ProviderSessionStartInput,
   type ProviderTurnStartResult,
   RuntimeMode,
   ProviderInteractionMode,
 } from "@t3tools/contracts";
 import { normalizeModelSlug } from "@t3tools/shared/model";
-import { Effect, ServiceMap } from "effect";
+import { Effect, Context } from "effect";
 
-import { buildPopupSafeEnv } from "./cliEnvironment";
 import {
   formatCodexCliUpgradeMessage,
   isCodexCliVersionSupported,
   parseCodexCliVersion,
-} from "./provider/codexCliVersion";
+} from "./provider/codexCliVersion.ts";
+import {
+  readCodexAccountSnapshot,
+  resolveCodexModelForAccount,
+  type CodexAccountSnapshot,
+} from "./provider/codexAccount.ts";
+import { buildCodexInitializeParams, killCodexChildProcess } from "./provider/codexAppServer.ts";
+
+export { buildCodexInitializeParams } from "./provider/codexAppServer.ts";
+export { readCodexAccountSnapshot, resolveCodexModelForAccount } from "./provider/codexAccount.ts";
 
 type PendingRequestKey = string;
 
@@ -71,6 +78,7 @@ interface CodexSessionContext {
   pending: Map<PendingRequestKey, PendingRequest>;
   pendingApprovals: Map<ApprovalRequestId, PendingApprovalRequest>;
   pendingUserInputs: Map<ApprovalRequestId, PendingUserInputRequest>;
+  collabReceiverTurns: Map<string, TurnId>;
   nextRequestId: number;
   stopping: boolean;
 }
@@ -97,23 +105,6 @@ interface JsonRpcNotification {
   params?: unknown;
 }
 
-type CodexPlanType =
-  | "free"
-  | "go"
-  | "plus"
-  | "pro"
-  | "team"
-  | "business"
-  | "enterprise"
-  | "edu"
-  | "unknown";
-
-interface CodexAccountSnapshot {
-  readonly type: "apiKey" | "chatgpt" | "unknown";
-  readonly planType: CodexPlanType | null;
-  readonly sparkEnabled: boolean;
-}
-
 export interface CodexAppServerSendTurnInput {
   readonly threadId: ThreadId;
   readonly input?: string;
@@ -131,7 +122,8 @@ export interface CodexAppServerStartSessionInput {
   readonly model?: string;
   readonly serviceTier?: string;
   readonly resumeCursor?: unknown;
-  readonly providerOptions?: ProviderSessionStartInput["providerOptions"];
+  readonly binaryPath: string;
+  readonly homePath?: string;
   readonly runtimeMode: RuntimeMode;
 }
 
@@ -144,6 +136,8 @@ export interface CodexThreadSnapshot {
   threadId: string;
   turns: CodexThreadTurnSnapshot[];
 }
+
+const CODEX_VERSION_CHECK_TIMEOUT_MS = 4_000;
 
 const ANSI_ESCAPE_CHAR = String.fromCharCode(27);
 const ANSI_ESCAPE_REGEX = new RegExp(`${ANSI_ESCAPE_CHAR}\\[[0-9;]*m`, "g");
@@ -160,51 +154,6 @@ const RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS = [
   "unknown thread",
   "does not exist",
 ];
-const CODEX_DEFAULT_MODEL = "gpt-5.3-codex";
-const CODEX_SPARK_MODEL = "gpt-5.3-codex-spark";
-const CODEX_SPARK_DISABLED_PLAN_TYPES = new Set<CodexPlanType>(["free", "go", "plus"]);
-const CODEX_VERSION_CHECK_TIMEOUT_MS = 4_000;
-
-function asObject(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== "object") {
-    return undefined;
-  }
-  return value as Record<string, unknown>;
-}
-
-function asString(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
-
-export function readCodexAccountSnapshot(response: unknown): CodexAccountSnapshot {
-  const record = asObject(response);
-  const account = asObject(record?.account) ?? record;
-  const accountType = asString(account?.type);
-
-  if (accountType === "apiKey") {
-    return {
-      type: "apiKey",
-      planType: null,
-      sparkEnabled: true,
-    };
-  }
-
-  if (accountType === "chatgpt") {
-    const planType = (account?.planType as CodexPlanType | null) ?? "unknown";
-    return {
-      type: "chatgpt",
-      planType,
-      sparkEnabled: !CODEX_SPARK_DISABLED_PLAN_TYPES.has(planType),
-    };
-  }
-
-  return {
-    type: "unknown",
-    planType: null,
-    sparkEnabled: true,
-  };
-}
-
 export const CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS = `<collaboration_mode># Plan Mode (Conversational)
 
 You work in 3 phases, and you should *chat your way* to a great plan before finalizing it. A great plan is very detailed-intent- and implementation-wise-so that it can be handed to another engineer or agent to be implemented right away. It must be **decision complete**, where the implementer does not need to make any decisions.
@@ -341,31 +290,26 @@ In Default mode, strongly prefer making reasonable assumptions and executing the
 </collaboration_mode>`;
 
 function mapCodexRuntimeMode(runtimeMode: RuntimeMode): {
-  readonly approvalPolicy: "on-request" | "never";
-  readonly sandbox: "workspace-write" | "danger-full-access";
+  readonly approvalPolicy: "untrusted" | "on-request" | "never";
+  readonly sandbox: "read-only" | "workspace-write" | "danger-full-access";
 } {
-  if (runtimeMode === "approval-required") {
-    return {
-      approvalPolicy: "on-request",
-      sandbox: "workspace-write",
-    };
+  switch (runtimeMode) {
+    case "approval-required":
+      return {
+        approvalPolicy: "untrusted",
+        sandbox: "read-only",
+      };
+    case "auto-accept-edits":
+      return {
+        approvalPolicy: "on-request",
+        sandbox: "workspace-write",
+      };
+    case "full-access":
+      return {
+        approvalPolicy: "never",
+        sandbox: "danger-full-access",
+      };
   }
-
-  return {
-    approvalPolicy: "never",
-    sandbox: "danger-full-access",
-  };
-}
-
-export function resolveCodexModelForAccount(
-  model: string | undefined,
-  account: CodexAccountSnapshot,
-): string | undefined {
-  if (model !== CODEX_SPARK_MODEL || account.sparkEnabled) {
-    return model;
-  }
-
-  return CODEX_DEFAULT_MODEL;
 }
 
 /**
@@ -374,17 +318,7 @@ export function resolveCodexModelForAccount(
  * entire process tree instead.
  */
 function killChildTree(child: ChildProcessWithoutNullStreams): void {
-  if (process.platform === "win32" && child.pid !== undefined) {
-    try {
-      spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
-        stdio: "ignore",
-      });
-      return;
-    } catch {
-      // fallback to direct kill
-    }
-  }
-  child.kill();
+  killCodexChildProcess(child);
 }
 
 export function normalizeCodexModelSlug(
@@ -401,19 +335,6 @@ export function normalizeCodexModelSlug(
   }
 
   return normalized;
-}
-
-export function buildCodexInitializeParams() {
-  return {
-    clientInfo: {
-      name: "tether_desktop",
-      title: "Tether Desktop",
-      version: "0.1.0",
-    },
-    capabilities: {
-      experimentalApi: true,
-    },
-  } as const;
 }
 
 function buildCodexCollaborationMode(input: {
@@ -518,7 +439,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
   private readonly sessions = new Map<ThreadId, CodexSessionContext>();
 
   private runPromise: (effect: Effect.Effect<unknown, never>) => Promise<unknown>;
-  constructor(services?: ServiceMap.ServiceMap<never>) {
+  constructor(services?: Context.Context<never>) {
     super();
     this.runPromise = services ? Effect.runPromiseWith(services) : Effect.runPromise;
   }
@@ -529,6 +450,25 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     let context: CodexSessionContext | undefined;
 
     try {
+      const existingContext = this.sessions.get(threadId);
+      if (existingContext) {
+        await Effect.logWarning("codex app-server replacing existing session", {
+          threadId,
+          existingStatus: existingContext.session.status,
+        }).pipe(this.runPromise);
+        try {
+          this.disposeSession(existingContext, {
+            emitLifecycleEvent: false,
+          });
+        } catch (error) {
+          await Effect.logWarning("codex app-server failed to dispose existing session", {
+            threadId,
+            existingStatus: existingContext.session.status,
+            cause: error instanceof Error ? error.message : String(error),
+          }).pipe(this.runPromise);
+        }
+      }
+
       const resolvedCwd = input.cwd ?? process.cwd();
 
       const session: ProviderSession = {
@@ -542,9 +482,8 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         updatedAt: now,
       };
 
-      const codexOptions = readCodexProviderOptions(input);
-      const codexBinaryPath = codexOptions.binaryPath ?? "codex";
-      const codexHomePath = codexOptions.homePath;
+      const codexBinaryPath = input.binaryPath;
+      const codexHomePath = input.homePath;
       this.assertSupportedCodexCliVersion({
         binaryPath: codexBinaryPath,
         cwd: resolvedCwd,
@@ -552,7 +491,10 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       });
       const child = spawn(codexBinaryPath, ["app-server"], {
         cwd: resolvedCwd,
-        env: buildPopupSafeEnv(process.env, codexHomePath ? { CODEX_HOME: codexHomePath } : {}),
+        env: {
+          ...process.env,
+          ...(codexHomePath ? { CODEX_HOME: codexHomePath } : {}),
+        },
         stdio: ["pipe", "pipe", "pipe"],
         shell: process.platform === "win32",
       });
@@ -570,6 +512,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         pending: new Map(),
         pendingApprovals: new Map(),
         pendingUserInputs: new Map(),
+        collabReceiverTurns: new Map(),
         nextRequestId: 1,
         stopping: false,
       };
@@ -582,6 +525,24 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       await this.sendRequest(context, "initialize", buildCodexInitializeParams());
 
       this.writeMessage(context, { method: "initialized" });
+      try {
+        const modelListResponse = await this.sendRequest(context, "model/list", {});
+        console.log("codex model/list response", modelListResponse);
+      } catch (error) {
+        console.log("codex model/list failed", error);
+      }
+      try {
+        const accountReadResponse = await this.sendRequest(context, "account/read", {});
+        console.log("codex account/read response", accountReadResponse);
+        context.account = readCodexAccountSnapshot(accountReadResponse);
+        console.log("codex subscription status", {
+          type: context.account.type,
+          planType: context.account.planType,
+          sparkEnabled: context.account.sparkEnabled,
+        });
+      } catch (error) {
+        console.log("codex account/read failed", error);
+      }
 
       const normalizedModel = resolveCodexModelForAccount(
         normalizeCodexModelSlug(input.model),
@@ -597,7 +558,6 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       const threadStartParams = {
         ...sessionOverrides,
         experimentalRawEvents: false,
-        persistExtendedHistory: true,
       };
       const resumeThreadId = readResumeThreadId(input);
       this.emitLifecycleEvent(
@@ -623,7 +583,6 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
           threadOpenResponse = await this.sendRequest(context, "thread/resume", {
             ...sessionOverrides,
             threadId: resumeThreadId,
-            persistExtendedHistory: true,
           });
         } catch (error) {
           if (!isRecoverableThreadResumeError(error)) {
@@ -700,7 +659,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         this.stopSession(threadId);
       } else {
         this.emitEvent({
-          id: EventId.makeUnsafe(randomUUID()),
+          id: EventId.make(randomUUID()),
           kind: "error",
           provider: "codex",
           threadId,
@@ -715,6 +674,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
 
   async sendTurn(input: CodexAppServerSendTurnInput): Promise<ProviderTurnStartResult> {
     const context = this.requireSession(input.threadId);
+    context.collabReceiverTurns.clear();
 
     const turnInput: Array<
       { type: "text"; text: string; text_elements: [] } | { type: "image"; url: string }
@@ -798,7 +758,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     if (!turnIdRaw) {
       throw new Error("turn/start response did not include a turn id.");
     }
-    const turnId = TurnId.makeUnsafe(turnIdRaw);
+    const turnId = TurnId.make(turnIdRaw);
 
     this.updateSession(context, {
       status: "running",
@@ -885,16 +845,12 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     decision: ProviderApprovalDecision,
   ): Promise<void> {
     const context = this.requireSession(threadId);
-    const pendingRequest =
-      context.pendingApprovals.get(requestId) ??
-      (context.pendingApprovals.size === 1
-        ? Array.from(context.pendingApprovals.values())[0]
-        : undefined);
+    const pendingRequest = context.pendingApprovals.get(requestId);
     if (!pendingRequest) {
       throw new Error(`Unknown pending approval request: ${requestId}`);
     }
 
-    context.pendingApprovals.delete(pendingRequest.requestId);
+    context.pendingApprovals.delete(requestId);
     this.writeMessage(context, {
       id: pendingRequest.jsonRpcId,
       result: {
@@ -902,26 +858,23 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       },
     });
 
-    const resolvedRequestIds = new Set<ApprovalRequestId>([pendingRequest.requestId, requestId]);
-    for (const resolvedRequestId of resolvedRequestIds) {
-      this.emitEvent({
-        id: EventId.makeUnsafe(randomUUID()),
-        kind: "notification",
-        provider: "codex",
-        threadId: context.session.threadId,
-        createdAt: new Date().toISOString(),
-        method: "item/requestApproval/decision",
-        turnId: pendingRequest.turnId,
-        itemId: pendingRequest.itemId,
-        requestId: resolvedRequestId,
+    this.emitEvent({
+      id: EventId.make(randomUUID()),
+      kind: "notification",
+      provider: "codex",
+      threadId: context.session.threadId,
+      createdAt: new Date().toISOString(),
+      method: "item/requestApproval/decision",
+      turnId: pendingRequest.turnId,
+      itemId: pendingRequest.itemId,
+      requestId: pendingRequest.requestId,
+      requestKind: pendingRequest.requestKind,
+      payload: {
+        requestId: pendingRequest.requestId,
         requestKind: pendingRequest.requestKind,
-        payload: {
-          requestId: resolvedRequestId,
-          requestKind: pendingRequest.requestKind,
-          decision,
-        },
-      });
-    }
+        decision,
+      },
+    });
   }
 
   async respondToUserInput(
@@ -930,16 +883,12 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     answers: ProviderUserInputAnswers,
   ): Promise<void> {
     const context = this.requireSession(threadId);
-    const pendingRequest =
-      context.pendingUserInputs.get(requestId) ??
-      (context.pendingUserInputs.size === 1
-        ? Array.from(context.pendingUserInputs.values())[0]
-        : undefined);
+    const pendingRequest = context.pendingUserInputs.get(requestId);
     if (!pendingRequest) {
       throw new Error(`Unknown pending user input request: ${requestId}`);
     }
 
-    context.pendingUserInputs.delete(pendingRequest.requestId);
+    context.pendingUserInputs.delete(requestId);
     const codexAnswers = toCodexUserInputAnswers(answers);
     this.writeMessage(context, {
       id: pendingRequest.jsonRpcId,
@@ -948,29 +897,39 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       },
     });
 
-    const resolvedRequestIds = new Set<ApprovalRequestId>([pendingRequest.requestId, requestId]);
-    for (const resolvedRequestId of resolvedRequestIds) {
-      this.emitEvent({
-        id: EventId.makeUnsafe(randomUUID()),
-        kind: "notification",
-        provider: "codex",
-        threadId: context.session.threadId,
-        createdAt: new Date().toISOString(),
-        method: "item/tool/requestUserInput/answered",
-        turnId: pendingRequest.turnId,
-        itemId: pendingRequest.itemId,
-        requestId: resolvedRequestId,
-        payload: {
-          requestId: resolvedRequestId,
-          answers: codexAnswers,
-        },
-      });
-    }
+    this.emitEvent({
+      id: EventId.make(randomUUID()),
+      kind: "notification",
+      provider: "codex",
+      threadId: context.session.threadId,
+      createdAt: new Date().toISOString(),
+      method: "item/tool/requestUserInput/answered",
+      turnId: pendingRequest.turnId,
+      itemId: pendingRequest.itemId,
+      requestId: pendingRequest.requestId,
+      payload: {
+        requestId: pendingRequest.requestId,
+        answers: codexAnswers,
+      },
+    });
   }
 
   stopSession(threadId: ThreadId): void {
     const context = this.sessions.get(threadId);
     if (!context) {
+      return;
+    }
+
+    this.disposeSession(context, {
+      emitLifecycleEvent: true,
+    });
+  }
+
+  private disposeSession(
+    context: CodexSessionContext,
+    options?: { readonly emitLifecycleEvent?: boolean },
+  ): void {
+    if (context.stopping) {
       return;
     }
 
@@ -994,8 +953,10 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       status: "closed",
       activeTurnId: undefined,
     });
-    this.emitLifecycleEvent(context, "session/closed", "Session stopped");
-    this.sessions.delete(threadId);
+    if (options?.emitLifecycleEvent !== false) {
+      this.emitLifecycleEvent(context, "session/closed", "Session stopped");
+    }
+    this.sessions.delete(context.session.threadId);
   }
 
   listSessions(): ProviderSession[] {
@@ -1041,7 +1002,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
           continue;
         }
 
-        this.emitErrorEvent(context, "process/stderr", classified.message);
+        this.emitNotificationEvent(context, "process/stderr", classified.message);
       }
     });
 
@@ -1118,21 +1079,32 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     context: CodexSessionContext,
     notification: JsonRpcNotification,
   ): void {
-    const route = this.readRouteFields(notification.params);
+    const rawRoute = this.readRouteFields(notification.params);
+    this.rememberCollabReceiverTurns(context, notification.params, rawRoute.turnId);
+    const childParentTurnId = this.readChildParentTurnId(context, notification.params);
+    const isChildConversation = childParentTurnId !== undefined;
+    if (
+      isChildConversation &&
+      this.shouldSuppressChildConversationNotification(notification.method)
+    ) {
+      return;
+    }
     const textDelta =
       notification.method === "item/agentMessage/delta"
         ? this.readString(notification.params, "delta")
         : undefined;
 
     this.emitEvent({
-      id: EventId.makeUnsafe(randomUUID()),
+      id: EventId.make(randomUUID()),
       kind: "notification",
       provider: "codex",
       threadId: context.session.threadId,
       createdAt: new Date().toISOString(),
       method: notification.method,
-      turnId: route.turnId,
-      itemId: route.itemId,
+      ...((childParentTurnId ?? rawRoute.turnId)
+        ? { turnId: childParentTurnId ?? rawRoute.turnId }
+        : {}),
+      ...(rawRoute.itemId ? { itemId: rawRoute.itemId } : {}),
       textDelta,
       payload: notification.params,
     });
@@ -1142,14 +1114,15 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         this.readString(this.readObject(notification.params)?.thread, "id"),
       );
       if (providerThreadId) {
-        this.updateSession(context, {
-          resumeCursor: { threadId: providerThreadId },
-        });
+        this.updateSession(context, { resumeCursor: { threadId: providerThreadId } });
       }
       return;
     }
 
     if (notification.method === "turn/started") {
+      if (isChildConversation) {
+        return;
+      }
       const turnId = toTurnId(this.readString(this.readObject(notification.params)?.turn, "id"));
       this.updateSession(context, {
         status: "running",
@@ -1159,6 +1132,10 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     }
 
     if (notification.method === "turn/completed") {
+      if (isChildConversation) {
+        return;
+      }
+      context.collabReceiverTurns.clear();
       const turn = this.readObject(notification.params, "turn");
       const status = this.readString(turn, "status");
       const errorMessage = this.readString(this.readObject(turn, "error"), "message");
@@ -1171,6 +1148,9 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     }
 
     if (notification.method === "error") {
+      if (isChildConversation) {
+        return;
+      }
       const message = this.readString(this.readObject(notification.params)?.error, "message");
       const willRetry = this.readBoolean(notification.params, "willRetry");
 
@@ -1182,12 +1162,13 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
   }
 
   private handleServerRequest(context: CodexSessionContext, request: JsonRpcRequest): void {
-    const route = this.readRouteFields(request.params);
+    const rawRoute = this.readRouteFields(request.params);
+    const childParentTurnId = this.readChildParentTurnId(context, request.params);
+    const effectiveTurnId = childParentTurnId ?? rawRoute.turnId;
     const requestKind = this.requestKindForMethod(request.method);
     let requestId: ApprovalRequestId | undefined;
     if (requestKind) {
-      requestId =
-        this.readPendingRequestId(request.params) ?? ApprovalRequestId.makeUnsafe(randomUUID());
+      requestId = ApprovalRequestId.make(randomUUID());
       const pendingRequest: PendingApprovalRequest = {
         requestId,
         jsonRpcId: request.id,
@@ -1199,33 +1180,32 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
               : "item/fileChange/requestApproval",
         requestKind,
         threadId: context.session.threadId,
-        ...(route.turnId ? { turnId: route.turnId } : {}),
-        ...(route.itemId ? { itemId: route.itemId } : {}),
+        ...(effectiveTurnId ? { turnId: effectiveTurnId } : {}),
+        ...(rawRoute.itemId ? { itemId: rawRoute.itemId } : {}),
       };
       context.pendingApprovals.set(requestId, pendingRequest);
     }
 
     if (request.method === "item/tool/requestUserInput") {
-      requestId =
-        this.readPendingRequestId(request.params) ?? ApprovalRequestId.makeUnsafe(randomUUID());
+      requestId = ApprovalRequestId.make(randomUUID());
       context.pendingUserInputs.set(requestId, {
         requestId,
         jsonRpcId: request.id,
         threadId: context.session.threadId,
-        ...(route.turnId ? { turnId: route.turnId } : {}),
-        ...(route.itemId ? { itemId: route.itemId } : {}),
+        ...(effectiveTurnId ? { turnId: effectiveTurnId } : {}),
+        ...(rawRoute.itemId ? { itemId: rawRoute.itemId } : {}),
       });
     }
 
     this.emitEvent({
-      id: EventId.makeUnsafe(randomUUID()),
+      id: EventId.make(randomUUID()),
       kind: "request",
       provider: "codex",
       threadId: context.session.threadId,
       createdAt: new Date().toISOString(),
       method: request.method,
-      turnId: route.turnId,
-      itemId: route.itemId,
+      ...(effectiveTurnId ? { turnId: effectiveTurnId } : {}),
+      ...(rawRoute.itemId ? { itemId: rawRoute.itemId } : {}),
       requestId,
       requestKind,
       payload: request.params,
@@ -1308,7 +1288,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
 
   private emitLifecycleEvent(context: CodexSessionContext, method: string, message: string): void {
     this.emitEvent({
-      id: EventId.makeUnsafe(randomUUID()),
+      id: EventId.make(randomUUID()),
       kind: "session",
       provider: "codex",
       threadId: context.session.threadId,
@@ -1320,8 +1300,24 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
 
   private emitErrorEvent(context: CodexSessionContext, method: string, message: string): void {
     this.emitEvent({
-      id: EventId.makeUnsafe(randomUUID()),
+      id: EventId.make(randomUUID()),
       kind: "error",
+      provider: "codex",
+      threadId: context.session.threadId,
+      createdAt: new Date().toISOString(),
+      method,
+      message,
+    });
+  }
+
+  private emitNotificationEvent(
+    context: CodexSessionContext,
+    method: string,
+    message: string,
+  ): void {
+    this.emitEvent({
+      id: EventId.make(randomUUID()),
+      kind: "notification",
       provider: "codex",
       threadId: context.session.threadId,
       createdAt: new Date().toISOString(),
@@ -1379,7 +1375,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     const turns = turnsRaw.map((turnValue, index) => {
       const turn = this.readObject(turnValue);
       const turnIdRaw = this.readString(turn, "id") ?? `${threadIdRaw}:turn:${index + 1}`;
-      const turnId = TurnId.makeUnsafe(turnIdRaw);
+      const turnId = TurnId.make(turnIdRaw);
       const items = this.readArray(turn, "items") ?? [];
       return {
         id: turnId,
@@ -1452,14 +1448,62 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     return route;
   }
 
-  private readPendingRequestId(params: unknown): ApprovalRequestId | undefined {
-    const requestId =
-      this.readString(params, "requestId") ??
-      this.readString(params, "request_id") ??
-      this.readString(this.readObject(params, "msg"), "requestId") ??
-      this.readString(this.readObject(params, "msg"), "request_id");
+  private readProviderConversationId(params: unknown): string | undefined {
+    return (
+      this.readString(params, "threadId") ??
+      this.readString(this.readObject(params, "thread"), "id") ??
+      this.readString(params, "conversationId")
+    );
+  }
 
-    return requestId ? ApprovalRequestId.makeUnsafe(requestId) : undefined;
+  private readChildParentTurnId(context: CodexSessionContext, params: unknown): TurnId | undefined {
+    const providerConversationId = this.readProviderConversationId(params);
+    if (!providerConversationId) {
+      return undefined;
+    }
+    return context.collabReceiverTurns.get(providerConversationId);
+  }
+
+  private rememberCollabReceiverTurns(
+    context: CodexSessionContext,
+    params: unknown,
+    parentTurnId: TurnId | undefined,
+  ): void {
+    if (!parentTurnId) {
+      return;
+    }
+    const payload = this.readObject(params);
+    const item = this.readObject(payload, "item") ?? payload;
+    const itemType = this.readString(item, "type") ?? this.readString(item, "kind");
+    if (itemType !== "collabAgentToolCall") {
+      return;
+    }
+
+    const receiverThreadIds =
+      this.readArray(item, "receiverThreadIds")
+        ?.map((value) => (typeof value === "string" ? value : null))
+        .filter((value): value is string => value !== null) ?? [];
+    for (const receiverThreadId of receiverThreadIds) {
+      context.collabReceiverTurns.set(receiverThreadId, parentTurnId);
+    }
+  }
+
+  private shouldSuppressChildConversationNotification(method: string): boolean {
+    return (
+      method === "thread/started" ||
+      method === "thread/status/changed" ||
+      method === "thread/archived" ||
+      method === "thread/unarchived" ||
+      method === "thread/closed" ||
+      method === "thread/compacted" ||
+      method === "thread/name/updated" ||
+      method === "thread/tokenUsage/updated" ||
+      method === "turn/started" ||
+      method === "turn/completed" ||
+      method === "turn/aborted" ||
+      method === "turn/plan/updated" ||
+      method === "item/plan/delta"
+    );
   }
 
   private readObject(value: unknown, key?: string): Record<string, unknown> | undefined {
@@ -1518,20 +1562,6 @@ function normalizeProviderThreadId(value: string | undefined): string | undefine
   return brandIfNonEmpty(value, (normalized) => normalized);
 }
 
-function readCodexProviderOptions(input: CodexAppServerStartSessionInput): {
-  readonly binaryPath?: string;
-  readonly homePath?: string;
-} {
-  const options = input.providerOptions?.codex;
-  if (!options) {
-    return {};
-  }
-  return {
-    ...(options.binaryPath ? { binaryPath: options.binaryPath } : {}),
-    ...(options.homePath ? { homePath: options.homePath } : {}),
-  };
-}
-
 function assertSupportedCodexCliVersion(input: {
   readonly binaryPath: string;
   readonly cwd: string;
@@ -1539,7 +1569,10 @@ function assertSupportedCodexCliVersion(input: {
 }): void {
   const result = spawnSync(input.binaryPath, ["--version"], {
     cwd: input.cwd,
-    env: buildPopupSafeEnv(process.env, input.homePath ? { CODEX_HOME: input.homePath } : {}),
+    env: {
+      ...process.env,
+      ...(input.homePath ? { CODEX_HOME: input.homePath } : {}),
+    },
     encoding: "utf8",
     shell: process.platform === "win32",
     stdio: ["ignore", "pipe", "pipe"],
@@ -1582,14 +1615,18 @@ function readResumeCursorThreadId(resumeCursor: unknown): string | undefined {
   return typeof rawThreadId === "string" ? normalizeProviderThreadId(rawThreadId) : undefined;
 }
 
-function readResumeThreadId(input: CodexAppServerStartSessionInput): string | undefined {
+function readResumeThreadId(input: {
+  readonly resumeCursor?: unknown;
+  readonly threadId?: ThreadId;
+  readonly runtimeMode?: RuntimeMode;
+}): string | undefined {
   return readResumeCursorThreadId(input.resumeCursor);
 }
 
 function toTurnId(value: string | undefined): TurnId | undefined {
-  return brandIfNonEmpty(value, TurnId.makeUnsafe);
+  return brandIfNonEmpty(value, TurnId.make);
 }
 
 function toProviderItemId(value: string | undefined): ProviderItemId | undefined {
-  return brandIfNonEmpty(value, ProviderItemId.makeUnsafe);
+  return brandIfNonEmpty(value, ProviderItemId.make);
 }

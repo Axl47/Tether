@@ -17,7 +17,7 @@ import {
   ThreadCreatedPayload,
   ThreadTurnDiff,
   ThreadTurnStartRequestedPayload,
-} from "./orchestration";
+} from "./orchestration.ts";
 
 const decodeTurnDiffInput = Schema.decodeUnknownEffect(OrchestrationGetTurnDiffInput);
 const decodeThreadTurnDiff = Schema.decodeUnknownEffect(ThreadTurnDiff);
@@ -81,14 +81,20 @@ it.effect("trims branded ids and command string fields at decode boundaries", ()
       projectId: " project-1 ",
       title: " Project Title ",
       workspaceRoot: " /tmp/workspace ",
-      defaultModel: " gpt-5.2 ",
+      defaultModelSelection: {
+        provider: "codex",
+        model: " gpt-5.2 ",
+      },
       createdAt: "2026-01-01T00:00:00.000Z",
     });
     assert.strictEqual(parsed.commandId, "cmd-1");
     assert.strictEqual(parsed.projectId, "project-1");
     assert.strictEqual(parsed.title, "Project Title");
     assert.strictEqual(parsed.workspaceRoot, "/tmp/workspace");
-    assert.strictEqual(parsed.defaultModel, "gpt-5.2");
+    assert.deepStrictEqual(parsed.defaultModelSelection, {
+      provider: "codex",
+      model: "gpt-5.2",
+    });
   }),
 );
 
@@ -174,7 +180,10 @@ it.effect("decodes thread.created runtime mode for historical events", () =>
       threadId: "thread-1",
       projectId: "project-1",
       title: "Thread title",
-      model: "gpt-5.4",
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5.4",
+      },
       interactionMode: "default",
       branch: null,
       worktreePath: null,
@@ -199,9 +208,10 @@ it.effect("accepts provider-scoped model options in thread.turn.start", () =>
         attachments: [],
       },
       provider: "codex",
-      model: "gpt-5.3-codex",
-      modelOptions: {
-        codex: {
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5.3-codex",
+        options: {
           reasoningEffort: "high",
           fastMode: true,
         },
@@ -209,8 +219,11 @@ it.effect("accepts provider-scoped model options in thread.turn.start", () =>
       createdAt: "2026-01-01T00:00:00.000Z",
     });
     assert.strictEqual(parsed.provider, "codex");
-    assert.strictEqual(parsed.modelOptions?.codex?.reasoningEffort, "high");
-    assert.strictEqual(parsed.modelOptions?.codex?.fastMode, true);
+    if (parsed.modelSelection?.provider !== "codex") {
+      assert.fail("Expected a codex model selection");
+    }
+    assert.strictEqual(parsed.modelSelection.options?.reasoningEffort, "high");
+    assert.strictEqual(parsed.modelSelection.options?.fastMode, true);
   }),
 );
 
@@ -383,7 +396,10 @@ it.effect("accepts orchestration threads with null or populated context windows"
       id: "thread-1",
       projectId: "project-1",
       title: "Thread",
-      model: "gpt-5-codex",
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
       runtimeMode: "full-access",
       interactionMode: "default",
       branch: null,
@@ -391,6 +407,7 @@ it.effect("accepts orchestration threads with null or populated context windows"
       latestTurn: null,
       createdAt: "2026-03-07T00:00:00.000Z",
       updatedAt: "2026-03-07T00:00:00.000Z",
+      archivedAt: null,
       deletedAt: null,
       messages: [],
       proposedPlans: [],

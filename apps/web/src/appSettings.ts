@@ -1,128 +1,74 @@
-import { useCallback, useSyncExternalStore } from "react";
-import { Option, Schema } from "effect";
-import { TrimmedNonEmptyString, type ProviderKind } from "@t3tools/contracts";
-import { getDefaultModel, getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
-import { DEFAULT_SIDEBAR_THREAD_SORT, SidebarThreadSortSchema } from "./sidebarThreadSort";
+import { useCallback, useMemo } from "react";
+import { type ProviderKind } from "@t3tools/contracts";
+import {
+  DEFAULT_TIMESTAMP_FORMAT,
+  type TimestampFormat,
+  type UnifiedSettings,
+} from "@t3tools/contracts/settings";
+import { DEFAULT_MODEL_BY_PROVIDER } from "@t3tools/contracts";
+import { getDefaultModel, normalizeModelSlug, resolveModelSlugForProvider } from "@t3tools/shared/model";
 
-const APP_SETTINGS_STORAGE_KEY = "tether:app-settings:v1";
-const LEGACY_APP_SETTINGS_STORAGE_KEYS = ["t3code:app-settings:v1"] as const;
-const MAX_CUSTOM_MODEL_COUNT = 32;
-export const MAX_CUSTOM_MODEL_LENGTH = 256;
-export const TIMESTAMP_FORMAT_OPTIONS = ["locale", "12-hour", "24-hour"] as const;
-export type TimestampFormat = (typeof TIMESTAMP_FORMAT_OPTIONS)[number];
-export const DEFAULT_TIMESTAMP_FORMAT: TimestampFormat = "locale";
-const BUILT_IN_MODEL_SLUGS_BY_PROVIDER: Record<ProviderKind, ReadonlySet<string>> = {
-  codex: new Set(getModelOptions("codex").map((option) => option.slug)),
-  claudeCode: new Set(getModelOptions("claudeCode").map((option) => option.slug)),
-  gemini: new Set(getModelOptions("gemini").map((option) => option.slug)),
-};
+import { useSettings, useUpdateSettings } from "./hooks/useSettings";
 
-const AppSettingsSchema = Schema.Struct({
-  codexBinaryPath: Schema.String.check(Schema.isMaxLength(4096)).pipe(
-    Schema.withConstructorDefault(() => Option.some("")),
-  ),
-  codexHomePath: Schema.String.check(Schema.isMaxLength(4096)).pipe(
-    Schema.withConstructorDefault(() => Option.some("")),
-  ),
-  defaultThreadEnvMode: Schema.Literals(["local", "worktree"]).pipe(
-    Schema.withConstructorDefault(() => Option.some("local")),
-  ),
-  confirmThreadDelete: Schema.Boolean.pipe(Schema.withConstructorDefault(() => Option.some(true))),
-  enableAssistantStreaming: Schema.Boolean.pipe(
-    Schema.withConstructorDefault(() => Option.some(false)),
-  ),
-  timestampFormat: Schema.Literals(["locale", "12-hour", "24-hour"]).pipe(
-    Schema.withConstructorDefault(() => Option.some(DEFAULT_TIMESTAMP_FORMAT)),
-  ),
-  sidebarThreadSort: SidebarThreadSortSchema.pipe(
-    Schema.withConstructorDefault(() => Option.some(DEFAULT_SIDEBAR_THREAD_SORT)),
-  ),
-  customCodexModels: Schema.Array(Schema.String).pipe(
-    Schema.withConstructorDefault(() => Option.some([])),
-  ),
-  textGenerationModel: Schema.optional(TrimmedNonEmptyString),
-  customGeminiModels: Schema.Array(Schema.String).pipe(
-    Schema.withConstructorDefault(() => Option.some([])),
-  ),
-  customClaudeModels: Schema.Array(Schema.String).pipe(
-    Schema.withConstructorDefault(() => Option.some([])),
-  ),
-});
-export type AppSettings = typeof AppSettingsSchema.Type;
+export { DEFAULT_TIMESTAMP_FORMAT, type TimestampFormat };
+
 export interface AppModelOption {
   slug: string;
   name: string;
   isCustom: boolean;
 }
-const DEFAULT_APP_SETTINGS = AppSettingsSchema.makeUnsafe({});
 
-let listeners: Array<() => void> = [];
-let cachedRawSettings: string | null | undefined;
-let cachedSnapshot: AppSettings = DEFAULT_APP_SETTINGS;
+type LegacySettingsCompat = UnifiedSettings & {
+  codexBinaryPath: string;
+  codexHomePath: string;
+  customCodexModels: string[];
+  customClaudeModels: string[];
+  customCursorModels: string[];
+  customGeminiModels: string[];
+  customOpenCodeModels: string[];
+  sidebarThreadSort: "activity" | "created" | "status" | "name";
+};
 
-export function normalizeCustomModelSlugs(
+function normalizeCustomModelSlugs(
   models: Iterable<string | null | undefined>,
-  provider: ProviderKind = "codex",
+  provider: ProviderKind,
 ): string[] {
-  const normalizedModels: string[] = [];
+  const result: string[] = [];
   const seen = new Set<string>();
-  const builtInModelSlugs = BUILT_IN_MODEL_SLUGS_BY_PROVIDER[provider];
-
   for (const candidate of models) {
     const normalized = normalizeModelSlug(candidate, provider);
-    if (
-      !normalized ||
-      normalized.length > MAX_CUSTOM_MODEL_LENGTH ||
-      builtInModelSlugs.has(normalized) ||
-      seen.has(normalized)
-    ) {
+    if (!normalized || seen.has(normalized)) {
       continue;
     }
-
     seen.add(normalized);
-    normalizedModels.push(normalized);
-    if (normalizedModels.length >= MAX_CUSTOM_MODEL_COUNT) {
-      break;
-    }
+    result.push(normalized);
   }
-
-  return normalizedModels;
-}
-
-function normalizeAppSettings(settings: AppSettings): AppSettings {
-  return {
-    ...settings,
-    customCodexModels: normalizeCustomModelSlugs(settings.customCodexModels, "codex"),
-    customGeminiModels: normalizeCustomModelSlugs(settings.customGeminiModels, "gemini"),
-    customClaudeModels: normalizeCustomModelSlugs(settings.customClaudeModels, "claudeCode"),
-  };
+  return result;
 }
 
 export function getCustomModelsForProvider(
-  settings: Pick<AppSettings, "customCodexModels" | "customGeminiModels"> &
-    Partial<Pick<AppSettings, "customClaudeModels">>,
+  settings: Pick<
+    LegacySettingsCompat,
+    | "customCodexModels"
+    | "customClaudeModels"
+    | "customCursorModels"
+    | "customGeminiModels"
+    | "customOpenCodeModels"
+  >,
   provider: ProviderKind,
 ): readonly string[] {
   switch (provider) {
-    case "claudeCode":
-      return settings.customClaudeModels ?? [];
+    case "claudeAgent":
+      return settings.customClaudeModels;
+    case "cursor":
+      return settings.customCursorModels;
     case "gemini":
       return settings.customGeminiModels;
+    case "opencode":
+      return settings.customOpenCodeModels;
     case "codex":
     default:
       return settings.customCodexModels;
-  }
-}
-
-export function patchCustomModelsForProvider(provider: ProviderKind, models: string[]) {
-  switch (provider) {
-    case "claudeCode":
-      return { customClaudeModels: models } satisfies Partial<AppSettings>;
-    case "gemini":
-      return { customGeminiModels: models } satisfies Partial<AppSettings>;
-    case "codex":
-    default:
-      return { customCodexModels: models } satisfies Partial<AppSettings>;
   }
 }
 
@@ -131,24 +77,18 @@ export function getAppModelOptions(
   customModels: readonly string[],
   selectedModel?: string | null,
 ): AppModelOption[] {
-  const options: AppModelOption[] = getModelOptions(provider).map(({ slug, name }) => ({
-    slug,
-    name,
-    isCustom: false,
-  }));
-  const seen = new Set(options.map((option) => option.slug));
+  const seen = new Set<string>();
+  const options: AppModelOption[] = [];
+  const baseModel = DEFAULT_MODEL_BY_PROVIDER[provider] ?? getDefaultModel(provider);
+  options.push({ slug: baseModel, name: baseModel, isCustom: false });
+  seen.add(baseModel);
 
   for (const slug of normalizeCustomModelSlugs(customModels, provider)) {
     if (seen.has(slug)) {
       continue;
     }
-
     seen.add(slug);
-    options.push({
-      slug,
-      name: slug,
-      isCustom: true,
-    });
+    options.push({ slug, name: slug, isCustom: true });
   }
 
   const normalizedSelectedModel = normalizeModelSlug(selectedModel, provider);
@@ -168,167 +108,112 @@ export function resolveAppModelSelection(
   customModels: readonly string[],
   selectedModel: string | null | undefined,
 ): string {
-  const options = getAppModelOptions(provider, customModels, selectedModel);
-  const trimmedSelectedModel = selectedModel?.trim();
-  if (trimmedSelectedModel) {
-    const direct = options.find((option) => option.slug === trimmedSelectedModel);
-    if (direct) {
-      return direct.slug;
-    }
-
-    const byName = options.find(
-      (option) => option.name.toLowerCase() === trimmedSelectedModel.toLowerCase(),
-    );
-    if (byName) {
-      return byName.slug;
-    }
-  }
-
-  const normalizedSelectedModel = normalizeModelSlug(selectedModel, provider);
-  if (!normalizedSelectedModel) {
-    return getDefaultModel(provider);
-  }
-
+  const normalizedSelectedModel = resolveModelSlugForProvider(provider, selectedModel);
+  const options = getAppModelOptions(provider, customModels, normalizedSelectedModel);
   return (
     options.find((option) => option.slug === normalizedSelectedModel)?.slug ??
+    DEFAULT_MODEL_BY_PROVIDER[provider] ??
     getDefaultModel(provider)
   );
 }
 
-export function getSlashModelOptions(
-  provider: ProviderKind,
-  customModels: readonly string[],
-  query: string,
-  selectedModel?: string | null,
-): AppModelOption[] {
-  const normalizedQuery = query.trim().toLowerCase();
-  const options = getAppModelOptions(provider, customModels, selectedModel);
-  if (!normalizedQuery) {
-    return options;
-  }
-
-  return options.filter((option) => {
-    const searchSlug = option.slug.toLowerCase();
-    const searchName = option.name.toLowerCase();
-    return searchSlug.includes(normalizedQuery) || searchName.includes(normalizedQuery);
-  });
-}
-
-function emitChange(): void {
-  for (const listener of listeners) {
-    listener();
-  }
-}
-
-function parsePersistedSettings(value: string | null): AppSettings {
-  if (!value) {
-    return DEFAULT_APP_SETTINGS;
-  }
-
-  try {
-    return normalizeAppSettings(Schema.decodeSync(Schema.fromJsonString(AppSettingsSchema))(value));
-  } catch {
-    return DEFAULT_APP_SETTINGS;
-  }
-}
-
-function readPersistedSettingsRaw(): string | null {
-  const current = window.localStorage.getItem(APP_SETTINGS_STORAGE_KEY);
-  if (current !== null) {
-    return current;
-  }
-  for (const legacyKey of LEGACY_APP_SETTINGS_STORAGE_KEYS) {
-    const legacy = window.localStorage.getItem(legacyKey);
-    if (legacy !== null) {
-      return legacy;
-    }
-  }
-  return null;
-}
-
-export function getAppSettingsSnapshot(): AppSettings {
-  if (typeof window === "undefined") {
-    return DEFAULT_APP_SETTINGS;
-  }
-
-  const raw = readPersistedSettingsRaw();
-  if (raw === cachedRawSettings) {
-    return cachedSnapshot;
-  }
-
-  cachedRawSettings = raw;
-  cachedSnapshot = parsePersistedSettings(raw);
-  return cachedSnapshot;
-}
-
-function persistSettings(next: AppSettings): void {
-  if (typeof window === "undefined") return;
-
-  const raw = JSON.stringify(next);
-  try {
-    if (raw !== cachedRawSettings) {
-      window.localStorage.setItem(APP_SETTINGS_STORAGE_KEY, raw);
-    }
-    for (const legacyKey of LEGACY_APP_SETTINGS_STORAGE_KEYS) {
-      window.localStorage.removeItem(legacyKey);
-    }
-  } catch {
-    // Best-effort persistence only.
-  }
-
-  cachedRawSettings = raw;
-  cachedSnapshot = next;
-}
-
-function subscribe(listener: () => void): () => void {
-  listeners.push(listener);
-
-  const onStorage = (event: StorageEvent) => {
-    if (
-      event.key === APP_SETTINGS_STORAGE_KEY ||
-      (typeof event.key === "string" &&
-        LEGACY_APP_SETTINGS_STORAGE_KEYS.includes(
-          event.key as (typeof LEGACY_APP_SETTINGS_STORAGE_KEYS)[number],
-        ))
-    ) {
-      emitChange();
-    }
-  };
-
-  window.addEventListener("storage", onStorage);
-  return () => {
-    listeners = listeners.filter((entry) => entry !== listener);
-    window.removeEventListener("storage", onStorage);
+function toLegacySettingsCompat(settings: UnifiedSettings): LegacySettingsCompat {
+  return {
+    ...settings,
+    codexBinaryPath: settings.providers.codex.binaryPath,
+    codexHomePath: settings.providers.codex.homePath,
+    customCodexModels: [...settings.providers.codex.customModels],
+    customClaudeModels: [...settings.providers.claudeAgent.customModels],
+    customCursorModels: [...settings.providers.cursor.customModels],
+    customGeminiModels: [],
+    customOpenCodeModels: [...settings.providers.opencode.customModels],
+    sidebarThreadSort: settings.sidebarThreadSortOrder === "created_at" ? "created" : "activity",
   };
 }
 
 export function useAppSettings() {
-  const settings = useSyncExternalStore(
-    subscribe,
-    getAppSettingsSnapshot,
-    () => DEFAULT_APP_SETTINGS,
+  const settings = useSettings();
+  const { updateSettings: updateUnifiedSettings, resetSettings } = useUpdateSettings();
+  const compatSettings = useMemo(() => toLegacySettingsCompat(settings), [settings]);
+
+  const updateSettings = useCallback(
+    (patch: Partial<LegacySettingsCompat>) => {
+      const nextPatch: {
+        enableAssistantStreaming?: UnifiedSettings["enableAssistantStreaming"];
+        defaultThreadEnvMode?: UnifiedSettings["defaultThreadEnvMode"];
+        confirmThreadDelete?: UnifiedSettings["confirmThreadDelete"];
+        confirmThreadArchive?: UnifiedSettings["confirmThreadArchive"];
+        timestampFormat?: UnifiedSettings["timestampFormat"];
+        sidebarThreadSortOrder?: UnifiedSettings["sidebarThreadSortOrder"];
+        providers?: UnifiedSettings["providers"];
+      } = {};
+
+      if (patch.enableAssistantStreaming !== undefined) {
+        nextPatch.enableAssistantStreaming = patch.enableAssistantStreaming;
+      }
+      if (patch.defaultThreadEnvMode !== undefined) {
+        nextPatch.defaultThreadEnvMode = patch.defaultThreadEnvMode;
+      }
+      if (patch.confirmThreadDelete !== undefined) {
+        nextPatch.confirmThreadDelete = patch.confirmThreadDelete;
+      }
+      if (patch.confirmThreadArchive !== undefined) {
+        nextPatch.confirmThreadArchive = patch.confirmThreadArchive;
+      }
+      if (patch.timestampFormat !== undefined) {
+        nextPatch.timestampFormat = patch.timestampFormat;
+      }
+      if (patch.sidebarThreadSort !== undefined) {
+        nextPatch.sidebarThreadSortOrder =
+          patch.sidebarThreadSort === "created" ? "created_at" : "updated_at";
+      }
+
+      const providerPatch: Record<string, UnifiedSettings["providers"][keyof UnifiedSettings["providers"]]> =
+        {};
+      const mergeProvider = (
+        provider: keyof UnifiedSettings["providers"],
+        partial: Partial<UnifiedSettings["providers"][typeof provider]>,
+      ) => {
+        providerPatch[provider] = {
+          ...settings.providers[provider],
+          ...partial,
+        };
+      };
+
+      if (patch.codexBinaryPath !== undefined || patch.codexHomePath !== undefined) {
+        mergeProvider("codex", {
+          ...(patch.codexBinaryPath !== undefined ? { binaryPath: patch.codexBinaryPath } : {}),
+          ...(patch.codexHomePath !== undefined ? { homePath: patch.codexHomePath } : {}),
+        });
+      }
+      if (patch.customCodexModels !== undefined) {
+        mergeProvider("codex", { customModels: [...patch.customCodexModels] });
+      }
+      if (patch.customClaudeModels !== undefined) {
+        mergeProvider("claudeAgent", { customModels: [...patch.customClaudeModels] });
+      }
+      if (patch.customCursorModels !== undefined) {
+        mergeProvider("cursor", { customModels: [...patch.customCursorModels] });
+      }
+      if (patch.customOpenCodeModels !== undefined) {
+        mergeProvider("opencode", { customModels: [...patch.customOpenCodeModels] });
+      }
+
+      if (Object.keys(providerPatch).length > 0) {
+        nextPatch.providers = {
+          ...settings.providers,
+          ...(providerPatch as Partial<UnifiedSettings["providers"]>),
+        };
+      }
+
+      updateUnifiedSettings(nextPatch);
+    },
+    [settings.providers, updateUnifiedSettings],
   );
 
-  const updateSettings = useCallback((patch: Partial<AppSettings>) => {
-    const next = normalizeAppSettings(
-      Schema.decodeSync(AppSettingsSchema)({
-        ...getAppSettingsSnapshot(),
-        ...patch,
-      }),
-    );
-    persistSettings(next);
-    emitChange();
-  }, []);
-
-  const resetSettings = useCallback(() => {
-    persistSettings(DEFAULT_APP_SETTINGS);
-    emitChange();
-  }, []);
-
   return {
-    settings,
+    settings: compatSettings,
     updateSettings,
     resetSettings,
-    defaults: DEFAULT_APP_SETTINGS,
   } as const;
 }

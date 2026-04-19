@@ -1,38 +1,67 @@
-import { ThreadId } from "@t3tools/contracts";
+import { type ServerLifecycleWelcomePayload } from "@t3tools/contracts";
+import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime";
 import {
   Outlet,
   createRootRouteWithContext,
   type ErrorComponentProps,
+  useLocation,
   useNavigate,
-  useRouterState,
 } from "@tanstack/react-router";
-import { useEffect, useRef } from "react";
+import { useEffect, useEffectEvent, useRef } from "react";
 import { QueryClient, useQueryClient } from "@tanstack/react-query";
-import { Throttler } from "@tanstack/react-pacer";
 
 import { APP_DISPLAY_NAME } from "../branding";
-import { QueuedTurnDispatcher } from "../components/QueuedTurnDispatcher";
+import { AppSidebarLayout } from "../components/AppSidebarLayout";
+import { CommandPalette } from "../components/CommandPalette";
+import {
+  SlowRpcAckToastCoordinator,
+  WebSocketConnectionCoordinator,
+  WebSocketConnectionSurface,
+} from "../components/WebSocketConnectionSurface";
 import { Button } from "../components/ui/button";
 import { AnchoredToastProvider, ToastProvider, toastManager } from "../components/ui/toast";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
-import { serverConfigQueryOptions, serverQueryKeys } from "../lib/serverReactQuery";
-import { readNativeApi } from "../nativeApi";
-import { clearPromotedDraftThreads, useComposerDraftStore } from "../composerDraftStore";
-import { useSplitViewStore } from "../splitViewStore";
+import { readLocalApi } from "../localApi";
+import { useSettings } from "../hooks/useSettings";
+import {
+  deriveLogicalProjectKeyFromSettings,
+  derivePhysicalProjectKeyFromPath,
+} from "../logicalProject";
+import {
+  getServerConfigUpdatedNotification,
+  ServerConfigUpdatedNotification,
+  startServerStateSync,
+  useServerConfig,
+  useServerConfigUpdatedSubscription,
+  useServerWelcomeSubscription,
+} from "../rpc/serverState";
 import { useStore } from "../store";
-import { useTerminalStateStore } from "../terminalStateStore";
-import { useThreadRunStateStore } from "../threadRunStateStore";
-import { terminalRunningSubprocessFromEvent } from "../terminalActivity";
-import { onServerConfigUpdated, onServerWelcome } from "../wsNativeApi";
-import { providerQueryKeys } from "../lib/providerReactQuery";
-import { projectQueryKeys } from "../lib/projectReactQuery";
-import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
-import { useAppViewportHeight } from "../hooks/useAppViewportHeight";
-import { deriveDesktopContextFromRoute } from "../desktopContext";
+import { useUiStateStore } from "../uiStateStore";
+import { syncBrowserChromeTheme } from "../hooks/useTheme";
+import {
+  ensureEnvironmentConnectionBootstrapped,
+  getPrimaryEnvironmentConnection,
+  startEnvironmentConnectionService,
+} from "../environments/runtime";
+import { configureClientTracing } from "../observability/clientTracing";
+import {
+  ensurePrimaryEnvironmentReady,
+  resolveInitialServerAuthGateState,
+  updatePrimaryEnvironmentDescriptor,
+} from "../environments/primary";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
 }>()({
+  beforeLoad: async () => {
+    const [, authGateState] = await Promise.all([
+      ensurePrimaryEnvironmentReady(),
+      resolveInitialServerAuthGateState(),
+    ]);
+    return {
+      authGateState,
+    };
+  },
   component: RootRouteView,
   errorComponent: RootRouteErrorView,
   head: () => ({
@@ -41,41 +70,52 @@ export const Route = createRootRouteWithContext<{
 });
 
 function RootRouteView() {
-  useAppViewportHeight();
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const { authGateState } = Route.useRouteContext();
 
-  if (!readNativeApi()) {
-    return (
-      <div className="flex h-[var(--app-viewport-height)] flex-col bg-background text-foreground">
-        <div className="flex flex-1 items-center justify-center">
-          <p className="text-sm text-muted-foreground">
-            Connecting to {APP_DISPLAY_NAME} server...
-          </p>
-        </div>
-      </div>
-    );
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      syncBrowserChromeTheme();
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [pathname]);
+
+  if (pathname === "/pair") {
+    return <Outlet />;
   }
 
+  if (authGateState.status !== "authenticated") {
+    return <Outlet />;
+  }
   return (
     <ToastProvider>
       <AnchoredToastProvider>
+        <AuthenticatedTracingBootstrap />
+        <ServerStateBootstrap />
+        <EnvironmentConnectionManagerBootstrap />
         <EventRouter />
-        <DesktopContextReporter />
-        <QueuedTurnDispatcher />
-        <DesktopProjectBootstrap />
-        <Outlet />
+        <WebSocketConnectionCoordinator />
+        <SlowRpcAckToastCoordinator />
+        <WebSocketConnectionSurface>
+          <CommandPalette>
+            <AppSidebarLayout>
+              <Outlet />
+            </AppSidebarLayout>
+          </CommandPalette>
+        </WebSocketConnectionSurface>
       </AnchoredToastProvider>
     </ToastProvider>
   );
 }
 
 function RootRouteErrorView({ error, reset }: ErrorComponentProps) {
-  useAppViewportHeight();
-
   const message = errorMessage(error);
   const details = errorDetails(error);
 
   return (
-    <div className="relative flex min-h-[var(--app-viewport-height)] items-center justify-center overflow-hidden bg-background px-4 py-10 text-foreground sm:px-6">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10 text-foreground sm:px-6">
       <div className="pointer-events-none absolute inset-0 opacity-80">
         <div className="absolute inset-x-0 top-0 h-44 bg-[radial-gradient(44rem_16rem_at_top,color-mix(in_srgb,var(--color-red-500)_16%,transparent),transparent)]" />
         <div className="absolute inset-0 bg-[linear-gradient(145deg,color-mix(in_srgb,var(--background)_90%,var(--color-black))_0%,var(--background)_55%)]" />
@@ -141,174 +181,105 @@ function errorDetails(error: unknown): string {
   }
 }
 
-function EventRouter() {
-  const syncServerReadModel = useStore((store) => store.syncServerReadModel);
-  const setProjectExpanded = useStore((store) => store.setProjectExpanded);
-  const removeOrphanedTerminalStates = useTerminalStateStore(
-    (store) => store.removeOrphanedTerminalStates,
-  );
-  const syncPendingRuns = useThreadRunStateStore((store) => store.syncPendingRuns);
-  const removeOrphanedPendingRuns = useThreadRunStateStore(
-    (store) => store.removeOrphanedPendingRuns,
-  );
+function ServerStateBootstrap() {
+  useEffect(() => startServerStateSync(getPrimaryEnvironmentConnection().client.server), []);
+
+  return null;
+}
+
+function AuthenticatedTracingBootstrap() {
+  useEffect(() => {
+    void configureClientTracing();
+  }, []);
+
+  return null;
+}
+
+function EnvironmentConnectionManagerBootstrap() {
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
-  const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const pathnameRef = useRef(pathname);
-  const handledBootstrapThreadIdRef = useRef<string | null>(null);
-
-  pathnameRef.current = pathname;
-
-  const routeThreadIdFromPathname = (nextPathname: string): ThreadId | null => {
-    if (nextPathname === "/" || nextPathname === "/settings") {
-      return null;
-    }
-    return ThreadId.makeUnsafe(nextPathname.slice(1));
-  };
 
   useEffect(() => {
-    const api = readNativeApi();
-    if (!api) return;
-    let disposed = false;
-    let latestSequence = 0;
-    let syncing = false;
-    let pending = false;
-    let needsProviderInvalidation = false;
+    return startEnvironmentConnectionService(queryClient);
+  }, [queryClient]);
 
-    const flushSnapshotSync = async (): Promise<void> => {
-      const snapshot = await api.orchestration.getSnapshot();
-      if (disposed) return;
-      latestSequence = Math.max(latestSequence, snapshot.snapshotSequence);
-      syncServerReadModel(snapshot);
-      clearPromotedDraftThreads(new Set(snapshot.threads.map((t) => t.id)));
-      syncPendingRuns(snapshot);
-      const draftThreadIds = Object.keys(
-        useComposerDraftStore.getState().draftThreadsByThreadId,
-      ) as ThreadId[];
-      const activeThreadIds = collectActiveTerminalThreadIds({
-        snapshotThreads: snapshot.threads,
-        draftThreadIds,
-      });
-      const nextSplitRouteThreadId = useSplitViewStore.getState().reconcileThreads(activeThreadIds);
-      removeOrphanedTerminalStates(activeThreadIds);
-      removeOrphanedPendingRuns(activeThreadIds);
-      const routeThreadId = routeThreadIdFromPathname(pathnameRef.current);
-      if (routeThreadId && !activeThreadIds.has(routeThreadId)) {
-        if (nextSplitRouteThreadId && nextSplitRouteThreadId !== routeThreadId) {
-          void navigate({
-            to: "/$threadId",
-            params: { threadId: nextSplitRouteThreadId },
-            replace: true,
-          });
-        } else {
-          void navigate({ to: "/", replace: true });
-        }
-      }
-      if (pending) {
-        pending = false;
-        await flushSnapshotSync();
-      }
-    };
+  return null;
+}
 
-    const syncSnapshot = async () => {
-      if (syncing) {
-        pending = true;
+function EventRouter() {
+  const setActiveEnvironmentId = useStore((store) => store.setActiveEnvironmentId);
+  const navigate = useNavigate();
+  const pathname = useLocation({ select: (loc) => loc.pathname });
+  const projectGroupingSettings = useSettings((settings) => ({
+    sidebarProjectGroupingMode: settings.sidebarProjectGroupingMode,
+    sidebarProjectGroupingOverrides: settings.sidebarProjectGroupingOverrides,
+  }));
+  const readPathname = useEffectEvent(() => pathname);
+  const handledBootstrapThreadIdRef = useRef<string | null>(null);
+  const seenServerConfigUpdateIdRef = useRef(getServerConfigUpdatedNotification()?.id ?? 0);
+  const disposedRef = useRef(false);
+  const serverConfig = useServerConfig();
+
+  const handleWelcome = useEffectEvent((payload: ServerLifecycleWelcomePayload | null) => {
+    if (!payload) return;
+
+    updatePrimaryEnvironmentDescriptor(payload.environment);
+    setActiveEnvironmentId(payload.environment.environmentId);
+    void (async () => {
+      await ensureEnvironmentConnectionBootstrapped(payload.environment.environmentId);
+      if (disposedRef.current) {
         return;
       }
-      syncing = true;
-      pending = false;
-      try {
-        await flushSnapshotSync();
-      } catch {
-        // Keep prior state and wait for next domain event to trigger a resync.
-      }
-      syncing = false;
-    };
 
-    const domainEventFlushThrottler = new Throttler(
-      () => {
-        if (needsProviderInvalidation) {
-          needsProviderInvalidation = false;
-          void queryClient.invalidateQueries({ queryKey: providerQueryKeys.all });
-          // Invalidate workspace entry queries so the @-mention file picker
-          // reflects files created, deleted, or restored during this turn.
-          void queryClient.invalidateQueries({ queryKey: projectQueryKeys.all });
-        }
-        void syncSnapshot();
-      },
-      {
-        wait: 100,
-        leading: false,
-        trailing: true,
-      },
-    );
-
-    const unsubDomainEvent = api.orchestration.onDomainEvent((event) => {
-      if (event.sequence <= latestSequence) {
+      if (!payload.bootstrapProjectId || !payload.bootstrapThreadId) {
         return;
       }
-      latestSequence = event.sequence;
-      if (event.type === "thread.turn-diff-completed" || event.type === "thread.reverted") {
-        needsProviderInvalidation = true;
-      }
-      domainEventFlushThrottler.maybeExecute();
-    });
-    const unsubTerminalEvent = api.terminal.onEvent((event) => {
-      const hasRunningSubprocess = terminalRunningSubprocessFromEvent(event);
-      if (hasRunningSubprocess === null) {
-        return;
-      }
-      useTerminalStateStore
-        .getState()
-        .setTerminalActivity(
-          ThreadId.makeUnsafe(event.threadId),
-          event.terminalId,
-          hasRunningSubprocess,
+      const bootstrapEnvironmentState =
+        useStore.getState().environmentStateById[payload.environment.environmentId];
+      const bootstrapProject =
+        bootstrapEnvironmentState?.projectById[payload.bootstrapProjectId] ?? null;
+      const bootstrapProjectKey =
+        (bootstrapProject
+          ? deriveLogicalProjectKeyFromSettings(bootstrapProject, projectGroupingSettings)
+          : null) ??
+        (serverConfig?.cwd
+          ? derivePhysicalProjectKeyFromPath(payload.environment.environmentId, serverConfig.cwd)
+          : null) ??
+        scopedProjectKey(
+          scopeProjectRef(payload.environment.environmentId, payload.bootstrapProjectId),
         );
-    });
-    const unsubWelcome = onServerWelcome((payload) => {
-      void (async () => {
-        await syncSnapshot();
-        if (disposed) {
-          return;
-        }
+      useUiStateStore.getState().setProjectExpanded(bootstrapProjectKey, true);
 
-        if (!payload.bootstrapProjectId || !payload.bootstrapThreadId) {
-          return;
-        }
-        setProjectExpanded(payload.bootstrapProjectId, true);
+      if (readPathname() !== "/") {
+        return;
+      }
+      if (handledBootstrapThreadIdRef.current === payload.bootstrapThreadId) {
+        return;
+      }
+      await navigate({
+        to: "/$environmentId/$threadId",
+        params: {
+          environmentId: payload.environment.environmentId,
+          threadId: payload.bootstrapThreadId,
+        },
+        replace: true,
+      });
+      handledBootstrapThreadIdRef.current = payload.bootstrapThreadId;
+    })().catch(() => undefined);
+  });
 
-        if (pathnameRef.current !== "/") {
-          return;
-        }
-        const persistedWorkspaceThreadId = useSplitViewStore.getState().getFocusedThreadId();
-        if (persistedWorkspaceThreadId) {
-          await navigate({
-            to: "/$threadId",
-            params: { threadId: persistedWorkspaceThreadId },
-            replace: true,
-          });
-          handledBootstrapThreadIdRef.current = payload.bootstrapThreadId;
-          return;
-        }
-        if (handledBootstrapThreadIdRef.current === payload.bootstrapThreadId) {
-          return;
-        }
-        await navigate({
-          to: "/$threadId",
-          params: { threadId: payload.bootstrapThreadId },
-          replace: true,
-        });
-        handledBootstrapThreadIdRef.current = payload.bootstrapThreadId;
-      })().catch(() => undefined);
-    });
-    // onServerConfigUpdated replays the latest cached value synchronously
-    // during subscribe. Skip the toast for that replay so effect re-runs
-    // don't produce duplicate toasts.
-    let subscribed = false;
-    const unsubServerConfigUpdated = onServerConfigUpdated((payload) => {
-      void queryClient.invalidateQueries({ queryKey: serverQueryKeys.config() });
-      if (!subscribed) return;
+  const handleServerConfigUpdated = useEffectEvent(
+    (notification: ServerConfigUpdatedNotification | null) => {
+      if (!notification) return;
+
+      const { id, payload, source } = notification;
+      if (id <= seenServerConfigUpdateIdRef.current) {
+        return;
+      }
+      seenServerConfigUpdateIdRef.current = id;
+      if (source !== "keybindingsUpdated") {
+        return;
+      }
+
       const issue = payload.issues.find((entry) => entry.kind.startsWith("keybindings."));
       if (!issue) {
         toastManager.add({
@@ -326,8 +297,12 @@ function EventRouter() {
         actionProps: {
           children: "Open keybindings.json",
           onClick: () => {
-            void queryClient
-              .ensureQueryData(serverConfigQueryOptions())
+            const api = readLocalApi();
+            if (!api) {
+              return;
+            }
+
+            void Promise.resolve(serverConfig ?? api.server.getConfig())
               .then((config) => {
                 const editor = resolveAndPersistPreferredEditor(config.availableEditors);
                 if (!editor) {
@@ -346,60 +321,27 @@ function EventRouter() {
           },
         },
       });
-    });
-    subscribed = true;
-    return () => {
-      disposed = true;
-      needsProviderInvalidation = false;
-      domainEventFlushThrottler.cancel();
-      unsubDomainEvent();
-      unsubTerminalEvent();
-      unsubWelcome();
-      unsubServerConfigUpdated();
-    };
-  }, [
-    navigate,
-    queryClient,
-    removeOrphanedTerminalStates,
-    removeOrphanedPendingRuns,
-    setProjectExpanded,
-    syncPendingRuns,
-    syncServerReadModel,
-  ]);
-
-  return null;
-}
-
-function DesktopProjectBootstrap() {
-  // Desktop hydration runs through EventRouter project + orchestration sync.
-  return null;
-}
-
-function DesktopContextReporter() {
-  const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const projects = useStore((store) => store.projects);
-  const threads = useStore((store) => store.threads);
-  const lastSerializedContextRef = useRef<string>("");
+    },
+  );
 
   useEffect(() => {
-    const api = readNativeApi();
-    if (!api) return;
-
-    const nextContext = deriveDesktopContextFromRoute(pathname, projects, threads);
-    const serialized = JSON.stringify(nextContext);
-    if (serialized === lastSerializedContextRef.current) {
+    if (!serverConfig) {
       return;
     }
 
-    const timeoutId = window.setTimeout(() => {
-      lastSerializedContextRef.current = serialized;
-      void api.server.setDesktopContext(nextContext).catch(() => undefined);
-    }, 120);
+    updatePrimaryEnvironmentDescriptor(serverConfig.environment);
+    setActiveEnvironmentId(serverConfig.environment.environmentId);
+  }, [serverConfig, setActiveEnvironmentId]);
 
+  useEffect(() => {
+    disposedRef.current = false;
     return () => {
-      window.clearTimeout(timeoutId);
+      disposedRef.current = true;
     };
-  }, [pathname, projects, threads]);
+  }, []);
+
+  useServerWelcomeSubscription(handleWelcome);
+  useServerConfigUpdatedSubscription(handleServerConfigUpdated);
 
   return null;
 }

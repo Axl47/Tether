@@ -1,27 +1,32 @@
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import {
   EventId,
   IsoDateTime,
+  NonNegativeInt,
   ProviderItemId,
+  PositiveInt,
   RuntimeItemId,
   RuntimeRequestId,
   RuntimeTaskId,
   ThreadId,
   TrimmedNonEmptyString,
   TurnId,
-} from "./baseSchemas";
-import { ChatAttachment, ProviderKind } from "./orchestration";
+} from "./baseSchemas.ts";
+import { ChatAttachment, ProviderKind } from "./orchestration.ts";
 
 const TrimmedNonEmptyStringSchema = TrimmedNonEmptyString;
 const UnknownRecordSchema = Schema.Record(Schema.String, Schema.Unknown);
 
-const RuntimeEventRawSource = Schema.Literals([
-  "codex.app-server.notification",
-  "codex.app-server.request",
-  "codex.eventmsg",
-  "claude.sdk.message",
-  "claude.sdk.permission",
-  "codex.sdk.thread-event",
+const RuntimeEventRawSource = Schema.Union([
+  Schema.Literal("codex.app-server.notification"),
+  Schema.Literal("codex.app-server.request"),
+  Schema.Literal("codex.eventmsg"),
+  Schema.Literal("claude.sdk.message"),
+  Schema.Literal("claude.sdk.permission"),
+  Schema.Literal("codex.sdk.thread-event"),
+  Schema.Literal("opencode.sdk.event"),
+  Schema.Literal("acp.jsonrpc"),
+  Schema.TemplateLiteral(["acp.", Schema.String, ".extension"]),
 ]);
 export type RuntimeEventRawSource = typeof RuntimeEventRawSource.Type;
 
@@ -294,8 +299,27 @@ const ThreadMetadataUpdatedPayload = Schema.Struct({
 });
 export type ThreadMetadataUpdatedPayload = typeof ThreadMetadataUpdatedPayload.Type;
 
+export const ThreadTokenUsageSnapshot = Schema.Struct({
+  usedTokens: NonNegativeInt,
+  totalProcessedTokens: Schema.optional(NonNegativeInt),
+  maxTokens: Schema.optional(PositiveInt),
+  inputTokens: Schema.optional(NonNegativeInt),
+  cachedInputTokens: Schema.optional(NonNegativeInt),
+  outputTokens: Schema.optional(NonNegativeInt),
+  reasoningOutputTokens: Schema.optional(NonNegativeInt),
+  lastUsedTokens: Schema.optional(NonNegativeInt),
+  lastInputTokens: Schema.optional(NonNegativeInt),
+  lastCachedInputTokens: Schema.optional(NonNegativeInt),
+  lastOutputTokens: Schema.optional(NonNegativeInt),
+  lastReasoningOutputTokens: Schema.optional(NonNegativeInt),
+  toolUses: Schema.optional(NonNegativeInt),
+  durationMs: Schema.optional(NonNegativeInt),
+  compactsAutomatically: Schema.optional(Schema.Boolean),
+});
+export type ThreadTokenUsageSnapshot = typeof ThreadTokenUsageSnapshot.Type;
+
 const ThreadTokenUsageUpdatedPayload = Schema.Struct({
-  usage: Schema.Unknown,
+  usage: ThreadTokenUsageSnapshot,
 });
 export type ThreadTokenUsageUpdatedPayload = typeof ThreadTokenUsageUpdatedPayload.Type;
 
@@ -415,6 +439,9 @@ export const UserInputQuestion = Schema.Struct({
   header: TrimmedNonEmptyStringSchema,
   question: TrimmedNonEmptyStringSchema,
   options: Schema.Array(UserInputQuestionOption),
+  multiSelect: Schema.optional(Schema.Boolean).pipe(
+    Schema.withConstructorDefault(Effect.succeed(false)),
+  ),
 });
 export type UserInputQuestion = typeof UserInputQuestion.Type;
 

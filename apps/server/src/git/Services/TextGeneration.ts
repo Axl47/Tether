@@ -6,11 +6,14 @@
  *
  * @module TextGeneration
  */
-import { ServiceMap } from "effect";
+import { Context } from "effect";
 import type { Effect } from "effect";
-import type { ChatAttachment } from "@t3tools/contracts";
+import type { ChatAttachment, ModelSelection } from "@t3tools/contracts";
 
-import type { TextGenerationError } from "../Errors.ts";
+import type { TextGenerationError } from "@t3tools/contracts";
+
+/** Providers that support git text generation (commit messages, PR content, branch names). */
+export type TextGenerationProvider = "codex" | "claudeAgent" | "cursor" | "opencode";
 
 export interface CommitMessageGenerationInput {
   cwd: string;
@@ -19,8 +22,8 @@ export interface CommitMessageGenerationInput {
   stagedPatch: string;
   /** When true, the model also returns a semantic branch name for the change. */
   includeBranch?: boolean;
-  /** Model to use for generation. Defaults to gpt-5.4-mini if not specified. */
-  model?: string;
+  /** What model and provider to use for generation. */
+  modelSelection: ModelSelection;
 }
 
 export interface CommitMessageGenerationResult {
@@ -37,8 +40,8 @@ export interface PrContentGenerationInput {
   commitSummary: string;
   diffSummary: string;
   diffPatch: string;
-  /** Model to use for generation. Defaults to gpt-5.4-mini if not specified. */
-  model?: string;
+  /** What model and provider to use for generation. */
+  modelSelection: ModelSelection;
 }
 
 export interface PrContentGenerationResult {
@@ -50,8 +53,8 @@ export interface BranchNameGenerationInput {
   cwd: string;
   message: string;
   attachments?: ReadonlyArray<ChatAttachment> | undefined;
-  /** Model to use for generation. Defaults to gpt-5.4-mini if not specified. */
-  model?: string;
+  /** What model and provider to use for generation. */
+  modelSelection: ModelSelection;
 }
 
 export interface BranchNameGenerationResult {
@@ -60,9 +63,10 @@ export interface BranchNameGenerationResult {
 
 export interface ThreadTitleGenerationInput {
   cwd: string;
-  originalMessage: string;
-  recentMessages: ReadonlyArray<string>;
-  currentTitle?: string | undefined;
+  message: string;
+  attachments?: ReadonlyArray<ChatAttachment> | undefined;
+  /** What model and provider to use for generation. */
+  modelSelection: ModelSelection;
 }
 
 export interface ThreadTitleGenerationResult {
@@ -104,7 +108,7 @@ export interface TextGenerationShape {
   ) => Effect.Effect<BranchNameGenerationResult, TextGenerationError>;
 
   /**
-   * Generate a short thread title from user message context.
+   * Generate a concise thread title from a user's first message.
    */
   readonly generateThreadTitle: (
     input: ThreadTitleGenerationInput,
@@ -114,6 +118,6 @@ export interface TextGenerationShape {
 /**
  * TextGeneration - Service tag for commit and PR text generation.
  */
-export class TextGeneration extends ServiceMap.Service<TextGeneration, TextGenerationShape>()(
+export class TextGeneration extends Context.Service<TextGeneration, TextGenerationShape>()(
   "t3/git/Services/TextGeneration",
 ) {}

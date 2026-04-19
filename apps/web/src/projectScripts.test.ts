@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
+import {
+  projectScriptCwd,
+  projectScriptRuntimeEnv,
+  setupProjectScript,
+} from "@t3tools/shared/projectScripts";
 
 import {
   commandForProjectScript,
   nextProjectScriptId,
   primaryProjectScript,
-  projectScriptRuntimeEnv,
   projectScriptIdFromCommand,
-  setupProjectScript,
 } from "./projectScripts";
 import {
   buildProjectScriptLaunchPlan,
@@ -292,5 +295,20 @@ describe("projectScripts helpers", () => {
       message:
         "This action needs 2 terminal tabs, but the thread is limited to 4. Close another terminal and try again.",
     });
+  });
+
+  it("prefers the worktree path for script cwd resolution", () => {
+    expect(
+      projectScriptCwd({
+        project: { cwd: "/repo" },
+        worktreePath: "/repo/worktree-a",
+      }),
+    ).toBe("/repo/worktree-a");
+    expect(
+      projectScriptCwd({
+        project: { cwd: "/repo" },
+        worktreePath: null,
+      }),
+    ).toBe("/repo");
   });
 });

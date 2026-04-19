@@ -19,6 +19,5 @@ export function isScrollContainerNearBottom(
     return true;
   }
 
-  const distanceFromBottom = scrollHeight - clientHeight - scrollTop;
-  return distanceFromBottom <= threshold;
+  return scrollHeight - clientHeight - scrollTop <= threshold;
 }

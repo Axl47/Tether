@@ -288,7 +288,7 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
 
         state.turnCount += 1;
         const turnCount = state.turnCount;
-        const turnId = TurnId.makeUnsafe(`turn-${turnCount}`);
+        const turnId = TurnId.make(`turn-${turnCount}`);
 
         const response = state.queuedResponses.shift();
         if (!response) {
@@ -306,7 +306,7 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
             ...(fixtureEvent as Record<string, unknown>),
             eventId: randomUUID(),
             provider,
-            sessionId: RuntimeSessionId.makeUnsafe(String(input.threadId)),
+            sessionId: RuntimeSessionId.make(String(input.threadId)),
             createdAt: nowIso(),
           };
           rawEvent.threadId = state.snapshot.threadId;
@@ -362,7 +362,7 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
         if (deferredTurnCompletedEvents.length === 0) {
           yield* emit({
             type: "turn.completed",
-            eventId: EventId.makeUnsafe(randomUUID()),
+            eventId: EventId.make(randomUUID()),
             provider,
             createdAt: nowIso(),
             threadId: state.snapshot.threadId,

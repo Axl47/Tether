@@ -1,12 +1,18 @@
 ---
 created_at: 2026-03-20T18:01
-updated_at: 2026-04-10T16:28
+updated_at: 2026-04-19T19:21Z
 ---
 # Remote Access Setup
 
-Use this when you want to open Tether from another device (phone, tablet, another laptop).
+Use this when you want to open Tether from another device such as a phone, tablet, or separate desktop app.
 
-## CLI ↔ Env option map
+## Recommended Setup
+
+Use a trusted private network that meshes your devices together, such as a tailnet. That gives you:
+
+- a stable address to connect to
+- transport security at the network layer
+- less exposure than opening the server to the public internet
 
 The Tether CLI accepts the following configuration options, available either as CLI flags or environment variables:
 
@@ -20,50 +26,76 @@ The Tether CLI accepts the following configuration options, available either as 
 | `--no-browser`          | `TETHER_NO_BROWSER`   | Disable auto-open browser.         |
 | `--auth-token <token>`  | `TETHER_AUTH_TOKEN`   | WebSocket auth token.              |
 
-> TIP: Use the `--help` flag to see all available options and their descriptions.
+## Enabling Network Access
 
-## Security First
+There are two ways to expose your server for remote connections: from the desktop app or from the CLI.
 
-- Always set `--auth-token` before exposing the server outside localhost.
-- Treat the token like a password.
-- Prefer binding to trusted interfaces (LAN IP or Tailnet IP) instead of opening all interfaces unless needed.
+### Option 1: Desktop App
 
-## 1) Build + run server for remote access
+If you are already running the desktop app and want to make it reachable from other devices:
 
-Remote access should use the built web app (not local Vite redirect mode).
+1. Open **Settings** → **Connections**.
+2. Under **Manage Local Backend**, toggle **Network access** on. This will restart the app and run the backend on all network interfaces.
+3. The settings panel will show the address the server is reachable at (for example `http://192.168.x.y:3773`).
+4. Use **Create Link** to generate a pairing link you can share with another device.
 
-```bash
-bun run build
-TOKEN="$(openssl rand -hex 24)"
-bun run --cwd apps/server start -- --host 0.0.0.0 --port 3773 --auth-token "$TOKEN" --no-browser
-```
+### Option 2: Headless Server (CLI)
 
-Then open on your phone:
+Use this when you want to run the server without a GUI, for example on a remote machine over SSH.
 
-`http://<your-machine-ip>:3773`
-
-Example:
-
-`http://192.168.1.42:3773`
-
-Notes:
-
-- `--host 0.0.0.0` listens on all IPv4 interfaces.
-- `--no-browser` prevents local auto-open, which is usually better for headless/remote sessions.
-- Ensure your OS firewall allows inbound TCP on the selected port.
-
-## 2) Tailnet / Tailscale access
-
-If you use Tailscale, you can bind directly to your Tailnet address.
+Run the server with `t3 serve`.
 
 ```bash
-TAILNET_IP="$(tailscale ip -4)"
-TOKEN="$(openssl rand -hex 24)"
-bun run --cwd apps/server start -- --host "$(tailscale ip -4)" --port 3773 --auth-token "$TOKEN" --no-browser
+npx t3 serve --host "$(tailscale ip -4)"
 ```
 
-Open from any device in your tailnet:
+`t3 serve` starts the server without opening a browser and prints:
 
-`http://<tailnet-ip>:3773`
+- a connection string
+- a pairing token
+- a pairing URL
+- a QR code for the pairing URL
 
-You can also bind `--host 0.0.0.0` and connect through the Tailnet IP, but binding directly to the Tailnet IP limits exposure.
+From there, connect from another device in either of these ways:
+
+- scan the QR code on your phone
+- in the desktop app, enter the full pairing URL
+- in the desktop app, enter the host and token separately
+
+Use `t3 serve --help` for the full flag reference. It supports the same general startup options as the normal server command, including an optional `cwd` argument.
+
+> Note
+> The GUIs do not currently support adding projects on remote environments.
+> For now, use `t3 project ...` on the server machine instead.
+> Full GUI support for remote project management is coming soon.
+
+## How Pairing Works
+
+The remote device does not need a long-lived secret up front.
+
+Instead:
+
+1. `t3 serve` issues a one-time owner pairing token.
+2. The remote device exchanges that token with the server.
+3. The server creates an authenticated session for that device.
+
+After pairing, future access is session-based. You do not need to keep reusing the original token unless you are pairing a new device.
+
+## Managing Access Later
+
+Use `t3 auth` to manage access after the initial pairing flow.
+
+Typical uses:
+
+- issue additional pairing credentials
+- inspect active sessions
+- revoke old pairing links or sessions
+
+Use `t3 auth --help` and the nested subcommand help pages for the full reference.
+
+## Security Notes
+
+- Treat pairing URLs and pairing tokens like passwords.
+- Prefer binding `--host` to a trusted private address, such as a Tailnet IP, instead of exposing the server broadly.
+- Anyone with a valid pairing credential can create a session until that credential expires or is revoked.
+- Use `t3 auth` to revoke credentials or sessions you no longer trust.
