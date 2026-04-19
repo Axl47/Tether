@@ -1,3 +1,7 @@
+---
+created_at: 2026-03-20T18:04
+updated_at: 2026-04-10T16:28
+---
 # Keybindings
 
 Tether reads keybindings from:

@@ -1,3 +1,7 @@
+---
+created_at: 2026-03-20T18:01
+updated_at: 2026-04-10T16:28
+---
 # Scripts
 
 - `bun run dev` — Starts contracts, server, and web in `turbo watch` mode.

@@ -1,3 +1,7 @@
+---
+created_at: 2026-03-20T18:01
+updated_at: 2026-04-10T16:28
+---
 # Tether
 
 Tether is a minimal GUI for coding agents that has grown into a more capable, reliability-first multi-provider workbench. It is still Codex-first, but this fork also adds Claude Code and Gemini provider support, stronger thread/session UX, and better remote-browser ergonomics for everyday use across multiple machines.

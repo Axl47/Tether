@@ -1,3 +1,7 @@
+---
+created_at: 2026-03-20T16:42
+updated_at: 2026-04-10T16:28
+---
 # Provider architecture
 
 The web app communicates with the server via WebSocket using a simple JSON-RPC-style protocol:

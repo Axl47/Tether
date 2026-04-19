@@ -1,3 +1,7 @@
+---
+created_at: 2026-03-20T16:42
+updated_at: 2026-04-10T16:28
+---
 # Workspace layout
 
 - `/apps/server`: Node.js WebSocket server. Wraps Codex app-server, serves the built web app, and opens the browser on start.

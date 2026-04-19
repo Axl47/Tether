@@ -1,3 +1,7 @@
+---
+created_at: 2026-03-20T18:01
+updated_at: 2026-04-10T16:28
+---
 # Runtime modes
 
 Tether has a global runtime mode switch in the chat toolbar:
