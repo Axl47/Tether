@@ -38,6 +38,17 @@ useComposerDraftStore.persist.setOptions({
   storage: createJSONStorage(() => localStorageMock),
 });
 
+function resetComposerDraftStore(): void {
+  useComposerDraftStore.setState({
+    draftsByThreadKey: {},
+    draftThreadsByThreadKey: {},
+    logicalProjectDraftThreadKeyByLogicalProjectKey: {},
+    stickyModelSelectionByProvider: {},
+    stickyActiveProvider: null,
+    queuedMessagesByThreadId: {},
+  });
+}
+
 function makeImage(input: {
   id: string;
   previewUrl: string;
@@ -538,6 +549,56 @@ describe("composerDraftStore project draft thread mapping", () => {
       worktreePath: null,
       envMode: "worktree",
     });
+  });
+});
+
+describe("composerDraftStore derived snapshot stability", () => {
+  const projectId = ProjectId.makeUnsafe("project-stable");
+  const threadId = ThreadId.makeUnsafe("thread-stable");
+
+  beforeEach(() => {
+    resetComposerDraftStore();
+  });
+
+  it("returns stable draft objects across repeated reads", () => {
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(projectId, DraftId.make(threadId));
+    store.setPrompt(threadId, "hello");
+
+    const firstDraft = useComposerDraftStore.getState().getComposerDraft(threadId);
+    const secondDraft = useComposerDraftStore.getState().getComposerDraft(threadId);
+    const firstDraftsByThreadId = useComposerDraftStore.getState().draftsByThreadId;
+    const secondDraftsByThreadId = useComposerDraftStore.getState().draftsByThreadId;
+
+    expect(firstDraft).not.toBeNull();
+    expect(secondDraft).toBe(firstDraft);
+    expect(secondDraftsByThreadId).toBe(firstDraftsByThreadId);
+    expect(secondDraftsByThreadId[threadId]).toBe(firstDraftsByThreadId[threadId]);
+  });
+
+  it("reuses derived id-indexed maps across unrelated store updates", () => {
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(projectId, DraftId.make(threadId));
+    store.setPrompt(threadId, "hello");
+
+    const firstDraftsByThreadId = useComposerDraftStore.getState().draftsByThreadId;
+    const firstDraftThreadsByThreadId = useComposerDraftStore.getState().draftThreadsByThreadId;
+    const firstProjectDraftThreadIdByProjectId =
+      useComposerDraftStore.getState().projectDraftThreadIdByProjectId;
+
+    useComposerDraftStore.setState({
+      queuedMessagesByThreadId: {
+        [threadId]: [],
+      },
+    });
+
+    expect(useComposerDraftStore.getState().draftsByThreadId).toBe(firstDraftsByThreadId);
+    expect(useComposerDraftStore.getState().draftThreadsByThreadId).toBe(
+      firstDraftThreadsByThreadId,
+    );
+    expect(useComposerDraftStore.getState().projectDraftThreadIdByProjectId).toBe(
+      firstProjectDraftThreadIdByProjectId,
+    );
   });
 });
 

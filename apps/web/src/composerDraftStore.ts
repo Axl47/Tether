@@ -549,19 +549,38 @@ function getCodexCompatibilityState(
   };
 }
 
+const legacyComposerDraftAliasCache = new WeakMap<
+  ComposerThreadDraftState,
+  ComposerThreadDraftState
+>();
+
 function withLegacyComposerDraftAliases(draft: ComposerThreadDraftState): ComposerThreadDraftState {
+  const cachedDraft = legacyComposerDraftAliasCache.get(draft);
+  if (cachedDraft) {
+    return cachedDraft;
+  }
+
   const activeProvider = draft.activeProvider;
   const activeSelection = activeProvider ? draft.modelSelectionByProvider[activeProvider] : null;
   const codexSelection =
     draft.modelSelectionByProvider.codex ?? (activeProvider === "codex" ? activeSelection : null);
   const { effort, codexFastMode } = getCodexCompatibilityState(codexSelection);
-  return {
-    ...draft,
-    provider: activeProvider ?? null,
-    model: activeSelection?.model ?? null,
-    effort: effort ?? null,
-    codexFastMode: codexFastMode ?? false,
-  };
+  const nextDraft =
+    draft.provider === (activeProvider ?? null) &&
+    draft.model === (activeSelection?.model ?? null) &&
+    draft.effort === (effort ?? null) &&
+    draft.codexFastMode === (codexFastMode ?? false)
+      ? draft
+      : {
+          ...draft,
+          provider: activeProvider ?? null,
+          model: activeSelection?.model ?? null,
+          effort: effort ?? null,
+          codexFastMode: codexFastMode ?? false,
+        };
+
+  legacyComposerDraftAliasCache.set(draft, nextDraft);
+  return nextDraft;
 }
 
 function withLegacyQueuedMessageAliases(
@@ -1224,9 +1243,22 @@ function getComposerDraftState(
   return draft ? withLegacyComposerDraftAliases(draft) : null;
 }
 
+let lastDraftsByThreadIdBuild: {
+  draftsByThreadKey: ComposerDraftStoreState["draftsByThreadKey"];
+  draftThreadsByThreadKey: ComposerDraftStoreState["draftThreadsByThreadKey"];
+  value: Record<ThreadId, ComposerThreadDraftState>;
+} | null = null;
+
 function buildDraftsByThreadId(
   state: Pick<ComposerDraftStoreState, "draftsByThreadKey" | "draftThreadsByThreadKey">,
 ): Record<ThreadId, ComposerThreadDraftState> {
+  if (
+    lastDraftsByThreadIdBuild?.draftsByThreadKey === state.draftsByThreadKey &&
+    lastDraftsByThreadIdBuild.draftThreadsByThreadKey === state.draftThreadsByThreadKey
+  ) {
+    return lastDraftsByThreadIdBuild.value;
+  }
+
   const draftsByThreadId: Record<ThreadId, ComposerThreadDraftState> = {};
   for (const [threadKey, draft] of Object.entries(state.draftsByThreadKey)) {
     const draftThread = state.draftThreadsByThreadKey[threadKey];
@@ -1241,29 +1273,66 @@ function buildDraftsByThreadId(
     }
     draftsByThreadId[threadKey as ThreadId] = withLegacyComposerDraftAliases(draft);
   }
+
+  lastDraftsByThreadIdBuild = {
+    draftsByThreadKey: state.draftsByThreadKey,
+    draftThreadsByThreadKey: state.draftThreadsByThreadKey,
+    value: draftsByThreadId,
+  };
   return draftsByThreadId;
 }
+
+let lastDraftThreadsByThreadIdBuild: {
+  draftThreadsByThreadKey: ComposerDraftStoreState["draftThreadsByThreadKey"];
+  value: Record<ThreadId, DraftThreadState>;
+} | null = null;
 
 function buildDraftThreadsByThreadId(
   state: Pick<ComposerDraftStoreState, "draftThreadsByThreadKey">,
 ): Record<ThreadId, DraftThreadState> {
-  return Object.fromEntries(
+  if (lastDraftThreadsByThreadIdBuild?.draftThreadsByThreadKey === state.draftThreadsByThreadKey) {
+    return lastDraftThreadsByThreadIdBuild.value;
+  }
+
+  const draftThreadsByThreadId = Object.fromEntries(
     Object.values(state.draftThreadsByThreadKey).map((draftThread) => [
       draftThread.threadId,
       draftThread,
     ]),
   ) as Record<ThreadId, DraftThreadState>;
+  lastDraftThreadsByThreadIdBuild = {
+    draftThreadsByThreadKey: state.draftThreadsByThreadKey,
+    value: draftThreadsByThreadId,
+  };
+  return draftThreadsByThreadId;
 }
+
+let lastProjectDraftThreadIdByProjectIdBuild: {
+  draftThreadsByThreadKey: ComposerDraftStoreState["draftThreadsByThreadKey"];
+  value: Record<ProjectId, ThreadId>;
+} | null = null;
 
 function buildProjectDraftThreadIdByProjectId(
   state: Pick<ComposerDraftStoreState, "draftThreadsByThreadKey">,
 ): Record<ProjectId, ThreadId> {
-  return Object.fromEntries(
+  if (
+    lastProjectDraftThreadIdByProjectIdBuild?.draftThreadsByThreadKey ===
+    state.draftThreadsByThreadKey
+  ) {
+    return lastProjectDraftThreadIdByProjectIdBuild.value;
+  }
+
+  const projectDraftThreadIdByProjectId = Object.fromEntries(
     Object.values(state.draftThreadsByThreadKey).map((draftThread) => [
       draftThread.projectId,
       draftThread.threadId,
     ]),
   ) as Record<ProjectId, ThreadId>;
+  lastProjectDraftThreadIdByProjectIdBuild = {
+    draftThreadsByThreadKey: state.draftThreadsByThreadKey,
+    value: projectDraftThreadIdByProjectId,
+  };
+  return projectDraftThreadIdByProjectId;
 }
 
 function isComposerThreadKeyInUse(mappings: Record<string, string>, threadKey: string): boolean {

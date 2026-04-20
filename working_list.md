@@ -1,6 +1,6 @@
 ---
 created_at: 2026-04-19T19:21Z
-updated_at: 2026-04-20T05:28Z
+updated_at: 2026-04-20T09:55Z
 ---
 
 # Working List
@@ -8,11 +8,10 @@ updated_at: 2026-04-20T05:28Z
 ## Pending
 
 - [ ] Re-run the server integration overlap suites in a Vitest environment that uses Node `>=22.16` so the sqlite-backed tests can execute past startup.
-- [ ] If the React maximum update depth loop still reproduces after the controlled-open guard fix, capture a live browser repro with component-level instrumentation and isolate the next external-store source.
 
 ## In Progress
 
-- [~] Prepare user verification for the follow-up controlled-open guard fix
+- [~] Prepare user verification for the composer draft selector stabilization follow-up
 
 ## Done
 
@@ -31,3 +30,8 @@ updated_at: 2026-04-20T05:28Z
 - [x] Fix the provider cache atomic temp-file collision and validate desktop startup no longer shows the rename error
 - [x] Harden root-level shell state subscriptions against several no-op external-store writes in commit `8116cf32`
 - [x] Trace the render loop to controlled open/close handlers in the merged diff panel shell and add no-op guards plus regression coverage
+- [x] Isolate the remaining render loop to `Sidebar` consuming unstable composer draft store snapshots
+- [x] Stabilize composer draft legacy aliasing plus derived id-indexed snapshot builders in `composerDraftStore`
+- [x] Add regression coverage for repeated and unrelated-read snapshot stability in `composerDraftStore.test.ts`
+- [x] Re-run the stubbed browser repro and confirm the `Sidebar` loop no longer appears
+- [x] Run `bun fmt`, `bun -b lint`, and `bun typecheck`
