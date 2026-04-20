@@ -1,6 +1,6 @@
 ---
 created_at: 2026-04-19T19:21Z
-updated_at: 2026-04-20T01:14Z
+updated_at: 2026-04-20T01:15Z
 ---
 
 # Working List
@@ -8,11 +8,10 @@ updated_at: 2026-04-20T01:14Z
 ## Pending
 
 - [ ] Re-run the server integration overlap suites in a Vitest environment that uses Node `>=22.16` so the sqlite-backed tests can execute past startup.
-- [ ] Capture the current stabilization pass in a follow-up commit on `Sync-upstream`.
 
 ## In Progress
 
-- [~] Package the post-merge stabilization changes for handoff on top of committed merge snapshot `7e6b2bc1`
+- [~] Prepare manual spot-check verification for the upstream-first merged branch
 
 ## Done
 
@@ -27,3 +26,4 @@ updated_at: 2026-04-20T01:14Z
 - [x] Run targeted overlap suites for server/web units; record the Node `20.19.4` sqlite blocker for server integration suites
 - [x] Run `bun fmt`, `bun -b lint`, and `bun typecheck`
 - [x] Finalize ExecPlan and working list outcomes
+- [x] Capture the post-merge stabilization pass in follow-up commit `316196ef`

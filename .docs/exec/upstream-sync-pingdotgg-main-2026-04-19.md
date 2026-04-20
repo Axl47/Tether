@@ -18,6 +18,7 @@ After this work, the local `Sync-upstream` branch will contain the current upstr
 - [x] (2026-04-20 01:10Z) Resolve semantic overlap while preserving Tether-specific behavior on top of the newer upstream baseline across server, web, contracts, desktop wiring, and docs.
 - [x] (2026-04-20 01:10Z) Run targeted overlap tests plus `bun fmt`, `bun lint`, and `bun typecheck`, recording the server integration-suite environment blocker separately from code regressions.
 - [x] (2026-04-20 01:14Z) Update this plan with the final conflict notes, validation evidence, and retrospective.
+- [x] (2026-04-20 01:14Z) Capture the post-merge stabilization pass in follow-up commit `316196ef` (`fix(sync): stabilize upstream-first merge against pingdotgg main`).
 
 ## Surprises & Discoveries
 
@@ -62,6 +63,8 @@ The upstream-first merge is now stabilized on top of committed merge snapshot `7
 - Reconciled test fixtures and harness layers with the merged orchestration and provider shapes, including thread snapshot fields such as `archivedAt`, `contextWindow`, and `lastAutoRenameUserMessageId`.
 - Reworked `apps/server/src/persistence/NodeSqliteClient.ts` to load `node:sqlite` via `createRequire()` at runtime so Vitest no longer fails during module translation.
 - Kept Tether-specific docs/front matter and local `rtk` command guidance intact while accepting upstream baseline changes in server, desktop, web, and release surfaces.
+
+The stabilized handoff is now committed as `316196ef` (`fix(sync): stabilize upstream-first merge against pingdotgg main`) on top of the merge snapshot, so the branch state is reproducible from git rather than only from the working tree.
 
 Validation evidence:
 
