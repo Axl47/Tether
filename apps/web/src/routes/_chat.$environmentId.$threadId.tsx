@@ -17,6 +17,7 @@ import {
   stripDiffSearchParams,
 } from "../diffRouteSearch";
 import { useMediaQuery } from "../hooks/useMediaQuery";
+import { shouldApplyControlledOpenChange } from "../lib/controlledOpenState";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import { selectEnvironmentState, selectThreadExistsByRef, useStore } from "../store";
 import { createThreadSelectorByRef } from "../storeSelectors";
@@ -57,13 +58,16 @@ const DiffPanelInlineSidebar = (props: {
   const { diffOpen, onCloseDiff, onOpenDiff, renderDiffContent } = props;
   const onOpenChange = useCallback(
     (open: boolean) => {
+      if (!shouldApplyControlledOpenChange(diffOpen, open)) {
+        return;
+      }
       if (open) {
         onOpenDiff();
         return;
       }
       onCloseDiff();
     },
-    [onCloseDiff, onOpenDiff],
+    [diffOpen, onCloseDiff, onOpenDiff],
   );
   const shouldAcceptInlineSidebarWidth = useCallback(
     ({ nextWidth, wrapper }: { nextWidth: number; wrapper: HTMLElement }) => {
@@ -190,7 +194,7 @@ function ChatThreadRouteView() {
     });
   }, [currentThreadKey]);
   const closeDiff = useCallback(() => {
-    if (!threadRef) {
+    if (!threadRef || !diffOpen) {
       return;
     }
     void navigate({
@@ -198,9 +202,9 @@ function ChatThreadRouteView() {
       params: buildThreadRouteParams(threadRef),
       search: () => ({}),
     });
-  }, [navigate, threadRef]);
+  }, [diffOpen, navigate, threadRef]);
   const openDiff = useCallback(() => {
-    if (!threadRef) {
+    if (!threadRef || diffOpen) {
       return;
     }
     markDiffOpened();
@@ -212,7 +216,7 @@ function ChatThreadRouteView() {
         return { ...rest, diff: "1" };
       },
     });
-  }, [markDiffOpened, navigate, threadRef]);
+  }, [diffOpen, markDiffOpened, navigate, threadRef]);
 
   useEffect(() => {
     if (!threadRef || !bootstrapComplete) {
