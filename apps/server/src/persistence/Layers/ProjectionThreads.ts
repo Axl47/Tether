@@ -1,6 +1,7 @@
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 import { Effect, Layer, Schema, Struct } from "effect";
+import { ModelSelection } from "@t3tools/contracts";
 
 import { toPersistenceDecodeError, toPersistenceSqlError } from "../Errors.ts";
 import {
@@ -14,6 +15,7 @@ import {
 
 const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
   Struct.assign({
+    modelSelection: Schema.fromJsonString(ModelSelection),
     contextWindow: Schema.NullOr(Schema.fromJsonString(ProjectionThread.fields.contextWindow)),
   }),
 );
@@ -36,7 +38,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           thread_id,
           project_id,
           title,
-          model,
+          model_selection_json,
           runtime_mode,
           interaction_mode,
           branch,
@@ -46,13 +48,18 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           last_autorename_user_message_id,
           created_at,
           updated_at,
+          archived_at,
+          latest_user_message_at,
+          pending_approval_count,
+          pending_user_input_count,
+          has_actionable_proposed_plan,
           deleted_at
         )
         VALUES (
           ${row.threadId},
           ${row.projectId},
           ${row.title},
-          ${row.model},
+          ${JSON.stringify(row.modelSelection)},
           ${row.runtimeMode},
           ${row.interactionMode},
           ${row.branch},
@@ -62,13 +69,18 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           ${row.lastAutoRenameUserMessageId},
           ${row.createdAt},
           ${row.updatedAt},
+          ${row.archivedAt},
+          ${row.latestUserMessageAt},
+          ${row.pendingApprovalCount},
+          ${row.pendingUserInputCount},
+          ${row.hasActionableProposedPlan},
           ${row.deletedAt}
         )
         ON CONFLICT (thread_id)
         DO UPDATE SET
           project_id = excluded.project_id,
           title = excluded.title,
-          model = excluded.model,
+          model_selection_json = excluded.model_selection_json,
           runtime_mode = excluded.runtime_mode,
           interaction_mode = excluded.interaction_mode,
           branch = excluded.branch,
@@ -78,6 +90,11 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           last_autorename_user_message_id = excluded.last_autorename_user_message_id,
           created_at = excluded.created_at,
           updated_at = excluded.updated_at,
+          archived_at = excluded.archived_at,
+          latest_user_message_at = excluded.latest_user_message_at,
+          pending_approval_count = excluded.pending_approval_count,
+          pending_user_input_count = excluded.pending_user_input_count,
+          has_actionable_proposed_plan = excluded.has_actionable_proposed_plan,
           deleted_at = excluded.deleted_at
       `,
   });
@@ -91,7 +108,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           thread_id AS "threadId",
           project_id AS "projectId",
           title,
-          model,
+          model_selection_json AS "modelSelection",
           runtime_mode AS "runtimeMode",
           interaction_mode AS "interactionMode",
           branch,
@@ -101,6 +118,11 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           last_autorename_user_message_id AS "lastAutoRenameUserMessageId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
+          archived_at AS "archivedAt",
+          latest_user_message_at AS "latestUserMessageAt",
+          pending_approval_count AS "pendingApprovalCount",
+          pending_user_input_count AS "pendingUserInputCount",
+          has_actionable_proposed_plan AS "hasActionableProposedPlan",
           deleted_at AS "deletedAt"
         FROM projection_threads
         WHERE thread_id = ${threadId}
@@ -116,7 +138,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           thread_id AS "threadId",
           project_id AS "projectId",
           title,
-          model,
+          model_selection_json AS "modelSelection",
           runtime_mode AS "runtimeMode",
           interaction_mode AS "interactionMode",
           branch,
@@ -126,6 +148,11 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           last_autorename_user_message_id AS "lastAutoRenameUserMessageId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
+          archived_at AS "archivedAt",
+          latest_user_message_at AS "latestUserMessageAt",
+          pending_approval_count AS "pendingApprovalCount",
+          pending_user_input_count AS "pendingUserInputCount",
+          has_actionable_proposed_plan AS "hasActionableProposedPlan",
           deleted_at AS "deletedAt"
         FROM projection_threads
         WHERE project_id = ${projectId}

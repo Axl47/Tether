@@ -2,6 +2,7 @@
 created_at: 2026-03-20T18:01
 updated_at: 2026-04-19T19:21Z
 ---
+
 # Remote Access Setup
 
 Use this when you want to open Tether from another device such as a phone, tablet, or separate desktop app.

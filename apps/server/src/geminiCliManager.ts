@@ -12,7 +12,7 @@ import {
   buildPopupSafeEnv,
   resolveGeminiAcpModulePath,
   resolveGeminiCliLaunchSpec,
-} from "./cliEnvironment";
+} from "./cliEnvironment.ts";
 
 export interface GeminiStreamEvent {
   readonly type: "init" | "message" | "tool_use" | "tool_result" | "error" | "result";

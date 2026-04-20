@@ -13,14 +13,14 @@ export interface PromptImageAttachmentData {
 
 export function readPromptImageAttachment(input: {
   readonly attachment: ChatAttachment;
-  readonly stateDir: string;
+  readonly attachmentsDir: string;
   readonly provider: ProviderKind;
   readonly method: string;
   readonly fileSystem: FileSystem.FileSystem;
 }): Effect.Effect<PromptImageAttachmentData, ProviderAdapterError> {
   return Effect.gen(function* () {
     const attachmentPath = resolveAttachmentPath({
-      stateDir: input.stateDir,
+      attachmentsDir: input.attachmentsDir,
       attachment: input.attachment,
     });
     if (!attachmentPath) {

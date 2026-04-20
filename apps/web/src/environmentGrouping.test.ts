@@ -212,6 +212,9 @@ function makeFixtureState(): AppState {
   };
 
   return {
+    projects: [],
+    threads: [],
+    threadsHydrated: true,
     activeEnvironmentId: primaryEnvId,
     environmentStateById: {
       [primaryEnvId]: primaryEnvState,

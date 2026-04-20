@@ -40,6 +40,10 @@ export function useThreadActions() {
   const handleNewThreadRef = useRef(handleNewThread);
   handleNewThreadRef.current = handleNewThread;
   const queryClient = useQueryClient();
+  const resolveSidebarThreadSort = useCallback(
+    () => (sidebarThreadSortOrder === "created_at" ? "created" : "activity"),
+    [sidebarThreadSortOrder],
+  );
 
   const resolveThreadTarget = useCallback((target: ScopedThreadRef) => {
     const state = useStore.getState();
@@ -168,7 +172,7 @@ export function useThreadActions() {
         threads,
         deletedThreadId: threadRef.threadId,
         deletedThreadIds,
-        sortOrder: sidebarThreadSortOrder,
+        sortOrder: resolveSidebarThreadSort(),
       });
       await api.orchestration.dispatchCommand({
         type: "thread.delete",
@@ -240,7 +244,7 @@ export function useThreadActions() {
       router,
       queryClient,
       resolveThreadTarget,
-      sidebarThreadSortOrder,
+      resolveSidebarThreadSort,
     ],
   );
 

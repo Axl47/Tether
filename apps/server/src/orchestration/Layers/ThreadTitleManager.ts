@@ -1,5 +1,6 @@
 import {
   CommandId,
+  DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
   type MessageId,
   type OrchestrationAutorenameProjectThreadsResult,
   type ThreadId,
@@ -8,6 +9,7 @@ import { Effect, Layer } from "effect";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { TextGeneration } from "../../git/Services/TextGeneration.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import {
   ThreadTitleManager,
@@ -79,6 +81,20 @@ function readAutorenameCache(thread: {
 const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const textGeneration = yield* TextGeneration;
+  const serverSettingsService = yield* ServerSettingsService;
+  const textGenerationModelSelection = yield* serverSettingsService.getSettings.pipe(
+    Effect.map((settings) => settings.textGenerationModelSelection),
+    Effect.catch((error) =>
+      Effect.logWarning("thread autorename falling back to default text-generation model", {
+        cause: error.message,
+      }).pipe(
+        Effect.as({
+          provider: "codex" as const,
+          model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.codex,
+        }),
+      ),
+    ),
+  );
 
   const autorenameProjectThreads: ThreadTitleManagerShape["autorenameProjectThreads"] = (
     projectId,
@@ -132,9 +148,8 @@ const make = Effect.gen(function* () {
         const titleResult = yield* textGeneration
           .generateThreadTitle({
             cwd,
-            currentTitle: thread.title,
-            originalMessage: userMessages[0]?.text ?? thread.title,
-            recentMessages: userMessages.map((message) => message.text),
+            message: userMessages.map((message) => message.text).join("\n\n"),
+            modelSelection: textGenerationModelSelection,
           })
           .pipe(
             Effect.map(

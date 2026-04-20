@@ -1,4 +1,4 @@
-import type { ContextMenuItem, LocalApi } from "@t3tools/contracts";
+import type { ContextMenuItem, LocalApi, ServerDesktopContext } from "@t3tools/contracts";
 
 import { resetGitStatusStateForTests } from "./lib/gitStatusState";
 import { resetRequestLatencyStateForTests } from "./rpc/requestLatencyState";
@@ -25,8 +25,28 @@ import {
 } from "./clientPersistenceStorage";
 
 let cachedApi: LocalApi | undefined;
+let cachedDesktopContext: ServerDesktopContext | null = null;
+
+function emptyDesktopContext(): ServerDesktopContext {
+  return {
+    projectId: null,
+    projectTitle: null,
+    workspaceRoot: null,
+    threadId: null,
+    threadTitle: null,
+    updatedAt: new Date().toISOString(),
+  };
+}
 
 export function createLocalApi(rpcClient: WsRpcClient): LocalApi {
+  const unsupportedProjectOperation = (name: string) =>
+    new Error(`Local projects.${name} is unavailable in this runtime.`);
+  const unsupportedBrowserOperation = (name: string) =>
+    new Error(`Local browser.${name} is unavailable in this runtime.`);
+  const unsupportedOrchestrationOperation = (name: string) =>
+    new Error(`Local orchestration.${name} is unavailable in this runtime.`);
+  const desktopBrowser = typeof window === "undefined" ? undefined : window.desktopBridge?.browser;
+
   return {
     dialogs: {
       pickFolder: async (options) => {
@@ -39,6 +59,138 @@ export function createLocalApi(rpcClient: WsRpcClient): LocalApi {
         }
         return window.confirm(message);
       },
+    },
+    terminal: {
+      open: (input) => rpcClient.terminal.open(input as never),
+      write: (input) => rpcClient.terminal.write(input as never),
+      resize: (input) => rpcClient.terminal.resize(input as never),
+      clear: (input) => rpcClient.terminal.clear(input as never),
+      restart: (input) => rpcClient.terminal.restart(input as never),
+      close: (input) => rpcClient.terminal.close(input as never),
+      onEvent: (callback) => rpcClient.terminal.onEvent(callback),
+    },
+    projects: {
+      searchEntries: rpcClient.projects.searchEntries,
+      readFile: async () => {
+        throw unsupportedProjectOperation("readFile");
+      },
+      writeFile: rpcClient.projects.writeFile,
+    },
+    filesystem: {
+      browse: rpcClient.filesystem.browse,
+    },
+    git: {
+      pull: rpcClient.git.pull,
+      refreshStatus: rpcClient.git.refreshStatus,
+      onStatus: (input, callback, options) => rpcClient.git.onStatus(input, callback, options),
+      listBranches: rpcClient.git.listBranches,
+      createWorktree: rpcClient.git.createWorktree,
+      removeWorktree: rpcClient.git.removeWorktree,
+      createBranch: rpcClient.git.createBranch,
+      checkout: rpcClient.git.checkout,
+      init: rpcClient.git.init,
+      resolvePullRequest: rpcClient.git.resolvePullRequest,
+      preparePullRequestThread: rpcClient.git.preparePullRequestThread,
+    },
+    browser: {
+      ensurePane: async (input) => {
+        if (!desktopBrowser) {
+          throw unsupportedBrowserOperation("ensurePane");
+        }
+        return desktopBrowser.ensurePane(input);
+      },
+      destroyPane: async (input) => {
+        if (!desktopBrowser) {
+          throw unsupportedBrowserOperation("destroyPane");
+        }
+        return desktopBrowser.destroyPane(input);
+      },
+      setBounds: async (input) => {
+        if (!desktopBrowser) {
+          throw unsupportedBrowserOperation("setBounds");
+        }
+        return desktopBrowser.setBounds(input);
+      },
+      setVisible: async (input) => {
+        if (!desktopBrowser) {
+          throw unsupportedBrowserOperation("setVisible");
+        }
+        return desktopBrowser.setVisible(input);
+      },
+      navigate: async (input) => {
+        if (!desktopBrowser) {
+          throw unsupportedBrowserOperation("navigate");
+        }
+        return desktopBrowser.navigate(input);
+      },
+      goBack: async (input) => {
+        if (!desktopBrowser) {
+          throw unsupportedBrowserOperation("goBack");
+        }
+        return desktopBrowser.goBack(input);
+      },
+      goForward: async (input) => {
+        if (!desktopBrowser) {
+          throw unsupportedBrowserOperation("goForward");
+        }
+        return desktopBrowser.goForward(input);
+      },
+      reload: async (input) => {
+        if (!desktopBrowser) {
+          throw unsupportedBrowserOperation("reload");
+        }
+        return desktopBrowser.reload(input);
+      },
+      stop: async (input) => {
+        if (!desktopBrowser) {
+          throw unsupportedBrowserOperation("stop");
+        }
+        return desktopBrowser.stop(input);
+      },
+      captureScreenshot: async (input) => {
+        if (!desktopBrowser) {
+          throw unsupportedBrowserOperation("captureScreenshot");
+        }
+        return desktopBrowser.captureScreenshot(input);
+      },
+      getSnapshot: async (input) => {
+        if (!desktopBrowser) {
+          throw unsupportedBrowserOperation("getSnapshot");
+        }
+        return desktopBrowser.getSnapshot(input);
+      },
+      onEvent: (callback) => {
+        if (!desktopBrowser) {
+          return () => undefined;
+        }
+        return desktopBrowser.onEvent(callback);
+      },
+      syncShortcutState: async (state) => {
+        if (!desktopBrowser) {
+          throw unsupportedBrowserOperation("syncShortcutState");
+        }
+        return desktopBrowser.syncShortcutState(state);
+      },
+    },
+    orchestration: {
+      getSnapshot: async () => {
+        throw unsupportedOrchestrationOperation("getSnapshot");
+      },
+      dispatchCommand: rpcClient.orchestration.dispatchCommand,
+      forceDeleteThread: async () => {
+        throw unsupportedOrchestrationOperation("forceDeleteThread");
+      },
+      getTurnDiff: rpcClient.orchestration.getTurnDiff,
+      getFullThreadDiff: rpcClient.orchestration.getFullThreadDiff,
+      autorenameProjectThreads: async () => {
+        throw unsupportedOrchestrationOperation("autorenameProjectThreads");
+      },
+      replayEvents: async () => [],
+      onDomainEvent: () => () => undefined,
+      subscribeShell: (callback, options) =>
+        rpcClient.orchestration.subscribeShell(callback, options),
+      subscribeThread: (input, callback, options) =>
+        rpcClient.orchestration.subscribeThread(input, callback, options),
     },
     shell: {
       openInEditor: (cwd, editor) => rpcClient.shell.openInEditor({ cwd, editor }),
@@ -111,6 +263,14 @@ export function createLocalApi(rpcClient: WsRpcClient): LocalApi {
     },
     server: {
       getConfig: rpcClient.server.getConfig,
+      getDesktopContext: async () => cachedDesktopContext ?? emptyDesktopContext(),
+      setDesktopContext: async (input) => {
+        cachedDesktopContext = {
+          ...input,
+          updatedAt: new Date().toISOString(),
+        };
+        return cachedDesktopContext;
+      },
       refreshProviders: rpcClient.server.refreshProviders,
       upsertKeybinding: rpcClient.server.upsertKeybinding,
       getSettings: rpcClient.server.getSettings,
@@ -142,6 +302,7 @@ export function ensureLocalApi(): LocalApi {
 
 export async function __resetLocalApiForTests() {
   cachedApi = undefined;
+  cachedDesktopContext = null;
   const { __resetClientSettingsPersistenceForTests } = await import("./hooks/useSettings");
   __resetClientSettingsPersistenceForTests();
   await resetEnvironmentServiceForTests();

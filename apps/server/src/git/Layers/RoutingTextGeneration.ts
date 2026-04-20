@@ -10,6 +10,7 @@
  * @module RoutingTextGeneration
  */
 import { Effect, Layer, Context } from "effect";
+import type { ProviderKind } from "@t3tools/contracts";
 
 import {
   TextGeneration,
@@ -51,7 +52,7 @@ const makeRoutingTextGeneration = Effect.gen(function* () {
   const cursor = yield* CursorTextGen;
   const openCode = yield* OpenCodeTextGen;
 
-  const route = (provider?: TextGenerationProvider): TextGenerationShape =>
+  const route = (provider?: TextGenerationProvider | ProviderKind): TextGenerationShape =>
     provider === "claudeAgent"
       ? claude
       : provider === "opencode"

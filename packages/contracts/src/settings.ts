@@ -6,6 +6,7 @@ import {
   ClaudeModelOptions,
   CodexModelOptions,
   CursorModelOptions,
+  GeminiModelOptions,
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
   OpenCodeModelOptions,
 } from "./model.ts";
@@ -98,6 +99,14 @@ export const CursorSettings = Schema.Struct({
   customModels: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
 });
 export type CursorSettings = typeof CursorSettings.Type;
+
+export const GeminiSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  binaryPath: makeBinaryPathSetting("gemini"),
+  customModels: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+});
+export type GeminiSettings = typeof GeminiSettings.Type;
+
 export const OpenCodeSettings = Schema.Struct({
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   binaryPath: makeBinaryPathSetting("opencode"),
@@ -133,6 +142,7 @@ export const ServerSettings = Schema.Struct({
     codex: CodexSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     claudeAgent: ClaudeSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     cursor: CursorSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+    gemini: GeminiSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     opencode: OpenCodeSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   }).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
@@ -183,6 +193,10 @@ const CursorModelOptionsPatch = Schema.Struct({
   contextWindow: Schema.optionalKey(CursorModelOptions.fields.contextWindow),
 });
 
+const GeminiModelOptionsPatch = Schema.Struct({
+  thinkingLevel: Schema.optionalKey(GeminiModelOptions.fields.thinkingLevel),
+});
+
 const OpenCodeModelOptionsPatch = Schema.Struct({
   variant: Schema.optionalKey(OpenCodeModelOptions.fields.variant),
   agent: Schema.optionalKey(OpenCodeModelOptions.fields.agent),
@@ -203,6 +217,11 @@ const ModelSelectionPatch = Schema.Union([
     provider: Schema.optionalKey(Schema.Literal("cursor")),
     model: Schema.optionalKey(TrimmedNonEmptyString),
     options: Schema.optionalKey(CursorModelOptionsPatch),
+  }),
+  Schema.Struct({
+    provider: Schema.optionalKey(Schema.Literal("gemini")),
+    model: Schema.optionalKey(TrimmedNonEmptyString),
+    options: Schema.optionalKey(GeminiModelOptionsPatch),
   }),
   Schema.Struct({
     provider: Schema.optionalKey(Schema.Literal("opencode")),
@@ -232,6 +251,12 @@ const CursorSettingsPatch = Schema.Struct({
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 
+const GeminiSettingsPatch = Schema.Struct({
+  enabled: Schema.optionalKey(Schema.Boolean),
+  binaryPath: Schema.optionalKey(Schema.String),
+  customModels: Schema.optionalKey(Schema.Array(Schema.String)),
+});
+
 const OpenCodeSettingsPatch = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
   binaryPath: Schema.optionalKey(Schema.String),
@@ -256,6 +281,7 @@ export const ServerSettingsPatch = Schema.Struct({
       codex: Schema.optionalKey(CodexSettingsPatch),
       claudeAgent: Schema.optionalKey(ClaudeSettingsPatch),
       cursor: Schema.optionalKey(CursorSettingsPatch),
+      gemini: Schema.optionalKey(GeminiSettingsPatch),
       opencode: Schema.optionalKey(OpenCodeSettingsPatch),
     }),
   ),

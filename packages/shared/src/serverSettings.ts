@@ -108,12 +108,12 @@ export function applyServerSettingsPatch(
                     selectionPatch.options as GeminiModelOptions | undefined,
                   ),
                 }
-            : {
-                provider,
-                model,
-                ...withModelSelectionOptions(
-                  selectionPatch.options as OpenCodeModelOptions | undefined,
-                ),
-              },
+              : {
+                  provider,
+                  model,
+                  ...withModelSelectionOptions(
+                    selectionPatch.options as OpenCodeModelOptions | undefined,
+                  ),
+                },
   };
 }

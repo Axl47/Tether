@@ -25,6 +25,7 @@ export const DEFAULT_INTERACTION_MODE: ProviderInteractionMode = "default";
 export const DEFAULT_THREAD_TERMINAL_HEIGHT = 280;
 export const DEFAULT_THREAD_TERMINAL_ID = "default";
 export const MAX_TERMINALS_PER_GROUP = 4;
+export const MAX_THREAD_TERMINAL_COUNT = 4;
 export type ProjectScript = ContractProjectScript;
 
 export interface ThreadTerminalGroup {
@@ -87,7 +88,7 @@ export interface Project {
   name: string;
   cwd: string;
   repositoryIdentity?: RepositoryIdentity | null;
-  defaultModelSelection: ModelSelection | null;
+  defaultModelSelection?: ModelSelection | null;
   model?: string | undefined;
   defaultModel?: string | undefined;
   expanded?: boolean | undefined;
@@ -118,8 +119,8 @@ export interface Thread {
   lastVisitedAt?: string | undefined;
   branch: string | null;
   worktreePath: string | null;
-  contextWindow: OrchestrationContextWindow | null;
-  lastAutoRenameUserMessageId: MessageId | null;
+  contextWindow?: OrchestrationContextWindow | null;
+  lastAutoRenameUserMessageId?: MessageId | null;
   turnDiffSummaries: TurnDiffSummary[];
   activities: OrchestrationThreadActivity[];
 }

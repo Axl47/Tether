@@ -10,6 +10,7 @@ import {
   EventId,
   MessageId,
   ProjectId,
+  TextGenerationError,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
@@ -17,7 +18,6 @@ import { Effect, Exit, Layer, ManagedRuntime, PubSub, Scope, Stream } from "effe
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ServerConfig } from "../../config.ts";
-import { TextGenerationError } from "../../git/Errors.ts";
 import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
@@ -227,7 +227,7 @@ describe("ProviderCommandReactor", () => {
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), stateDir)),
       Layer.provideMerge(NodeServices.layer),
     );
-    const runtime = ManagedRuntime.make(layer);
+    const runtime = ManagedRuntime.make(layer as any);
 
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
     const reactor = await runtime.runPromise(Effect.service(ProviderCommandReactor));
@@ -235,7 +235,7 @@ describe("ProviderCommandReactor", () => {
     let started = false;
     const startReactor = async () => {
       if (started) return;
-      await Effect.runPromise(reactor.start.pipe(Scope.provide(scope!)));
+      await Effect.runPromise(reactor.start().pipe(Scope.provide(scope!)));
       started = true;
     };
     if (input?.autoStart !== false) {
@@ -250,7 +250,7 @@ describe("ProviderCommandReactor", () => {
         projectId: asProjectId("project-1"),
         title: "Provider Project",
         workspaceRoot: "/tmp/provider-project",
-        defaultModel: "gpt-5-codex",
+        defaultModelSelection: { provider: "codex", model: "gpt-5-codex" },
         createdAt: now,
       }),
     );
@@ -261,7 +261,7 @@ describe("ProviderCommandReactor", () => {
         threadId: ThreadId.makeUnsafe("thread-1"),
         projectId: asProjectId("project-1"),
         title: "Thread",
-        model: "gpt-5-codex",
+        modelSelection: { provider: "codex", model: "gpt-5-codex" },
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",
         branch: null,
@@ -313,7 +313,7 @@ describe("ProviderCommandReactor", () => {
     expect(harness.startSession.mock.calls[0]?.[0]).toEqual(ThreadId.makeUnsafe("thread-1"));
     expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
       cwd: "/tmp/provider-project",
-      model: "gpt-5-codex",
+      modelSelection: { provider: "codex", model: "gpt-5-codex" },
       runtimeMode: "approval-required",
     });
 
@@ -339,9 +339,10 @@ describe("ProviderCommandReactor", () => {
           attachments: [],
         },
         provider: "codex",
-        model: "gpt-5.3-codex",
-        modelOptions: {
-          codex: {
+        modelSelection: {
+          provider: "codex",
+          model: "gpt-5.3-codex",
+          options: {
             reasoningEffort: "high",
             fastMode: true,
           },
@@ -355,9 +356,10 @@ describe("ProviderCommandReactor", () => {
     await waitFor(() => harness.startSession.mock.calls.length === 1);
     await waitFor(() => harness.sendTurn.mock.calls.length === 1);
     expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
-      model: "gpt-5.3-codex",
-      modelOptions: {
-        codex: {
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5.3-codex",
+        options: {
           reasoningEffort: "high",
           fastMode: true,
         },
@@ -365,9 +367,10 @@ describe("ProviderCommandReactor", () => {
     });
     expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
       threadId: ThreadId.makeUnsafe("thread-1"),
-      model: "gpt-5.3-codex",
-      modelOptions: {
-        codex: {
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5.3-codex",
+        options: {
           reasoningEffort: "high",
           fastMode: true,
         },

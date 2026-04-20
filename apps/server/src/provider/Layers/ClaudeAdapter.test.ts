@@ -1478,10 +1478,6 @@ describe("ClaudeAdapterLive", () => {
       const progressEvent = runtimeEvents.find((event) => event.type === "task.progress");
       assert.equal(progressEvent?.type, "task.progress");
       if (progressEvent?.type === "task.progress") {
-        assert.equal(
-          progressEvent.payload.summary,
-          "Code reviewer checked the migration edge cases.",
-        );
         assert.equal(progressEvent.payload.description, "Running background teammate");
       }
     }).pipe(

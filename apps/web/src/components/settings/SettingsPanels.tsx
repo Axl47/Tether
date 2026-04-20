@@ -140,6 +140,13 @@ const PROVIDER_SETTINGS: readonly InstallProviderSettings[] = [
     binaryDescription: "Path to the Cursor agent binary",
   },
   {
+    provider: "gemini",
+    title: "Gemini",
+    badgeLabel: "Early Access",
+    binaryPlaceholder: "Gemini CLI binary path",
+    binaryDescription: "Path to the Gemini CLI binary",
+  },
+  {
     provider: "opencode",
     title: "OpenCode",
     binaryPlaceholder: "OpenCode binary path",
@@ -544,6 +551,11 @@ export function GeneralSettingsPanel() {
         DEFAULT_UNIFIED_SETTINGS.providers.cursor.binaryPath ||
       settings.providers.cursor.customModels.length > 0,
     ),
+    gemini: Boolean(
+      settings.providers.gemini.binaryPath !==
+        DEFAULT_UNIFIED_SETTINGS.providers.gemini.binaryPath ||
+      settings.providers.gemini.customModels.length > 0,
+    ),
     opencode: Boolean(
       settings.providers.opencode.binaryPath !==
         DEFAULT_UNIFIED_SETTINGS.providers.opencode.binaryPath ||
@@ -560,6 +572,7 @@ export function GeneralSettingsPanel() {
     codex: "",
     claudeAgent: "",
     cursor: "",
+    gemini: "",
     opencode: "",
   });
   const [customModelErrorByProvider, setCustomModelErrorByProvider] = useState<

@@ -15,7 +15,7 @@ const asEventId = (value: string): EventId => EventId.makeUnsafe(value);
 const asCheckpointRef = (value: string): CheckpointRef => CheckpointRef.makeUnsafe(value);
 
 const projectionSnapshotLayer = it.layer(
-  OrchestrationProjectionSnapshotQueryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+  OrchestrationProjectionSnapshotQueryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)) as any,
 );
 
 projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
@@ -234,7 +234,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           id: asProjectId("project-1"),
           title: "Project 1",
           workspaceRoot: "/tmp/project-1",
-          defaultModel: "gpt-5-codex",
+          defaultModelSelection: { provider: "codex", model: "gpt-5-codex" },
           scripts: [
             {
               id: "script-1",
@@ -254,7 +254,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           id: ThreadId.makeUnsafe("thread-1"),
           projectId: asProjectId("project-1"),
           title: "Thread 1",
-          model: "gpt-5-codex",
+          modelSelection: { provider: "codex", model: "gpt-5-codex" },
           interactionMode: "default",
           runtimeMode: "full-access",
           branch: null,
@@ -270,6 +270,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           lastAutoRenameUserMessageId: asMessageId("message-autorename-1"),
           createdAt: "2026-02-24T00:00:02.000Z",
           updatedAt: "2026-02-24T00:00:03.000Z",
+          archivedAt: null,
           deletedAt: null,
           messages: [
             {

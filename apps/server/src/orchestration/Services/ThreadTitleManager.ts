@@ -1,5 +1,5 @@
 import type { OrchestrationAutorenameProjectThreadsResult, ProjectId } from "@t3tools/contracts";
-import { ServiceMap } from "effect";
+import { Context } from "effect";
 import type { Effect } from "effect";
 
 export interface ThreadTitleManagerShape {
@@ -8,7 +8,7 @@ export interface ThreadTitleManagerShape {
   ) => Effect.Effect<OrchestrationAutorenameProjectThreadsResult>;
 }
 
-export class ThreadTitleManager extends ServiceMap.Service<
+export class ThreadTitleManager extends Context.Service<
   ThreadTitleManager,
   ThreadTitleManagerShape
 >()("t3/orchestration/Services/ThreadTitleManager") {}

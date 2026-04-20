@@ -674,7 +674,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
 
   async sendTurn(input: CodexAppServerSendTurnInput): Promise<ProviderTurnStartResult> {
     const context = this.requireSession(input.threadId);
-    context.collabReceiverTurns.clear();
+    context.collabReceiverTurns?.clear();
 
     const turnInput: Array<
       { type: "text"; text: string; text_elements: [] } | { type: "image"; url: string }
@@ -845,12 +845,15 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     decision: ProviderApprovalDecision,
   ): Promise<void> {
     const context = this.requireSession(threadId);
-    const pendingRequest = context.pendingApprovals.get(requestId);
+    const [resolvedRequestId, pendingRequest, didFallback] = this.resolvePendingApprovalRequest(
+      context,
+      requestId,
+    );
     if (!pendingRequest) {
       throw new Error(`Unknown pending approval request: ${requestId}`);
     }
 
-    context.pendingApprovals.delete(requestId);
+    context.pendingApprovals.delete(resolvedRequestId);
     this.writeMessage(context, {
       id: pendingRequest.jsonRpcId,
       result: {
@@ -875,6 +878,26 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         decision,
       },
     });
+
+    if (didFallback) {
+      this.emitEvent({
+        id: EventId.make(randomUUID()),
+        kind: "notification",
+        provider: "codex",
+        threadId: context.session.threadId,
+        createdAt: new Date().toISOString(),
+        method: "item/requestApproval/decision",
+        turnId: pendingRequest.turnId,
+        itemId: pendingRequest.itemId,
+        requestId,
+        requestKind: pendingRequest.requestKind,
+        payload: {
+          requestId,
+          requestKind: pendingRequest.requestKind,
+          decision,
+        },
+      });
+    }
   }
 
   async respondToUserInput(
@@ -883,12 +906,15 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     answers: ProviderUserInputAnswers,
   ): Promise<void> {
     const context = this.requireSession(threadId);
-    const pendingRequest = context.pendingUserInputs.get(requestId);
+    const [resolvedRequestId, pendingRequest, didFallback] = this.resolvePendingUserInputRequest(
+      context,
+      requestId,
+    );
     if (!pendingRequest) {
       throw new Error(`Unknown pending user input request: ${requestId}`);
     }
 
-    context.pendingUserInputs.delete(requestId);
+    context.pendingUserInputs.delete(resolvedRequestId);
     const codexAnswers = toCodexUserInputAnswers(answers);
     this.writeMessage(context, {
       id: pendingRequest.jsonRpcId,
@@ -912,6 +938,24 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         answers: codexAnswers,
       },
     });
+
+    if (didFallback) {
+      this.emitEvent({
+        id: EventId.make(randomUUID()),
+        kind: "notification",
+        provider: "codex",
+        threadId: context.session.threadId,
+        createdAt: new Date().toISOString(),
+        method: "item/tool/requestUserInput/answered",
+        turnId: pendingRequest.turnId,
+        itemId: pendingRequest.itemId,
+        requestId,
+        payload: {
+          requestId,
+          answers: codexAnswers,
+        },
+      });
+    }
   }
 
   stopSession(threadId: ThreadId): void {
@@ -1135,7 +1179,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       if (isChildConversation) {
         return;
       }
-      context.collabReceiverTurns.clear();
+      context.collabReceiverTurns?.clear();
       const turn = this.readObject(notification.params, "turn");
       const status = this.readString(turn, "status");
       const errorMessage = this.readString(this.readObject(turn, "error"), "message");
@@ -1167,8 +1211,9 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     const effectiveTurnId = childParentTurnId ?? rawRoute.turnId;
     const requestKind = this.requestKindForMethod(request.method);
     let requestId: ApprovalRequestId | undefined;
+    const providerRequestId = this.readProviderRequestId(request.params);
     if (requestKind) {
-      requestId = ApprovalRequestId.make(randomUUID());
+      requestId = providerRequestId ?? ApprovalRequestId.make(randomUUID());
       const pendingRequest: PendingApprovalRequest = {
         requestId,
         jsonRpcId: request.id,
@@ -1187,7 +1232,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     }
 
     if (request.method === "item/tool/requestUserInput") {
-      requestId = ApprovalRequestId.make(randomUUID());
+      requestId = providerRequestId ?? ApprovalRequestId.make(randomUUID());
       context.pendingUserInputs.set(requestId, {
         requestId,
         jsonRpcId: request.id,
@@ -1456,12 +1501,58 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     );
   }
 
+  private readProviderRequestId(params: unknown): ApprovalRequestId | undefined {
+    const directRequestId = this.readString(params, "request_id");
+    if (directRequestId) {
+      return ApprovalRequestId.makeUnsafe(directRequestId);
+    }
+    const msgRequestId = this.readString(this.readObject(params)?.msg, "request_id");
+    if (msgRequestId) {
+      return ApprovalRequestId.makeUnsafe(msgRequestId);
+    }
+    return undefined;
+  }
+
   private readChildParentTurnId(context: CodexSessionContext, params: unknown): TurnId | undefined {
     const providerConversationId = this.readProviderConversationId(params);
     if (!providerConversationId) {
       return undefined;
     }
     return context.collabReceiverTurns.get(providerConversationId);
+  }
+
+  private resolvePendingApprovalRequest(
+    context: CodexSessionContext,
+    requestId: ApprovalRequestId,
+  ): [ApprovalRequestId, PendingApprovalRequest | undefined, boolean] {
+    const exactMatch = context.pendingApprovals.get(requestId);
+    if (exactMatch) {
+      return [requestId, exactMatch, false];
+    }
+    if (context.pendingApprovals.size === 1) {
+      const fallback = context.pendingApprovals.entries().next().value;
+      if (fallback) {
+        return [fallback[0], fallback[1], true];
+      }
+    }
+    return [requestId, undefined, false];
+  }
+
+  private resolvePendingUserInputRequest(
+    context: CodexSessionContext,
+    requestId: ApprovalRequestId,
+  ): [ApprovalRequestId, PendingUserInputRequest | undefined, boolean] {
+    const exactMatch = context.pendingUserInputs.get(requestId);
+    if (exactMatch) {
+      return [requestId, exactMatch, false];
+    }
+    if (context.pendingUserInputs.size === 1) {
+      const fallback = context.pendingUserInputs.entries().next().value;
+      if (fallback) {
+        return [fallback[0], fallback[1], true];
+      }
+    }
+    return [requestId, undefined, false];
   }
 
   private rememberCollabReceiverTurns(

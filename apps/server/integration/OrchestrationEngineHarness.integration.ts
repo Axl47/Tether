@@ -5,6 +5,7 @@ import {
   ApprovalRequestId,
   type OrchestrationEvent,
   type OrchestrationThread,
+  type ProviderKind,
 } from "@t3tools/contracts";
 import {
   Effect,
@@ -213,7 +214,7 @@ export interface OrchestrationIntegrationHarness {
 }
 
 interface MakeOrchestrationIntegrationHarnessOptions {
-  readonly provider?: "codex";
+  readonly provider?: ProviderKind;
   readonly realCodex?: boolean;
 }
 
@@ -278,19 +279,17 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provideMerge(NodeServices.layer),
       Layer.provideMerge(providerSessionDirectoryLayer),
     );
-    const providerLayer = (
-      useRealCodex
-        ? makeProviderServiceLive().pipe(
-            Layer.provide(providerSessionDirectoryLayer),
-            Layer.provide(realCodexRegistry),
-            Layer.provide(AnalyticsService.layerTest),
-          )
-        : makeProviderServiceLive().pipe(
-            Layer.provide(providerSessionDirectoryLayer),
-            Layer.provide(fakeRegistry!),
-            Layer.provide(AnalyticsService.layerTest),
-          )
-    ) as any;
+    const providerLayer = useRealCodex
+      ? makeProviderServiceLive().pipe(
+          Layer.provide(providerSessionDirectoryLayer),
+          Layer.provide(realCodexRegistry),
+          Layer.provide(AnalyticsService.layerTest),
+        )
+      : makeProviderServiceLive().pipe(
+          Layer.provide(providerSessionDirectoryLayer),
+          Layer.provide(fakeRegistry!),
+          Layer.provide(AnalyticsService.layerTest),
+        );
 
     const checkpointStoreLayer = CheckpointStoreLive.pipe(Layer.provide(GitCoreLive));
     const projectionSnapshotQueryLayer = OrchestrationProjectionSnapshotQueryLive;

@@ -56,6 +56,13 @@ const PROVIDER_CUSTOM_MODEL_CONFIG: Record<ProviderKind, ProviderCustomModelConf
     placeholder: "your-cursor-model-slug",
     example: "claude-sonnet-4-6",
   },
+  gemini: {
+    provider: "gemini",
+    title: "Gemini",
+    description: "Save additional Gemini model slugs for the picker and `/model` command.",
+    placeholder: "your-gemini-model-slug",
+    example: "gemini-2.5-pro",
+  },
   opencode: {
     provider: "opencode",
     title: "OpenCode",
@@ -188,6 +195,12 @@ export function getCustomModelOptionsByProvider(
       providers,
       "cursor",
       selectedProvider === "cursor" ? selectedModel : undefined,
+    ),
+    gemini: getAppModelOptions(
+      settings,
+      providers,
+      "gemini",
+      selectedProvider === "gemini" ? selectedModel : undefined,
     ),
     opencode: getAppModelOptions(
       settings,

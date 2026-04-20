@@ -71,6 +71,7 @@ import {
   type ProviderAdapterError,
 } from "../Errors.ts";
 import { ClaudeAdapter, type ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
+import { ClaudeCodeAdapter, type ClaudeCodeAdapterShape } from "../Services/ClaudeCodeAdapter.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
 const PROVIDER = "claudeAgent" as const;
@@ -3211,7 +3212,20 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 });
 
 export const ClaudeAdapterLive = Layer.effect(ClaudeAdapter, makeClaudeAdapter());
+export const ClaudeCodeAdapterLive = Layer.effect(
+  ClaudeCodeAdapter,
+  makeClaudeAdapter().pipe(Effect.map((adapter) => adapter as ClaudeCodeAdapterShape)),
+);
 
 export function makeClaudeAdapterLive(options?: ClaudeAdapterLiveOptions) {
   return Layer.effect(ClaudeAdapter, makeClaudeAdapter(options));
 }
+
+export function makeClaudeCodeAdapterLive(options?: ClaudeAdapterLiveOptions) {
+  return Layer.effect(
+    ClaudeCodeAdapter,
+    makeClaudeAdapter(options).pipe(Effect.map((adapter) => adapter as ClaudeCodeAdapterShape)),
+  );
+}
+
+export type { ClaudeAdapterLiveOptions as ClaudeCodeAdapterLiveOptions };

@@ -46,6 +46,8 @@ export function buildLocalDraftThread(
     latestTurn: null,
     branch: draftThread.branch,
     worktreePath: draftThread.worktreePath,
+    contextWindow: null,
+    lastAutoRenameUserMessageId: null,
     turnDiffSummaries: [],
     activities: [],
     proposedPlans: [],

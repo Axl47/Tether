@@ -23,7 +23,7 @@ function ChatRouteGlobalShortcuts() {
   const keybindings = useServerKeybindings();
   const terminalOpen = useTerminalStateStore((state) =>
     routeThreadRef
-      ? selectThreadTerminalState(state.terminalStateByThreadId, routeThreadRef.threadId).terminalOpen
+      ? selectThreadTerminalState(state.terminalStateByThreadKey, routeThreadRef).terminalOpen
       : false,
   );
   const appSettings = useSettings();

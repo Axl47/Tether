@@ -636,7 +636,9 @@ const devRunnerCli = Command.make("dev-runner", {
     Flag.withDescription(
       "Browser-facing host/IP for remote dev URLs (forwards to TETHER_PUBLIC_HOST).",
     ),
-    Flag.withFallbackConfig(fallbackOptionalStringConfig("TETHER_PUBLIC_HOST", "T3CODE_PUBLIC_HOST")),
+    Flag.withFallbackConfig(
+      fallbackOptionalStringConfig("TETHER_PUBLIC_HOST", "T3CODE_PUBLIC_HOST"),
+    ),
   ),
   port: Flag.integer("port").pipe(
     Flag.withSchema(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }))),

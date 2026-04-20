@@ -112,7 +112,8 @@ export const DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER: Record<ProviderKind,
   gemini: "gemini-2.5-flash",
   opencode: "openai/gpt-5",
 };
-export const DEFAULT_GIT_TEXT_GENERATION_MODEL = DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.codex;
+export const DEFAULT_GIT_TEXT_GENERATION_MODEL =
+  DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.codex;
 
 export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string, string>> = {
   codex: {

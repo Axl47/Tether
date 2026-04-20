@@ -3,20 +3,18 @@ import { DEFAULT_RUNTIME_MODE, type ScopedProjectRef } from "@t3tools/contracts"
 import { useParams, useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
-
 import {
-  DraftId,
   type DraftThreadEnvMode,
   type DraftThreadState,
   useComposerDraftStore,
 } from "../composerDraftStore";
+import { newDraftId, newThreadId } from "../lib/utils";
 import { orderItemsByPreferredIds } from "../components/Sidebar.logic";
-import { randomUuid, newThreadId } from "../lib/utils";
 import { deriveLogicalProjectKeyFromSettings } from "../logicalProject";
+import { selectProjectsAcrossEnvironments, useStore } from "../store";
 import { createThreadSelectorByRef } from "../storeSelectors";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { useUiStateStore } from "../uiStateStore";
-import { selectProjectsAcrossEnvironments, useStore } from "../store";
 import { useSettings } from "./useSettings";
 
 function useNewThreadState() {
@@ -41,10 +39,10 @@ function useNewThreadState() {
       },
     ): Promise<void> => {
       const {
-        applyStickyState,
-        getDraftSession,
         getDraftSessionByLogicalProjectKey,
+        getDraftSession,
         getDraftThread,
+        applyStickyState,
         setDraftThreadContext,
         setLogicalProjectDraftThreadId,
       } = useComposerDraftStore.getState();
@@ -66,7 +64,6 @@ function useNewThreadState() {
           ? getDraftThread(currentRouteTarget.threadRef)
           : getDraftSession(currentRouteTarget.draftId)
         : null;
-
       if (storedDraftThread) {
         return (async () => {
           if (hasBranchOption || hasWorktreePathOption || hasEnvModeOption) {
@@ -117,7 +114,7 @@ function useNewThreadState() {
         return Promise.resolve();
       }
 
-      const draftId = DraftId.make(randomUuid());
+      const draftId = newDraftId();
       const threadId = newThreadId();
       const createdAt = new Date().toISOString();
       return (async () => {
@@ -137,7 +134,7 @@ function useNewThreadState() {
         });
       })();
     },
-    [getCurrentRouteTarget, projectGroupingSettings, projects, router],
+    [getCurrentRouteTarget, projectGroupingSettings, router, projects],
   );
 }
 
@@ -168,15 +165,13 @@ export function useHandleNewThread() {
       : null,
   );
   const projects = useStore(useShallow((store) => selectProjectsAcrossEnvironments(store)));
-  const orderedProjects = useMemo(
-    () =>
-      orderItemsByPreferredIds({
-        items: projects,
-        preferredIds: projectOrder,
-        getId: (project) => scopedProjectKey(scopeProjectRef(project.environmentId, project.id)),
-      }),
-    [projectOrder, projects],
-  );
+  const orderedProjects = useMemo(() => {
+    return orderItemsByPreferredIds({
+      items: projects,
+      preferredIds: projectOrder,
+      getId: (project) => scopedProjectKey(scopeProjectRef(project.environmentId, project.id)),
+    });
+  }, [projectOrder, projects]);
   const handleNewThread = useNewThreadState();
 
   return {

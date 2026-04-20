@@ -286,10 +286,7 @@ const BuildEnvConfig = Config.all({
   keepStage: fallbackBooleanConfig("TETHER_DESKTOP_KEEP_STAGE", "T3CODE_DESKTOP_KEEP_STAGE"),
   signed: fallbackBooleanConfig("TETHER_DESKTOP_SIGNED", "T3CODE_DESKTOP_SIGNED"),
   verbose: fallbackBooleanConfig("TETHER_DESKTOP_VERBOSE", "T3CODE_DESKTOP_VERBOSE"),
-  mockUpdates: fallbackBooleanConfig(
-    "TETHER_DESKTOP_MOCK_UPDATES",
-    "T3CODE_DESKTOP_MOCK_UPDATES",
-  ),
+  mockUpdates: fallbackBooleanConfig("TETHER_DESKTOP_MOCK_UPDATES", "T3CODE_DESKTOP_MOCK_UPDATES"),
   mockUpdateServerPort: fallbackOptionConfig(
     Config.string("TETHER_DESKTOP_MOCK_UPDATE_SERVER_PORT").pipe(Config.option),
     Config.string("T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT").pipe(Config.option),

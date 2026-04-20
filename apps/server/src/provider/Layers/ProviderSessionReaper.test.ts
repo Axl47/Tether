@@ -87,6 +87,8 @@ function makeReadModel(
       updatedAt: now,
       archivedAt: null,
       latestTurn: null,
+      contextWindow: null,
+      lastAutoRenameUserMessageId: null,
       messages: [],
       session: thread.session,
       activities: [],

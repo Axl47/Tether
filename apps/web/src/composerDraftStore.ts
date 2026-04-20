@@ -62,6 +62,8 @@ const composerDebouncedStorage = createDebouncedStorage(
   COMPOSER_PERSIST_DEBOUNCE_MS,
 );
 
+export { createDebouncedStorage };
+
 // Flush pending composer draft writes before page unload to prevent data loss.
 if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
   window.addEventListener("beforeunload", () => {
@@ -267,6 +269,7 @@ interface ProjectDraftSession extends DraftSessionState {
  * surfaces that still key composer state by bare thread id.
  */
 type ComposerThreadTarget = ScopedThreadRef | DraftId | ThreadId;
+type ComposerProjectTarget = ScopedProjectRef | ProjectId;
 
 /**
  * Persisted store for composer content plus draft-session metadata.
@@ -330,7 +333,7 @@ interface ComposerDraftStoreState {
   ) => void;
   /** Creates or updates the draft session tracked for a concrete project ref. */
   setProjectDraftThreadId: (
-    projectRef: ScopedProjectRef,
+    projectRef: ComposerProjectTarget,
     draftId: DraftId,
     options?: {
       threadId?: ThreadId;
@@ -355,9 +358,9 @@ interface ComposerDraftStoreState {
       interactionMode?: ProviderInteractionMode;
     },
   ) => void;
-  clearProjectDraftThreadId: (projectRef: ScopedProjectRef) => void;
+  clearProjectDraftThreadId: (projectRef: ComposerProjectTarget) => void;
   clearProjectDraftThreadById: (
-    projectRef: ScopedProjectRef,
+    projectRef: ComposerProjectTarget,
     threadRef: ComposerThreadTarget,
   ) => void;
   /** Marks a draft session as being promoted to a real server thread. */
@@ -539,7 +542,7 @@ function getCodexCompatibilityState(
       codexFastMode: false,
     };
   }
-  const codexOptions = selection.options?.codex;
+  const codexOptions = selection.options;
   return {
     effort: codexOptions?.reasoningEffort ?? null,
     codexFastMode: codexOptions?.fastMode === true,
@@ -556,8 +559,8 @@ function withLegacyComposerDraftAliases(draft: ComposerThreadDraftState): Compos
     ...draft,
     provider: activeProvider ?? null,
     model: activeSelection?.model ?? null,
-    effort,
-    codexFastMode,
+    effort: effort ?? null,
+    codexFastMode: codexFastMode ?? false,
   };
 }
 
@@ -1203,8 +1206,9 @@ function resolveComposerThreadId(
     return parsedThreadRef.threadId;
   }
   return (
-    state.draftThreadsByThreadKey[findDraftKeyForLegacyThreadId(state, threadKeyOrId as ThreadId) ?? ""]
-      ?.threadId ?? (threadKeyOrId as ThreadId)
+    state.draftThreadsByThreadKey[
+      findDraftKeyForLegacyThreadId(state, threadKeyOrId as ThreadId) ?? ""
+    ]?.threadId ?? (threadKeyOrId as ThreadId)
   );
 }
 
@@ -1405,9 +1409,9 @@ function resolveProjectRefForLegacyProjectId(projectId: ProjectId): ScopedProjec
       return scopeProjectRef(project.environmentId, projectId);
     }
   }
-  const environmentEntries = Object.entries(storeState.environmentStateById ?? {}) as Array<
-    [EnvironmentId, Record<string, unknown>]
-  >;
+  const environmentEntries = Object.entries(
+    storeState.environmentStateById ?? {},
+  ) as unknown as Array<[EnvironmentId, Record<string, unknown>]>;
   for (const [environmentId, environmentState] of environmentEntries) {
     const projectById =
       "projectById" in environmentState &&
@@ -1423,6 +1427,12 @@ function resolveProjectRefForLegacyProjectId(projectId: ProjectId): ScopedProjec
     return scopeProjectRef(storeState.activeEnvironmentId, projectId);
   }
   return null;
+}
+
+function resolveComposerProjectRef(projectRef: ComposerProjectTarget): ScopedProjectRef | null {
+  return typeof projectRef === "string"
+    ? resolveProjectRefForLegacyProjectId(projectRef)
+    : projectRef;
 }
 
 function normalizePersistedDraftThreads(
@@ -2266,9 +2276,13 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
           });
         },
         setProjectDraftThreadId: (projectRef, draftId, options) => {
+          const resolvedProjectRef = resolveComposerProjectRef(projectRef);
+          if (!resolvedProjectRef) {
+            return;
+          }
           get().setLogicalProjectDraftThreadId(
-            projectDraftKey(projectRef),
-            projectRef,
+            projectDraftKey(resolvedProjectRef),
+            resolvedProjectRef,
             draftId,
             options,
           );
@@ -2353,11 +2367,15 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
           });
         },
         clearProjectDraftThreadId: (projectRef) => {
+          const resolvedProjectRef = resolveComposerProjectRef(projectRef);
+          if (!resolvedProjectRef) {
+            return;
+          }
           set((state) => {
             const matchingThreadEntry = Object.entries(state.draftThreadsByThreadKey).find(
               ([, draftThread]) =>
-                draftThread.projectId === projectRef.projectId &&
-                draftThread.environmentId === projectRef.environmentId,
+                draftThread.projectId === resolvedProjectRef.projectId &&
+                draftThread.environmentId === resolvedProjectRef.environmentId,
             );
             if (!matchingThreadEntry) {
               return state;
@@ -2366,6 +2384,10 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
           });
         },
         clearProjectDraftThreadById: (projectRef, threadRef) => {
+          const resolvedProjectRef = resolveComposerProjectRef(projectRef);
+          if (!resolvedProjectRef) {
+            return;
+          }
           const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
           if (threadKey.length === 0) {
             return;
@@ -2374,8 +2396,8 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             const draftThread = state.draftThreadsByThreadKey[threadKey];
             if (
               !draftThread ||
-              draftThread.projectId !== projectRef.projectId ||
-              draftThread.environmentId !== projectRef.environmentId
+              draftThread.projectId !== resolvedProjectRef.projectId ||
+              draftThread.environmentId !== resolvedProjectRef.environmentId
             ) {
               return state;
             }
@@ -2835,7 +2857,9 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
         },
         setEffort: (threadRef, effort) => {
           const currentDraft = get().getComposerDraft(threadRef);
-          const currentCodexOptions = currentDraft?.modelSelectionByProvider.codex?.options?.codex;
+          const currentCodexSelection = currentDraft?.modelSelectionByProvider.codex;
+          const currentCodexOptions =
+            currentCodexSelection?.provider === "codex" ? currentCodexSelection.options : undefined;
           const nextCodexOptions =
             effort != null || currentCodexOptions?.fastMode === true
               ? {
@@ -2844,12 +2868,16 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                 }
               : null;
           get().setProviderModelOptions(threadRef, "codex", nextCodexOptions, {
-            model: currentDraft?.modelSelectionByProvider.codex?.model ?? DEFAULT_MODEL_BY_PROVIDER.codex,
+            model:
+              currentDraft?.modelSelectionByProvider.codex?.model ??
+              DEFAULT_MODEL_BY_PROVIDER.codex,
           });
         },
         setCodexFastMode: (threadRef, enabled) => {
           const currentDraft = get().getComposerDraft(threadRef);
-          const currentCodexOptions = currentDraft?.modelSelectionByProvider.codex?.options?.codex;
+          const currentCodexSelection = currentDraft?.modelSelectionByProvider.codex;
+          const currentCodexOptions =
+            currentCodexSelection?.provider === "codex" ? currentCodexSelection.options : undefined;
           const nextCodexOptions =
             enabled === true || currentCodexOptions?.reasoningEffort
               ? {
@@ -2860,7 +2888,9 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                 }
               : null;
           get().setProviderModelOptions(threadRef, "codex", nextCodexOptions, {
-            model: currentDraft?.modelSelectionByProvider.codex?.model ?? DEFAULT_MODEL_BY_PROVIDER.codex,
+            model:
+              currentDraft?.modelSelectionByProvider.codex?.model ??
+              DEFAULT_MODEL_BY_PROVIDER.codex,
           });
         },
         addImage: (threadRef, image) => {
@@ -3258,7 +3288,9 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             if (!existingQueue || existingQueue.length === 0) {
               return state;
             }
-            const queuedMessageIndex = existingQueue.findIndex((entry) => entry.id === queuedMessageId);
+            const queuedMessageIndex = existingQueue.findIndex(
+              (entry) => entry.id === queuedMessageId,
+            );
             if (queuedMessageIndex < 0) {
               return state;
             }
@@ -3310,10 +3342,10 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                         queuedMessage.model,
                         queuedMessage.provider === "codex"
                           ? {
-                              codex: {
-                                ...(queuedMessage.effort ? { reasoningEffort: queuedMessage.effort } : {}),
-                                ...(queuedMessage.codexFastMode ? { fastMode: true } : {}),
-                              },
+                              ...(queuedMessage.effort
+                                ? { reasoningEffort: queuedMessage.effort }
+                                : {}),
+                              ...(queuedMessage.codexFastMode ? { fastMode: true } : {}),
                             }
                           : undefined,
                       ),

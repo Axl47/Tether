@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import os from "node:os";
 import { Effect, FileSystem, Path } from "effect";
-import { ServerConfig, type RuntimeMode, type ServerConfigShape } from "./config";
+import { ServerConfig, type RuntimeMode, type ServerConfigShape } from "./config.ts";
 
 export interface LocalTetherDiscoveryDescriptor {
   readonly version: 1;
@@ -54,14 +54,9 @@ function formatHostForUrl(host: string): string {
 export function buildLocalTetherWsUrl(input: {
   readonly host: string | undefined;
   readonly port: number;
-  readonly authToken: string | undefined;
 }): string {
   const host = resolveLocalTetherDiscoveryHost(input.host);
-  const url = new URL(`ws://${formatHostForUrl(host)}:${input.port}/`);
-  if (input.authToken) {
-    url.searchParams.set("token", input.authToken);
-  }
-  return url.toString();
+  return new URL(`ws://${formatHostForUrl(host)}:${input.port}/`).toString();
 }
 
 function buildLocalTetherDiscoveryDescriptor(input: {
@@ -87,7 +82,6 @@ function buildLocalTetherDiscoveryDescriptor(input: {
     wsUrl: buildLocalTetherWsUrl({
       host,
       port: input.config.port,
-      authToken: input.config.authToken,
     }),
     startedAt: input.startedAt,
     updatedAt,

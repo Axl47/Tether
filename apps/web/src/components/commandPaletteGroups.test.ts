@@ -1,16 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import type { Workspace } from "../splitViewStore";
 import type { Project, Thread } from "../types";
 import { buildPaletteItemGroups } from "./commandPaletteGroups";
 
 const PROJECT_ID = "project-1" as Project["id"];
+const ENVIRONMENT_ID = EnvironmentId.make("environment-local");
 
 function makeProject(overrides: Partial<Project> = {}): Project {
   return {
     id: PROJECT_ID,
+    environmentId: ENVIRONMENT_ID,
     name: "Project One",
     cwd: "/repo/project-one",
+    defaultModelSelection: {
+      provider: "codex",
+      model: "gpt-5-codex",
+    },
     model: "gpt-5-codex",
     expanded: true,
     scripts: [],
@@ -21,9 +27,14 @@ function makeProject(overrides: Partial<Project> = {}): Project {
 function makeThread(id: string, overrides: Partial<Thread> = {}): Thread {
   return {
     id: ThreadId.makeUnsafe(id),
+    environmentId: ENVIRONMENT_ID,
     codexThreadId: null,
     projectId: PROJECT_ID,
     title: id,
+    modelSelection: {
+      provider: "codex",
+      model: "gpt-5-codex",
+    },
     model: "gpt-5-codex",
     runtimeMode: "full-access",
     interactionMode: "default",
@@ -32,6 +43,7 @@ function makeThread(id: string, overrides: Partial<Thread> = {}): Thread {
     proposedPlans: [],
     error: null,
     createdAt: "2026-03-12T00:00:00.000Z",
+    archivedAt: null,
     latestTurn: null,
     lastVisitedAt: undefined,
     updatedAt: "2026-03-12T00:00:00.000Z",

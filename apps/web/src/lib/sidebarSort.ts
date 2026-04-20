@@ -10,7 +10,10 @@ function parseIsoTimestamp(iso: string): number {
 export function getThreadLatestActivityTimestamp(
   thread: Pick<Thread, "createdAt" | "updatedAt">,
 ): number {
-  return Math.max(parseIsoTimestamp(thread.updatedAt), parseIsoTimestamp(thread.createdAt));
+  return Math.max(
+    parseIsoTimestamp(thread.updatedAt ?? thread.createdAt),
+    parseIsoTimestamp(thread.createdAt),
+  );
 }
 
 export function compareThreadsByLatestActivity(

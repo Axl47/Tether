@@ -1,8 +1,8 @@
-import { type ProjectId, ThreadId } from "@t3tools/contracts";
 import { createFileRoute, retainSearchParams, useNavigate } from "@tanstack/react-router";
-import { Suspense, lazy, useState, useMemo, type ReactNode, useCallback, useEffect } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
 
 import ChatView from "../components/ChatView";
+import { threadHasStarted } from "../components/ChatView.logic";
 import { DiffWorkerPoolProvider } from "../components/DiffWorkerPoolProvider";
 import {
   DiffPanelHeaderSkeleton,
@@ -10,64 +10,25 @@ import {
   DiffPanelShell,
   type DiffPanelMode,
 } from "../components/DiffPanelShell";
-import { SplitPanelRoot, SplitDropPreview, SplitPlaceholder } from "../components/SplitPanel";
-import { BrowserPane } from "../components/BrowserPane";
-import { useComposerDraftStore } from "../composerDraftStore";
+import { finalizePromotedDraftThreadByRef, useComposerDraftStore } from "../composerDraftStore";
 import {
-  clearDiffSearchParams,
   type DiffRouteSearch,
   parseDiffRouteSearch,
   stripDiffSearchParams,
 } from "../diffRouteSearch";
 import { useMediaQuery } from "../hooks/useMediaQuery";
-import { useStore } from "../store";
-import { useCommandPaletteStore } from "../commandPaletteStore";
-import {
-  useSplitViewStore,
-  computeClosestDropZone,
-  dropZoneToSplit,
-  type DropZone,
-  type SplitLeaf,
-  findLeaf,
-  findLeafByThreadId,
-  firstLeaf,
-} from "../splitViewStore";
-import { newThreadId } from "../lib/utils";
-import { Sheet, SheetPopup } from "../components/ui/sheet";
+import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
+import { selectEnvironmentState, selectThreadExistsByRef, useStore } from "../store";
+import { createThreadSelectorByRef } from "../storeSelectors";
+import { resolveThreadRouteRef, buildThreadRouteParams } from "../threadRoutes";
+import { RightPanelSheet } from "../components/RightPanelSheet";
 import { Sidebar, SidebarInset, SidebarProvider, SidebarRail } from "~/components/ui/sidebar";
 
 const DiffPanel = lazy(() => import("../components/DiffPanel"));
-const DIFF_INLINE_LAYOUT_MEDIA_QUERY = "(max-width: 1180px)";
 const DIFF_INLINE_SIDEBAR_WIDTH_STORAGE_KEY = "chat_diff_sidebar_width";
 const DIFF_INLINE_DEFAULT_WIDTH = "clamp(28rem,48vw,44rem)";
 const DIFF_INLINE_SIDEBAR_MIN_WIDTH = 26 * 16;
 const COMPOSER_COMPACT_MIN_LEFT_CONTROLS_WIDTH_PX = 208;
-
-const DiffPanelSheet = (props: {
-  children: ReactNode;
-  diffOpen: boolean;
-  onCloseDiff: () => void;
-}) => {
-  return (
-    <Sheet
-      open={props.diffOpen}
-      onOpenChange={(open) => {
-        if (!open) {
-          props.onCloseDiff();
-        }
-      }}
-    >
-      <SheetPopup
-        side="right"
-        showCloseButton={false}
-        keepMounted
-        className="w-[min(88vw,820px)] max-w-[820px] p-0"
-      >
-        {props.children}
-      </SheetPopup>
-    </Sheet>
-  );
-};
 
 const DiffLoadingFallback = (props: { mode: DiffPanelMode }) => {
   return (
@@ -175,446 +136,117 @@ const DiffPanelInlineSidebar = (props: {
   );
 };
 
-/** Renders a single thread pane inside a split leaf. */
-function SplitThreadPane({
-  threadId,
-  onCloseSplitPane,
-}: {
-  threadId: ThreadId;
-  onCloseSplitPane: () => void;
-}) {
-  return (
-    <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-background text-foreground">
-      <ChatView key={threadId} threadId={threadId} onCloseSplitPane={onCloseSplitPane} />
-    </div>
-  );
-}
-
 function ChatThreadRouteView() {
-  const threadsHydrated = useStore((store) => store.threadsHydrated);
-  const threads = useStore((store) => store.threads);
   const navigate = useNavigate();
-  const threadId = Route.useParams({
-    select: (params) => ThreadId.makeUnsafe(params.threadId),
+  const threadRef = Route.useParams({
+    select: (params) => resolveThreadRouteRef(params),
   });
   const search = Route.useSearch();
-  const draftThreadsByThreadId = useComposerDraftStore((store) => store.draftThreadsByThreadId);
-  const threadExists = threads.some((thread) => thread.id === threadId);
-  const draftThreadExists = Object.hasOwn(draftThreadsByThreadId, threadId);
+  const bootstrapComplete = useStore(
+    (store) => selectEnvironmentState(store, threadRef?.environmentId ?? null).bootstrapComplete,
+  );
+  const serverThread = useStore(useMemo(() => createThreadSelectorByRef(threadRef), [threadRef]));
+  const threadExists = useStore((store) => selectThreadExistsByRef(store, threadRef));
+  const environmentHasServerThreads = useStore(
+    (store) => selectEnvironmentState(store, threadRef?.environmentId ?? null).threadIds.length > 0,
+  );
+  const draftThreadExists = useComposerDraftStore((store) =>
+    threadRef ? store.getDraftThreadByRef(threadRef) !== null : false,
+  );
+  const draftThread = useComposerDraftStore((store) =>
+    threadRef ? store.getDraftThreadByRef(threadRef) : null,
+  );
+  const environmentHasDraftThreads = useComposerDraftStore((store) => {
+    if (!threadRef) {
+      return false;
+    }
+    return store.hasDraftThreadsInEnvironment(threadRef.environmentId);
+  });
   const routeThreadExists = threadExists || draftThreadExists;
+  const serverThreadStarted = threadHasStarted(serverThread);
+  const environmentHasAnyThreads = environmentHasServerThreads || environmentHasDraftThreads;
   const diffOpen = search.diff === "1";
-  const shouldUseDiffSheet = useMediaQuery(DIFF_INLINE_LAYOUT_MEDIA_QUERY);
-  const [hasOpenedDiff, setHasOpenedDiff] = useState(diffOpen);
-  const commandPaletteOpen = useCommandPaletteStore((state) => state.open);
-  const commandPaletteMode = useCommandPaletteStore((state) => state.mode);
-  const commandPalettePreviewLeafId = useCommandPaletteStore((state) => state.previewLeafId);
-  const commandPalettePreviewThreadId = useCommandPaletteStore((state) => state.previewThreadId);
-
-  // Split view state
-  const splitGroup = useSplitViewStore((s) => s.group);
-  const workspaces = useSplitViewStore((s) => s.workspaces);
-  const activateWorkspace = useSplitViewStore((s) => s.activateWorkspace);
-  const setFocusedLeaf = useSplitViewStore((s) => s.setFocusedLeaf);
-  const splitThread = useSplitViewStore((s) => s.splitThread);
-  const splitLeaf = useSplitViewStore((s) => s.splitLeaf);
-  const replaceThreadInLeaf = useSplitViewStore((s) => s.replaceThreadInLeaf);
-  const reconcileThreads = useSplitViewStore((s) => s.reconcileThreads);
-  const setProjectDraftThreadId = useComposerDraftStore((s) => s.setProjectDraftThreadId);
-  const isSplitView = splitGroup !== null;
-
-  // Drop zone visual state for single-thread mode
-  const [initialDropZone, setInitialDropZone] = useState<DropZone | null>(null);
-
-  const createProjectDraftThread = useCallback(
-    (projectId: ProjectId): ThreadId => {
-      const tid = newThreadId();
-      setProjectDraftThreadId(projectId, tid, {
-        createdAt: new Date().toISOString(),
-        branch: null,
-        worktreePath: null,
-        envMode: "local",
-        runtimeMode: "full-access",
-      });
-      return tid;
-    },
-    [setProjectDraftThreadId],
-  );
-
-  /** Handle a thread/project dropped onto a split pane's drop zone. */
-  const handleSplitDrop = useCallback(
-    (
-      leafId: string,
-      droppedThreadId: ThreadId | null,
-      projectId: string | null,
-      zone: DropZone,
-    ) => {
-      if (droppedThreadId) {
-        const workspaceWithThread = workspaces.find((workspace) =>
-          findLeafByThreadId(workspace.root, droppedThreadId),
-        );
-        const existingWorkspaceLeaf = workspaceWithThread
-          ? findLeafByThreadId(workspaceWithThread.root, droppedThreadId)
-          : null;
-
-        if (workspaceWithThread && existingWorkspaceLeaf) {
-          activateWorkspace(workspaceWithThread.id);
-          setFocusedLeaf(existingWorkspaceLeaf.id);
-          void navigate({
-            to: "/$threadId",
-            params: { threadId: droppedThreadId },
-          });
-          return;
-        }
-
-        if (zone === "center") {
-          if (!isSplitView) {
-            void navigate({
-              to: "/$threadId",
-              params: { threadId: droppedThreadId },
-            });
-            return;
-          }
-          const existingLeaf = splitGroup
-            ? findLeafByThreadId(splitGroup.root, droppedThreadId)
-            : null;
-          if (existingLeaf) {
-            setFocusedLeaf(existingLeaf.id);
-          } else {
-            replaceThreadInLeaf(leafId, droppedThreadId);
-          }
-          return;
-        }
-        const { direction, insertBefore } = dropZoneToSplit(zone);
-        if (isSplitView) {
-          splitLeaf(leafId, droppedThreadId, direction, insertBefore);
-        } else {
-          splitThread(threadId, droppedThreadId, direction, insertBefore);
-        }
-      } else if (projectId) {
-        const tid = createProjectDraftThread(projectId as ProjectId);
-        if (zone === "center") {
-          if (isSplitView) {
-            replaceThreadInLeaf(leafId, tid);
-          } else {
-            void navigate({
-              to: "/$threadId",
-              params: { threadId: tid },
-            });
-          }
-          return;
-        }
-        const { direction, insertBefore } = dropZoneToSplit(zone);
-        if (isSplitView) {
-          splitLeaf(leafId, tid, direction, insertBefore);
-        } else {
-          splitThread(threadId, tid, direction, insertBefore);
-        }
+  const shouldUseDiffSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
+  const currentThreadKey = threadRef ? `${threadRef.environmentId}:${threadRef.threadId}` : null;
+  const [diffPanelMountState, setDiffPanelMountState] = useState(() => ({
+    threadKey: currentThreadKey,
+    hasOpenedDiff: diffOpen,
+  }));
+  const hasOpenedDiff =
+    diffPanelMountState.threadKey === currentThreadKey
+      ? diffPanelMountState.hasOpenedDiff
+      : diffOpen;
+  const markDiffOpened = useCallback(() => {
+    setDiffPanelMountState((previous) => {
+      if (previous.threadKey === currentThreadKey && previous.hasOpenedDiff) {
+        return previous;
       }
-    },
-    [
-      activateWorkspace,
-      createProjectDraftThread,
-      isSplitView,
-      navigate,
-      replaceThreadInLeaf,
-      setFocusedLeaf,
-      splitGroup,
-      splitLeaf,
-      splitThread,
-      threadId,
-      workspaces,
-    ],
-  );
-
-  /** Handle initial drop onto the single-thread view (not yet split). */
-  const handleInitialDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      const droppedThreadId = e.dataTransfer.getData("application/t3-thread-id") || null;
-      const droppedProjectId = e.dataTransfer.getData("application/t3-project-id") || null;
-      const dragType = e.dataTransfer.getData("application/t3-drag-type");
-
-      const rect = e.currentTarget.getBoundingClientRect();
-      const zone = computeClosestDropZone(e.clientX, e.clientY, rect);
-      if (dragType === "project" && droppedProjectId) {
-        const tid = createProjectDraftThread(droppedProjectId as ProjectId);
-        if (zone === "center") {
-          void navigate({
-            to: "/$threadId",
-            params: { threadId: tid },
-          });
-          return;
-        }
-        const { direction, insertBefore } = dropZoneToSplit(zone);
-        splitThread(threadId, tid, direction, insertBefore);
-      } else if (droppedThreadId && droppedThreadId !== threadId) {
-        const workspaceWithThread = workspaces.find((workspace) =>
-          findLeafByThreadId(workspace.root, droppedThreadId as ThreadId),
-        );
-        const existingWorkspaceLeaf = workspaceWithThread
-          ? findLeafByThreadId(workspaceWithThread.root, droppedThreadId as ThreadId)
-          : null;
-        if (workspaceWithThread && existingWorkspaceLeaf) {
-          activateWorkspace(workspaceWithThread.id);
-          setFocusedLeaf(existingWorkspaceLeaf.id);
-          void navigate({
-            to: "/$threadId",
-            params: { threadId: droppedThreadId as ThreadId },
-          });
-          return;
-        }
-        if (zone === "center") {
-          void navigate({
-            to: "/$threadId",
-            params: { threadId: droppedThreadId as ThreadId },
-          });
-          return;
-        }
-        const { direction, insertBefore } = dropZoneToSplit(zone);
-        splitThread(threadId, droppedThreadId as ThreadId, direction, insertBefore);
-      }
-    },
-    [
-      activateWorkspace,
-      createProjectDraftThread,
-      navigate,
-      setFocusedLeaf,
-      splitThread,
-      threadId,
-      workspaces,
-    ],
-  );
-
-  const availableThreadIds = useMemo(() => {
-    const next = new Set<ThreadId>();
-    for (const thread of threads) {
-      next.add(thread.id);
-    }
-    for (const draftThreadId of Object.keys(draftThreadsByThreadId) as ThreadId[]) {
-      next.add(draftThreadId);
-    }
-    return next;
-  }, [draftThreadsByThreadId, threads]);
-
-  const routeFallbackThreadId = useMemo(() => {
-    if (!splitGroup) return null;
-    const focusedLeaf = findLeaf(splitGroup.root, splitGroup.focusedLeafId);
-    if (focusedLeaf?.paneType === "thread") return focusedLeaf.threadId;
-    if (focusedLeaf?.paneType === "browser") return focusedLeaf.targetThreadId;
-    const first = firstLeaf(splitGroup.root);
-    return first.paneType === "thread" ? first.threadId : first.targetThreadId;
-  }, [splitGroup]);
-  const focusedThreadId = routeFallbackThreadId ?? threadId;
-
-  const closeDiff = useCallback(() => {
-    void navigate({
-      to: "/$threadId",
-      params: { threadId: focusedThreadId },
-      search: (previous) => {
-        return clearDiffSearchParams(previous) as unknown as DiffRouteSearch;
-      },
+      return {
+        threadKey: currentThreadKey,
+        hasOpenedDiff: true,
+      };
     });
-  }, [focusedThreadId, navigate]);
-  const openDiff = useCallback(() => {
+  }, [currentThreadKey]);
+  const closeDiff = useCallback(() => {
+    if (!threadRef) {
+      return;
+    }
     void navigate({
-      to: "/$threadId",
-      params: { threadId: focusedThreadId },
+      to: "/$environmentId/$threadId",
+      params: buildThreadRouteParams(threadRef),
+      search: () => ({}),
+    });
+  }, [navigate, threadRef]);
+  const openDiff = useCallback(() => {
+    if (!threadRef) {
+      return;
+    }
+    markDiffOpened();
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: buildThreadRouteParams(threadRef),
       search: (previous) => {
         const rest = stripDiffSearchParams(previous);
         return { ...rest, diff: "1" };
       },
     });
-  }, [focusedThreadId, navigate]);
-
-  const focusSplitThread = useCallback(
-    (focusedLeafThreadId: ThreadId) => {
-      if (focusedLeafThreadId === threadId) return;
-      void navigate({
-        to: "/$threadId",
-        params: { threadId: focusedLeafThreadId },
-        replace: true,
-        search: (previous) => previous,
-      });
-    },
-    [navigate, threadId],
-  );
+  }, [markDiffOpened, navigate, threadRef]);
 
   useEffect(() => {
-    if (diffOpen) {
-      setHasOpenedDiff(true);
+    if (!threadRef || !bootstrapComplete) {
+      return;
     }
-  }, [diffOpen]);
+
+    if (!routeThreadExists && environmentHasAnyThreads) {
+      void navigate({ to: "/", replace: true });
+    }
+  }, [bootstrapComplete, environmentHasAnyThreads, navigate, routeThreadExists, threadRef]);
 
   useEffect(() => {
-    if (!threadsHydrated) {
+    if (!threadRef || !serverThreadStarted || !draftThread?.promotedTo) {
       return;
     }
+    finalizePromotedDraftThreadByRef(threadRef);
+  }, [draftThread?.promotedTo, serverThreadStarted, threadRef]);
 
-    const remainingThreadId = reconcileThreads(availableThreadIds);
-    if (!routeThreadExists && remainingThreadId && remainingThreadId !== threadId) {
-      void navigate({
-        to: "/$threadId",
-        params: { threadId: remainingThreadId },
-        replace: true,
-      });
-    }
-  }, [
-    availableThreadIds,
-    navigate,
-    reconcileThreads,
-    routeThreadExists,
-    threadId,
-    threadsHydrated,
-  ]);
-
-  useEffect(() => {
-    if (!threadsHydrated || routeThreadExists || isSplitView) {
-      return;
-    }
-
-    if (routeFallbackThreadId && routeFallbackThreadId !== threadId) {
-      void navigate({
-        to: "/$threadId",
-        params: { threadId: routeFallbackThreadId },
-        replace: true,
-      });
-      return;
-    }
-    void navigate({ to: "/", replace: true });
-  }, [isSplitView, navigate, routeFallbackThreadId, routeThreadExists, threadsHydrated, threadId]);
-
-  useEffect(() => {
-    if (
-      !threadsHydrated ||
-      !isSplitView ||
-      !routeFallbackThreadId ||
-      routeFallbackThreadId === threadId
-    ) {
-      return;
-    }
-    if (!availableThreadIds.has(routeFallbackThreadId)) {
-      return;
-    }
-    void navigate({
-      to: "/$threadId",
-      params: { threadId: routeFallbackThreadId },
-      replace: true,
-      search: (previous) => previous,
-    });
-  }, [availableThreadIds, isSplitView, navigate, routeFallbackThreadId, threadId, threadsHydrated]);
-
-  if (!threadsHydrated || (!routeThreadExists && !isSplitView)) {
+  if (!threadRef || !bootstrapComplete || !routeThreadExists) {
     return null;
   }
 
   const shouldRenderDiffContent = diffOpen || hasOpenedDiff;
 
-  // ── Split view mode ──────────────────────────────────────────────
-  if (isSplitView) {
-    const renderLeaf = (leaf: SplitLeaf) => {
-      if (leaf.paneType === "browser") {
-        return <BrowserPane leaf={leaf} />;
-      }
-      const tid = leaf.threadId;
-      const isPaletteSplitPreview =
-        commandPaletteOpen &&
-        commandPaletteMode !== "default" &&
-        commandPalettePreviewLeafId === leaf.id &&
-        commandPalettePreviewThreadId === tid;
-
-      if (isPaletteSplitPreview) {
-        return (
-          <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-background p-2 text-foreground">
-            <SplitPlaceholder />
-          </div>
-        );
-      }
-
-      const onClose = () => {
-        const remaining = useSplitViewStore.getState().closePane(leaf.id);
-        if (remaining) {
-          void navigate({
-            to: "/$threadId",
-            params: { threadId: remaining },
-          });
-        }
-      };
-      return <SplitThreadPane threadId={tid} onCloseSplitPane={onClose} />;
-    };
-
-    return (
-      <div className="flex h-dvh w-full min-h-0 min-w-0 flex-col overflow-hidden">
-        <div className="flex min-h-0 flex-1 overflow-hidden">
-          <SidebarInset className="min-h-0 flex-1 overflow-hidden overscroll-y-none bg-muted py-3 pl-2 pr-3 text-foreground dark:bg-card">
-            <SplitPanelRoot
-              renderLeaf={renderLeaf}
-              onSplitDrop={handleSplitDrop}
-              onFocusLeaf={(leaf) => {
-                if (leaf.paneType === "thread") focusSplitThread(leaf.threadId);
-              }}
-            />
-          </SidebarInset>
-          {!shouldUseDiffSheet && (
-            <DiffPanelInlineSidebar
-              diffOpen={diffOpen}
-              onCloseDiff={closeDiff}
-              onOpenDiff={openDiff}
-              renderDiffContent={diffOpen || hasOpenedDiff}
-            />
-          )}
-          {shouldUseDiffSheet && (
-            <DiffPanelSheet diffOpen={diffOpen} onCloseDiff={closeDiff}>
-              <Suspense fallback={<DiffLoadingFallback mode="sheet" />}>
-                <DiffPanel mode="sheet" />
-              </Suspense>
-            </DiffPanelSheet>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // ── Single thread mode (original behaviour) ─────────────────────
-  // Wrap in a drop target so threads can be dragged here to create an initial split
-  const singleThreadPane = (
-    <SidebarInset
-      className="relative h-[var(--app-viewport-height)] min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground"
-      onDragOver={(e) => {
-        if (
-          e.dataTransfer.types.includes("application/t3-thread-id") ||
-          e.dataTransfer.types.includes("application/t3-project-id")
-        ) {
-          e.preventDefault();
-          const rect = e.currentTarget.getBoundingClientRect();
-          setInitialDropZone(computeClosestDropZone(e.clientX, e.clientY, rect));
-        }
-      }}
-      onDragLeave={(e) => {
-        const rect = e.currentTarget.getBoundingClientRect();
-        if (
-          e.clientX <= rect.left ||
-          e.clientX >= rect.right ||
-          e.clientY <= rect.top ||
-          e.clientY >= rect.bottom
-        ) {
-          setInitialDropZone(null);
-        }
-      }}
-      onDrop={(e) => {
-        setInitialDropZone(null);
-        handleInitialDrop(e);
-      }}
-    >
-      <SplitDropPreview zone={initialDropZone}>
-        <ChatView key={threadId} threadId={threadId} onCloseSplitPane={undefined} />
-      </SplitDropPreview>
-    </SidebarInset>
-  );
-
   if (!shouldUseDiffSheet) {
     return (
       <>
-        {singleThreadPane}
+        <SidebarInset className="h-dvh  min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
+          <ChatView
+            environmentId={threadRef.environmentId}
+            threadId={threadRef.threadId}
+            onDiffPanelOpen={markDiffOpened}
+            reserveTitleBarControlInset={!diffOpen}
+            routeKind="server"
+          />
+        </SidebarInset>
         <DiffPanelInlineSidebar
           diffOpen={diffOpen}
           onCloseDiff={closeDiff}
@@ -627,15 +259,22 @@ function ChatThreadRouteView() {
 
   return (
     <>
-      {singleThreadPane}
-      <DiffPanelSheet diffOpen={diffOpen} onCloseDiff={closeDiff}>
+      <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
+        <ChatView
+          environmentId={threadRef.environmentId}
+          threadId={threadRef.threadId}
+          onDiffPanelOpen={markDiffOpened}
+          routeKind="server"
+        />
+      </SidebarInset>
+      <RightPanelSheet open={diffOpen} onClose={closeDiff}>
         {shouldRenderDiffContent ? <LazyDiffPanel mode="sheet" /> : null}
-      </DiffPanelSheet>
+      </RightPanelSheet>
     </>
   );
 }
 
-export const Route = createFileRoute("/_chat/$threadId")({
+export const Route = createFileRoute("/_chat/$environmentId/$threadId")({
   validateSearch: (search) => parseDiffRouteSearch(search),
   search: {
     middlewares: [retainSearchParams<DiffRouteSearch>(["diff"])],

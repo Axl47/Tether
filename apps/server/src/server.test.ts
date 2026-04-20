@@ -34,6 +34,7 @@ import {
   ManagedRuntime,
   Option,
   Path,
+  Scope,
   Stream,
 } from "effect";
 import {
@@ -109,6 +110,7 @@ import { ServerAuthLive } from "./auth/Layers/ServerAuth.ts";
 const defaultProjectId = ProjectId.make("project-default");
 const defaultThreadId = ThreadId.make("thread-default");
 const defaultDesktopBootstrapToken = "test-desktop-bootstrap-token";
+type ServerTestEnvironment = Scope.Scope | NodeServices.NodeServices;
 const defaultModelSelection = {
   provider: "codex",
   model: "gpt-5-codex",
@@ -155,6 +157,8 @@ const makeDefaultOrchestrationReadModel = () => {
         createdAt: now,
         updatedAt: now,
         archivedAt: null,
+        contextWindow: null,
+        lastAutoRenameUserMessageId: null,
         latestTurn: null,
         messages: [],
         session: null,
@@ -2892,6 +2896,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             createdAt: now,
             updatedAt: now,
             archivedAt: null,
+            contextWindow: null,
+            lastAutoRenameUserMessageId: null,
             latestTurn: null,
             messages: [],
             session: null,

@@ -313,7 +313,7 @@ export function writePreferredTerminalEditor(editor: EditorId): void {
 }
 
 export function preferredTerminalEditor(availableEditors?: ReadonlyArray<EditorId>): EditorId {
-  const fallback = EDITORS.find((editor) => editor.command)?.id ?? "cursor";
+  const fallback = EDITORS.find((editor) => editor.commands !== null)?.id ?? "cursor";
 
   const storedEditor = readPreferredTerminalEditor();
   if (availableEditors) {

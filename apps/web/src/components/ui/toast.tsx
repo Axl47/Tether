@@ -3,7 +3,8 @@
 import { Toast, type ToastObject } from "@base-ui/react/toast";
 import { useEffect, type CSSProperties, type ReactNode } from "react";
 import { useParams } from "@tanstack/react-router";
-import { ThreadId } from "@t3tools/contracts";
+import { scopeThreadRef } from "@t3tools/client-runtime";
+import { type ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import {
   CircleAlertIcon,
   CircleCheckIcon,
@@ -14,10 +15,16 @@ import {
 
 import { cn } from "~/lib/utils";
 import { buttonVariants } from "~/components/ui/button";
-import { buildVisibleToastLayout, shouldHideCollapsedToastContent } from "./toast.logic";
+import {
+  buildVisibleToastLayout,
+  shouldHideCollapsedToastContent,
+  shouldRenderThreadScopedToast,
+} from "./toast.logic";
 
-type ThreadToastData = {
+export type ThreadToastData = {
+  threadRef?: ScopedThreadRef | null;
   threadId?: ThreadId | null;
+  hideCopyButton?: boolean;
   tooltipStyle?: boolean;
   dismissAfterVisibleMs?: number;
   actions?: ReadonlyArray<{
@@ -52,20 +59,13 @@ interface ToastProviderProps extends Toast.Provider.Props {
   position?: ToastPosition;
 }
 
-function shouldRenderForActiveThread(
-  data: ThreadToastData | undefined,
-  activeThreadId: ThreadId | null,
-): boolean {
-  const toastThreadId = data?.threadId;
-  if (!toastThreadId) return true;
-  return toastThreadId === activeThreadId;
-}
-
-function useActiveThreadIdFromRoute(): ThreadId | null {
+function useActiveThreadRefFromRoute(): ScopedThreadRef | null {
   return useParams({
     strict: false,
     select: (params) =>
-      typeof params.threadId === "string" ? ThreadId.makeUnsafe(params.threadId) : null,
+      typeof params.environmentId === "string" && typeof params.threadId === "string"
+        ? scopeThreadRef(params.environmentId as never, ThreadId.makeUnsafe(params.threadId))
+        : null,
   });
 }
 
@@ -188,10 +188,10 @@ function ToastActions({ toast }: { toast: ToastObject<ThreadToastData> }) {
 
 function Toasts({ position = "top-right" }: { position: ToastPosition }) {
   const { toasts } = Toast.useToastManager<ThreadToastData>();
-  const activeThreadId = useActiveThreadIdFromRoute();
+  const activeThreadRef = useActiveThreadRefFromRoute();
   const isTop = position.startsWith("top");
   const visibleToasts = toasts.filter((toast) =>
-    shouldRenderForActiveThread(toast.data, activeThreadId),
+    shouldRenderThreadScopedToast(toast.data, activeThreadRef),
   );
   const visibleToastLayout = buildVisibleToastLayout(visibleToasts);
 
@@ -350,13 +350,13 @@ function AnchoredToastProvider({ children, ...props }: Toast.Provider.Props) {
 
 function AnchoredToasts() {
   const { toasts } = Toast.useToastManager<ThreadToastData>();
-  const activeThreadId = useActiveThreadIdFromRoute();
+  const activeThreadRef = useActiveThreadRefFromRoute();
 
   return (
     <Toast.Portal data-slot="toast-portal-anchored">
       <Toast.Viewport className="outline-none" data-slot="toast-viewport-anchored">
         {toasts
-          .filter((toast) => shouldRenderForActiveThread(toast.data, activeThreadId))
+          .filter((toast) => shouldRenderThreadScopedToast(toast.data, activeThreadRef))
           .map((toast) => {
             const Icon = toast.type ? TOAST_ICONS[toast.type as keyof typeof TOAST_ICONS] : null;
             const tooltipStyle = toast.data?.tooltipStyle ?? false;

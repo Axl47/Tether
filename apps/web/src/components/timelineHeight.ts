@@ -113,5 +113,7 @@ export function estimateTimelineMessageHeight(
   }
 
   const charsPerLine = estimateCharsPerLineForAssistant(layout.timelineWidthPx);
-  return ASSISTANT_BASE_HEIGHT_PX + estimateWrappedLineCount(message.text, charsPerLine) * LINE_HEIGHT_PX;
+  return (
+    ASSISTANT_BASE_HEIGHT_PX + estimateWrappedLineCount(message.text, charsPerLine) * LINE_HEIGHT_PX
+  );
 }

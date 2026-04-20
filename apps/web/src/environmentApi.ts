@@ -6,6 +6,12 @@ import { readEnvironmentConnection } from "./environments/runtime";
 const environmentApiOverridesForTests = new Map<EnvironmentId, EnvironmentApi>();
 
 export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
+  const unsupportedOrchestrationOperation = (name: string) =>
+    new Error(`Environment orchestration.${name} is unavailable in this runtime.`);
+  const unsupportedBrowserOperation = (name: string) =>
+    new Error(`Environment browser.${name} is unavailable in this runtime.`);
+  const desktopBrowser = typeof window === "undefined" ? undefined : window.desktopBridge?.browser;
+
   return {
     terminal: {
       open: (input) => rpcClient.terminal.open(input as never),
@@ -18,6 +24,9 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
     },
     projects: {
       searchEntries: rpcClient.projects.searchEntries,
+      readFile: async () => {
+        throw new Error("Environment projects.readFile is unavailable in this runtime.");
+      },
       writeFile: rpcClient.projects.writeFile,
     },
     filesystem: {
@@ -36,10 +45,101 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       resolvePullRequest: rpcClient.git.resolvePullRequest,
       preparePullRequestThread: rpcClient.git.preparePullRequestThread,
     },
+    browser: {
+      ensurePane: async (input) => {
+        if (!desktopBrowser) {
+          throw unsupportedBrowserOperation("ensurePane");
+        }
+        return desktopBrowser.ensurePane(input);
+      },
+      destroyPane: async (input) => {
+        if (!desktopBrowser) {
+          throw unsupportedBrowserOperation("destroyPane");
+        }
+        return desktopBrowser.destroyPane(input);
+      },
+      setBounds: async (input) => {
+        if (!desktopBrowser) {
+          throw unsupportedBrowserOperation("setBounds");
+        }
+        return desktopBrowser.setBounds(input);
+      },
+      setVisible: async (input) => {
+        if (!desktopBrowser) {
+          throw unsupportedBrowserOperation("setVisible");
+        }
+        return desktopBrowser.setVisible(input);
+      },
+      navigate: async (input) => {
+        if (!desktopBrowser) {
+          throw unsupportedBrowserOperation("navigate");
+        }
+        return desktopBrowser.navigate(input);
+      },
+      goBack: async (input) => {
+        if (!desktopBrowser) {
+          throw unsupportedBrowserOperation("goBack");
+        }
+        return desktopBrowser.goBack(input);
+      },
+      goForward: async (input) => {
+        if (!desktopBrowser) {
+          throw unsupportedBrowserOperation("goForward");
+        }
+        return desktopBrowser.goForward(input);
+      },
+      reload: async (input) => {
+        if (!desktopBrowser) {
+          throw unsupportedBrowserOperation("reload");
+        }
+        return desktopBrowser.reload(input);
+      },
+      stop: async (input) => {
+        if (!desktopBrowser) {
+          throw unsupportedBrowserOperation("stop");
+        }
+        return desktopBrowser.stop(input);
+      },
+      captureScreenshot: async (input) => {
+        if (!desktopBrowser) {
+          throw unsupportedBrowserOperation("captureScreenshot");
+        }
+        return desktopBrowser.captureScreenshot(input);
+      },
+      getSnapshot: async (input) => {
+        if (!desktopBrowser) {
+          throw unsupportedBrowserOperation("getSnapshot");
+        }
+        return desktopBrowser.getSnapshot(input);
+      },
+      onEvent: (callback) => {
+        if (!desktopBrowser) {
+          return () => undefined;
+        }
+        return desktopBrowser.onEvent(callback);
+      },
+      syncShortcutState: async (state) => {
+        if (!desktopBrowser) {
+          throw unsupportedBrowserOperation("syncShortcutState");
+        }
+        return desktopBrowser.syncShortcutState(state);
+      },
+    },
     orchestration: {
+      getSnapshot: async () => {
+        throw unsupportedOrchestrationOperation("getSnapshot");
+      },
       dispatchCommand: rpcClient.orchestration.dispatchCommand,
+      forceDeleteThread: async () => {
+        throw unsupportedOrchestrationOperation("forceDeleteThread");
+      },
       getTurnDiff: rpcClient.orchestration.getTurnDiff,
       getFullThreadDiff: rpcClient.orchestration.getFullThreadDiff,
+      autorenameProjectThreads: async () => {
+        throw unsupportedOrchestrationOperation("autorenameProjectThreads");
+      },
+      replayEvents: async () => [],
+      onDomainEvent: () => () => undefined,
       subscribeShell: (callback, options) =>
         rpcClient.orchestration.subscribeShell(callback, options),
       subscribeThread: (input, callback, options) =>

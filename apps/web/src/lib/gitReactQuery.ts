@@ -19,6 +19,8 @@ const GIT_BRANCHES_PAGE_SIZE = 100;
 
 export const gitQueryKeys = {
   all: ["git"] as const,
+  status: (environmentId: EnvironmentId | null, cwd: string | null) =>
+    ["git", "status", environmentId ?? null, cwd] as const,
   branches: (environmentId: EnvironmentId | null, cwd: string | null) =>
     ["git", "branches", environmentId ?? null, cwd] as const,
   branchSearch: (environmentId: EnvironmentId | null, cwd: string | null, query: string) =>
@@ -118,6 +120,26 @@ export function gitResolvePullRequestQueryOptions(input: {
     staleTime: 30_000,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
+  });
+}
+
+export function gitStatusQueryOptions(
+  cwd: string | null,
+  input?: { environmentId?: EnvironmentId | null },
+) {
+  const environmentId = input?.environmentId ?? null;
+  return queryOptions({
+    queryKey: gitQueryKeys.status(environmentId, cwd),
+    queryFn: async () => {
+      if (!cwd || !environmentId) {
+        throw new Error("Git status is unavailable.");
+      }
+      return ensureEnvironmentApi(environmentId).git.refreshStatus({ cwd });
+    },
+    enabled: cwd !== null && environmentId !== null,
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   });
 }
 

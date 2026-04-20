@@ -172,9 +172,15 @@ const ProviderRegistryLiveBase = Layer.effect(
     );
     const providersRef = yield* Ref.make<ReadonlyArray<ServerProvider>>(cachedProviders);
 
-    const persistProvider = (provider: ServerProvider) =>
-      writeProviderStatusCache({
-        filePath: cachePathByProvider.get(provider.provider)!,
+    const persistProvider = (provider: ServerProvider) => {
+      const filePath = cachePathByProvider.get(
+        provider.provider as (typeof PROVIDER_CACHE_IDS)[number],
+      );
+      if (!filePath) {
+        return Effect.void;
+      }
+      return writeProviderStatusCache({
+        filePath,
         provider,
       }).pipe(
         Effect.provideService(FileSystem.FileSystem, fileSystem),
@@ -182,6 +188,7 @@ const ProviderRegistryLiveBase = Layer.effect(
         Effect.tapError(Effect.logError),
         Effect.ignore,
       );
+    };
 
     const upsertProviders = Effect.fn("upsertProviders")(function* (
       nextProviders: ReadonlyArray<ServerProvider>,

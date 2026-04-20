@@ -6,7 +6,11 @@ import {
   type UnifiedSettings,
 } from "@t3tools/contracts/settings";
 import { DEFAULT_MODEL_BY_PROVIDER } from "@t3tools/contracts";
-import { getDefaultModel, normalizeModelSlug, resolveModelSlugForProvider } from "@t3tools/shared/model";
+import {
+  getDefaultModel,
+  normalizeModelSlug,
+  resolveModelSlugForProvider,
+} from "@t3tools/shared/model";
 
 import { useSettings, useUpdateSettings } from "./hooks/useSettings";
 
@@ -168,8 +172,10 @@ export function useAppSettings() {
           patch.sidebarThreadSort === "created" ? "created_at" : "updated_at";
       }
 
-      const providerPatch: Record<string, UnifiedSettings["providers"][keyof UnifiedSettings["providers"]]> =
-        {};
+      const providerPatch: Record<
+        string,
+        UnifiedSettings["providers"][keyof UnifiedSettings["providers"]]
+      > = {};
       const mergeProvider = (
         provider: keyof UnifiedSettings["providers"],
         partial: Partial<UnifiedSettings["providers"][typeof provider]>,

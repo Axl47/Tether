@@ -113,7 +113,7 @@ export function normalizeClaudeContextWindow(
   const usedPercent = clampPercent((usedTokens / maxTokens) * 100);
 
   return {
-    provider: "claudeCode",
+    provider: "claudeAgent",
     usedTokens,
     maxTokens,
     remainingTokens,

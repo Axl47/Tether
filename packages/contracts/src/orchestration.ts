@@ -34,7 +34,13 @@ export const ORCHESTRATION_WS_METHODS = {
   subscribeThread: "orchestration.subscribeThread",
 } as const;
 
-export const ProviderKind = Schema.Literals(["codex", "claudeAgent", "cursor", "gemini", "opencode"]);
+export const ProviderKind = Schema.Literals([
+  "codex",
+  "claudeAgent",
+  "cursor",
+  "gemini",
+  "opencode",
+]);
 export type ProviderKind = typeof ProviderKind.Type;
 export const ProviderApprovalPolicy = Schema.Literals([
   "untrusted",

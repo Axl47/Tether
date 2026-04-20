@@ -1105,7 +1105,9 @@ function buildProjectState(
   };
 }
 
-function getEnvironmentStateRecord(state: Pick<AppState, "environmentStateById">): Record<string, EnvironmentState> {
+function getEnvironmentStateRecord(
+  state: Pick<AppState, "environmentStateById">,
+): Record<string, EnvironmentState> {
   return state.environmentStateById ?? {};
 }
 
@@ -1174,22 +1176,21 @@ function mapLegacyProjectsFromReadModel(
   const previousById = new Map(previous.map((project) => [project.id, project] as const));
   const previousByCwd = new Map(previous.map((project) => [project.cwd, project] as const));
   const previousOrderById = new Map(previous.map((project, index) => [project.id, index] as const));
-  const previousOrderByCwd = new Map(previous.map((project, index) => [project.cwd, index] as const));
+  const previousOrderByCwd = new Map(
+    previous.map((project, index) => [project.cwd, index] as const),
+  );
 
   const mappedProjects = incoming.map((project) => {
     const existing = previousById.get(project.id) ?? previousByCwd.get(project.workspaceRoot);
     const defaultModelSelection = resolveProjectDefaultModelSelection(project);
     return {
       id: project.id,
-      environmentId: existing?.environmentId,
+      environmentId: existing?.environmentId ?? ("" as EnvironmentId),
       name: project.title,
       cwd: project.workspaceRoot,
       repositoryIdentity: project.repositoryIdentity ?? existing?.repositoryIdentity ?? null,
       defaultModelSelection,
-      model:
-        existing?.model ??
-        defaultModelSelection?.model ??
-        DEFAULT_MODEL_BY_PROVIDER.codex,
+      model: existing?.model ?? defaultModelSelection?.model ?? DEFAULT_MODEL_BY_PROVIDER.codex,
       defaultModel:
         defaultModelSelection?.model ??
         existing?.defaultModel ??
@@ -1239,7 +1240,7 @@ function mapLegacyThreadsFromReadModel(
     });
     return {
       id: thread.id,
-      environmentId: existing?.environmentId,
+      environmentId: existing?.environmentId ?? ("" as EnvironmentId),
       codexThreadId: null,
       projectId: thread.projectId,
       title: thread.title,
@@ -1249,10 +1250,7 @@ function mapLegacyThreadsFromReadModel(
       interactionMode: thread.interactionMode,
       session: thread.session ? mapSession(thread.session) : null,
       messages: thread.messages.map((message) =>
-        mapMessage(
-          existing?.environmentId ?? ("" as EnvironmentId),
-          message,
-        ),
+        mapMessage(existing?.environmentId ?? ("" as EnvironmentId), message),
       ),
       proposedPlans: thread.proposedPlans.map(mapProposedPlan),
       error: sanitizeThreadErrorMessage(thread.session?.lastError),
@@ -1380,10 +1378,7 @@ export function reorderProjects(
   };
 }
 
-export function syncServerReadModel(
-  state: AppState,
-  readModel: OrchestrationReadModel,
-): AppState {
+export function syncServerReadModel(state: AppState, readModel: OrchestrationReadModel): AppState {
   return {
     ...state,
     projects: mapLegacyProjectsFromReadModel(readModel.projects, state.projects ?? []),

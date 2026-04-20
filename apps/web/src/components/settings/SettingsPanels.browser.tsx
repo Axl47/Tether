@@ -279,6 +279,28 @@ const createDesktopBridgeStub = (overrides?: {
   };
 
   return {
+    browser: {
+      ensurePane: vi.fn().mockResolvedValue(undefined),
+      destroyPane: vi.fn().mockResolvedValue(undefined),
+      setBounds: vi.fn().mockResolvedValue(undefined),
+      setVisible: vi.fn().mockResolvedValue(undefined),
+      navigate: vi.fn().mockResolvedValue(undefined),
+      goBack: vi.fn().mockResolvedValue(undefined),
+      goForward: vi.fn().mockResolvedValue(undefined),
+      reload: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue(undefined),
+      captureScreenshot: vi.fn().mockResolvedValue({ dataUrl: null }),
+      getSnapshot: vi.fn().mockResolvedValue({
+        paneId: "pane-test",
+        title: null,
+        url: null,
+        canGoBack: false,
+        canGoForward: false,
+        isLoading: false,
+      }),
+      onEvent: () => () => {},
+      syncShortcutState: vi.fn().mockResolvedValue(undefined),
+    },
     getAppBranding: vi.fn().mockReturnValue(null),
     getLocalEnvironmentBootstrap: () => ({
       label: "Local environment",
@@ -293,6 +315,7 @@ const createDesktopBridgeStub = (overrides?: {
     getSavedEnvironmentSecret: vi.fn().mockResolvedValue(null),
     setSavedEnvironmentSecret: vi.fn().mockResolvedValue(true),
     removeSavedEnvironmentSecret: vi.fn().mockResolvedValue(undefined),
+    getWsUrl: vi.fn().mockReturnValue("ws://127.0.0.1:3773"),
     getServerExposureState: vi.fn().mockResolvedValue(
       overrides?.serverExposureState ?? {
         mode: "local-only",

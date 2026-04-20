@@ -1,31 +1,69 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { Effect, FileSystem, Layer } from "effect";
-import { ServerConfig, type ServerConfigShape } from "./config";
+import { ServerConfig, type ServerConfigShape } from "./config.ts";
 import {
   LOCAL_TETHER_DISCOVERY_TTL_MS,
   buildLocalTetherWsUrl,
   publishLocalTetherDiscovery,
   resolveLocalTetherDiscoveryHost,
   type LocalTetherDiscoveryDescriptor,
-} from "./localTetherDiscovery";
+} from "./localTetherDiscovery.ts";
 
 const makeConfigLayer = (overrides: Partial<ServerConfigShape> = {}) =>
-  Layer.succeed(ServerConfig, {
-    mode: "web",
-    port: 3773,
-    host: undefined,
-    cwd: "/tmp/tether",
-    keybindingsConfigPath: "/tmp/tether/keybindings.json",
-    stateDir: "/tmp/tether-state",
-    staticDir: undefined,
-    devUrl: undefined,
-    noBrowser: true,
-    authToken: undefined,
-    autoBootstrapProjectFromCwd: false,
-    logWebSocketEvents: false,
-    ...overrides,
-  } satisfies ServerConfigShape);
+  (() => {
+    const baseDir = mkdtempSync(join(tmpdir(), "tether-local-discovery-config-"));
+    const stateDir = join(baseDir, "userdata");
+    const logsDir = join(stateDir, "logs");
+    const providerLogsDir = join(logsDir, "provider");
+
+    return Layer.succeed(ServerConfig, {
+      logLevel: "Error",
+      traceMinLevel: "Info",
+      traceTimingEnabled: true,
+      traceBatchWindowMs: 200,
+      traceMaxBytes: 10 * 1024 * 1024,
+      traceMaxFiles: 10,
+      otlpTracesUrl: undefined,
+      otlpMetricsUrl: undefined,
+      otlpExportIntervalMs: 10_000,
+      otlpServiceName: "t3-server",
+      mode: "web",
+      port: 3773,
+      host: undefined,
+      cwd: "/tmp/tether",
+      baseDir,
+      stateDir,
+      dbPath: join(stateDir, "state.sqlite"),
+      keybindingsConfigPath: join(stateDir, "keybindings.json"),
+      settingsPath: join(stateDir, "settings.json"),
+      providerStatusCacheDir: join(baseDir, "caches"),
+      worktreesDir: join(baseDir, "worktrees"),
+      attachmentsDir: join(stateDir, "attachments"),
+      logsDir,
+      serverLogPath: join(logsDir, "server.log"),
+      serverTracePath: join(logsDir, "server.trace.ndjson"),
+      providerLogsDir,
+      providerEventLogPath: join(providerLogsDir, "events.log"),
+      terminalLogsDir: join(logsDir, "terminals"),
+      anonymousIdPath: join(stateDir, "anonymous-id"),
+      environmentIdPath: join(stateDir, "environment-id"),
+      serverRuntimeStatePath: join(stateDir, "server-runtime.json"),
+      secretsDir: join(stateDir, "secrets"),
+      staticDir: undefined,
+      devUrl: undefined,
+      noBrowser: true,
+      startupPresentation: "browser",
+      desktopBootstrapToken: undefined,
+      autoBootstrapProjectFromCwd: false,
+      logWebSocketEvents: false,
+      ...overrides,
+    } satisfies ServerConfigShape);
+  })();
 
 const readDescriptor = (recordPath: string) =>
   Effect.gen(function* () {
@@ -80,7 +118,6 @@ it.layer(NodeServices.layer)("localTetherDiscovery", (it) => {
             mode: "desktop",
             port: 56875,
             host: "127.0.0.1",
-            authToken: "desktop-secret",
           }),
         ),
       );
@@ -89,7 +126,7 @@ it.layer(NodeServices.layer)("localTetherDiscovery", (it) => {
 
       assert.equal(descriptor.mode, "desktop");
       assert.equal(descriptor.host, "127.0.0.1");
-      assert.equal(descriptor.wsUrl, "ws://127.0.0.1:56875/?token=desktop-secret");
+      assert.equal(descriptor.wsUrl, "ws://127.0.0.1:56875/");
     }).pipe(Effect.scoped),
   );
 
@@ -173,9 +210,8 @@ it.layer(NodeServices.layer)("localTetherDiscovery", (it) => {
       buildLocalTetherWsUrl({
         host: "::1",
         port: 3773,
-        authToken: "secret",
       }),
-      "ws://[::1]:3773/?token=secret",
+      "ws://[::1]:3773/",
     );
     assert.equal(LOCAL_TETHER_DISCOVERY_TTL_MS, 15_000);
   });

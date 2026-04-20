@@ -149,9 +149,14 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
   const prStatus = prStatusIndicator(pr);
   const threadStatus = resolveThreadStatusPill({
     thread: {
-      ...thread,
+      interactionMode: thread.interactionMode,
+      latestTurn: thread.latestTurn,
       lastVisitedAt,
+      proposedPlans: [],
+      session: thread.session,
     },
+    hasPendingApprovals: thread.hasPendingApprovals,
+    hasPendingUserInput: thread.hasPendingUserInput,
   });
 
   if (!prStatus && !threadStatus) {

@@ -29,7 +29,7 @@ describe("normalizeClaudeContextWindow", () => {
         "2026-03-10T00:00:00.000Z",
       ),
     ).toEqual({
-      provider: "claudeCode",
+      provider: "claudeAgent",
       usedTokens: 89_000,
       maxTokens: 200_000,
       remainingTokens: 111_000,
@@ -61,7 +61,7 @@ describe("normalizeClaudeContextWindow", () => {
         "2026-03-10T00:00:00.000Z",
       ),
     ).toEqual({
-      provider: "claudeCode",
+      provider: "claudeAgent",
       usedTokens: 55_000,
       maxTokens: 180_000,
       remainingTokens: 125_000,

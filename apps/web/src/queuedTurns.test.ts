@@ -1,15 +1,22 @@
-import { EventId, ProjectId, ThreadId, TurnId } from "@t3tools/contracts";
+import { EnvironmentId, EventId, ProjectId, ThreadId, TurnId } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
 import { canAutoDispatchQueuedTurn, queuedMessagePreview } from "./queuedTurns";
 import { type Thread } from "./types";
 
+const ENVIRONMENT_ID = EnvironmentId.make("environment-local");
+
 function makeThread(overrides?: Partial<Thread>): Thread {
   return {
     id: ThreadId.makeUnsafe("thread-1"),
+    environmentId: ENVIRONMENT_ID,
     codexThreadId: "codex-thread-1",
     projectId: ProjectId.makeUnsafe("project-1"),
     title: "Thread",
+    modelSelection: {
+      provider: "codex",
+      model: "gpt-5.4",
+    },
     model: "gpt-5.4",
     runtimeMode: "full-access",
     interactionMode: "default",
@@ -24,6 +31,7 @@ function makeThread(overrides?: Partial<Thread>): Thread {
     proposedPlans: [],
     error: null,
     createdAt: "2026-03-08T00:00:00.000Z",
+    archivedAt: null,
     updatedAt: "2026-03-08T00:00:00.000Z",
     latestTurn: null,
     branch: null,

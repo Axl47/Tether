@@ -136,6 +136,8 @@ export function getThreadFromEnvironmentState(
     activities,
     proposedPlans,
     turnDiffSummaries,
+    contextWindow: null,
+    lastAutoRenameUserMessageId: null,
   };
 
   threadCache.set(shell, {

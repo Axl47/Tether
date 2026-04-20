@@ -255,9 +255,7 @@ export function getReasoningEffortOptions(provider: ProviderKind = "codex"): Rea
   return REASONING_EFFORT_OPTIONS_BY_PROVIDER[provider] ?? [];
 }
 
-export function getDefaultReasoningEffort(
-  provider: ProviderKind = "codex",
-): string | null {
+export function getDefaultReasoningEffort(provider: ProviderKind = "codex"): string | null {
   return DEFAULT_REASONING_EFFORT_BY_PROVIDER[provider] ?? null;
 }
 

@@ -181,7 +181,7 @@ function resolveLocalImageSourcePath(input: {
 export function materializeGeminiAssistantImageAttachment(input: {
   readonly rawEvent: Record<string, unknown>;
   readonly threadId: ThreadId;
-  readonly stateDir: string;
+  readonly attachmentsDir: string;
   readonly fileSystem: FileSystem.FileSystem;
 }) {
   return Effect.gen(function* () {
@@ -245,7 +245,7 @@ export function materializeGeminiAssistantImageAttachment(input: {
       sizeBytes: bytes.byteLength,
     };
     const attachmentPath = resolveAttachmentPath({
-      stateDir: input.stateDir,
+      attachmentsDir: input.attachmentsDir,
       attachment,
     });
     if (!attachmentPath) {
@@ -286,7 +286,7 @@ export function materializeGeminiAssistantImageAttachment(input: {
 
 function buildGeminiPromptAttachment(input: {
   readonly attachment: ChatAttachment;
-  readonly stateDir: string;
+  readonly attachmentsDir: string;
   readonly threadId: ThreadId;
   readonly fileSystem: FileSystem.FileSystem;
 }): Effect.Effect<
@@ -296,7 +296,7 @@ function buildGeminiPromptAttachment(input: {
   return Effect.gen(function* () {
     const promptAttachment = yield* readPromptImageAttachment({
       attachment: input.attachment,
-      stateDir: input.stateDir,
+      attachmentsDir: input.attachmentsDir,
       provider: PROVIDER,
       method: "sendTurn",
       fileSystem: input.fileSystem,
@@ -602,7 +602,7 @@ function mapGeminiEventToCanonical(rawEvent: Record<string, unknown>): ProviderR
 
 function mapGeminiRawEventToCanonical(input: {
   readonly rawEvent: Record<string, unknown>;
-  readonly stateDir: string;
+  readonly attachmentsDir: string;
   readonly fileSystem: FileSystem.FileSystem;
 }) {
   return Effect.gen(function* () {
@@ -618,7 +618,7 @@ function mapGeminiRawEventToCanonical(input: {
     const attachment = yield* materializeGeminiAssistantImageAttachment({
       rawEvent: input.rawEvent,
       threadId: ThreadId.makeUnsafe(input.rawEvent.threadId),
-      stateDir: input.stateDir,
+      attachmentsDir: input.attachmentsDir,
       fileSystem: input.fileSystem,
     });
 
@@ -648,12 +648,14 @@ const makeGeminiAdapter = () =>
     const serverConfig = yield* Effect.service(ServerConfig);
     const eventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
     const manager = new GeminiCliManager();
+    const runtimeContext = yield* Effect.context<never>();
+    const runPromise = Effect.runPromiseWith(runtimeContext);
 
     manager.on("event", (rawEvent: Record<string, unknown>) => {
-      void Effect.runPromise(
+      void runPromise(
         mapGeminiRawEventToCanonical({
           rawEvent,
-          stateDir: serverConfig.stateDir,
+          attachmentsDir: serverConfig.attachmentsDir,
           fileSystem,
         }).pipe(
           Effect.match({
@@ -687,13 +689,22 @@ const makeGeminiAdapter = () =>
 
     const adapter: GeminiAdapterShape = {
       provider: PROVIDER,
-      capabilities: { sessionModelSwitch: "restart-session" },
+      capabilities: { sessionModelSwitch: "unsupported" },
 
       startSession: (input) =>
         Effect.try({
           try: () => {
+            if (input.provider !== undefined && input.provider !== PROVIDER) {
+              throw new ProviderAdapterValidationError({
+                provider: PROVIDER,
+                operation: "startSession",
+                issue: `Expected provider '${PROVIDER}' but received '${input.provider}'.`,
+              });
+            }
             const cwd = input.cwd ?? process.cwd();
-            const model = normalizeModelSlug(input.model, "gemini") ?? getDefaultModel("gemini");
+            const selectedModel =
+              input.modelSelection?.provider === PROVIDER ? input.modelSelection.model : undefined;
+            const model = normalizeModelSlug(selectedModel, "gemini") ?? getDefaultModel("gemini");
             const resumeCursor =
               input.resumeCursor &&
               typeof input.resumeCursor === "object" &&
@@ -753,7 +764,7 @@ const makeGeminiAdapter = () =>
             (attachment) =>
               buildGeminiPromptAttachment({
                 attachment,
-                stateDir: serverConfig.stateDir,
+                attachmentsDir: serverConfig.attachmentsDir,
                 threadId: input.threadId,
                 fileSystem,
               }),
@@ -766,7 +777,9 @@ const makeGeminiAdapter = () =>
                 threadId: String(input.threadId),
                 text,
                 prompt: [{ type: "text", text }, ...promptAttachments],
-                ...(input.model ? { model: input.model } : {}),
+                ...(input.modelSelection?.provider === PROVIDER
+                  ? { model: input.modelSelection.model }
+                  : {}),
                 approvalMode: input.interactionMode === "plan" ? "plan" : "yolo",
               }),
             catch: (cause: unknown) => {

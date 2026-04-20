@@ -439,12 +439,17 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           messageId: command.message.messageId,
+          ...(command.provider !== undefined ? { provider: command.provider } : {}),
           ...(command.modelSelection !== undefined
             ? { modelSelection: command.modelSelection }
             : {}),
+          ...(command.providerOptions !== undefined
+            ? { providerOptions: command.providerOptions }
+            : {}),
           ...(command.titleSeed !== undefined ? { titleSeed: command.titleSeed } : {}),
-          runtimeMode: targetThread.runtimeMode,
-          interactionMode: targetThread.interactionMode,
+          assistantDeliveryMode: command.assistantDeliveryMode ?? "buffered",
+          runtimeMode: command.runtimeMode,
+          interactionMode: command.interactionMode,
           ...(sourceProposedPlan !== undefined ? { sourceProposedPlan } : {}),
           createdAt: command.createdAt,
         },
@@ -644,7 +649,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           messageId: command.messageId,
           role: "assistant",
           text: command.delta,
-          ...(command.attachments !== undefined ? { attachments: command.attachments } : {}),
           turnId: command.turnId ?? null,
           streaming: true,
           createdAt: command.createdAt,
@@ -672,7 +676,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           messageId: command.messageId,
           role: "assistant",
           text: "",
-          ...(command.attachments !== undefined ? { attachments: command.attachments } : {}),
           turnId: command.turnId ?? null,
           streaming: false,
           createdAt: command.createdAt,

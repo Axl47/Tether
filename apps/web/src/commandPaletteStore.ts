@@ -3,6 +3,11 @@ import { create } from "zustand";
 
 export type CommandPaletteMode = "default" | "split-right" | "split-down" | "replace-focused";
 
+interface CommandPaletteOpenIntent {
+  kind: "add-project";
+  requestId: number;
+}
+
 interface CommandPaletteState {
   open: boolean;
   mode: CommandPaletteMode;
@@ -10,6 +15,7 @@ interface CommandPaletteState {
   sourceLeafId: string | null;
   previewThreadId: ThreadId | null;
   previewLeafId: string | null;
+  openIntent: CommandPaletteOpenIntent | null;
 }
 
 interface CommandPaletteStore extends CommandPaletteState {
@@ -24,6 +30,8 @@ interface CommandPaletteStore extends CommandPaletteState {
   }) => void;
   closePalette: () => void;
   toggleDefaultPalette: () => void;
+  openAddProject: () => void;
+  clearOpenIntent: () => void;
 }
 
 const DEFAULT_STATE: CommandPaletteState = {
@@ -33,6 +41,7 @@ const DEFAULT_STATE: CommandPaletteState = {
   sourceLeafId: null,
   previewThreadId: null,
   previewLeafId: null,
+  openIntent: null,
 };
 
 export const useCommandPaletteStore = create<CommandPaletteStore>((set, get) => ({
@@ -68,6 +77,7 @@ export const useCommandPaletteStore = create<CommandPaletteStore>((set, get) => 
       sourceLeafId: options?.sourceLeafId ?? null,
       previewThreadId: options?.previewThreadId ?? null,
       previewLeafId: options?.previewLeafId ?? null,
+      openIntent: null,
     });
   },
 
@@ -92,6 +102,19 @@ export const useCommandPaletteStore = create<CommandPaletteStore>((set, get) => 
       sourceLeafId: null,
       previewThreadId: null,
       previewLeafId: null,
+      openIntent: null,
     });
   },
+
+  openAddProject: () =>
+    set((state) => ({
+      ...DEFAULT_STATE,
+      open: true,
+      openIntent: {
+        kind: "add-project",
+        requestId: (state.openIntent?.requestId ?? 0) + 1,
+      },
+    })),
+
+  clearOpenIntent: () => set({ openIntent: null }),
 }));
