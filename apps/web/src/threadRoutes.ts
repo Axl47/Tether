@@ -12,6 +12,13 @@ export type ThreadRouteTarget =
       draftId: DraftId;
     };
 
+const THREAD_ROUTE_CACHE_SEPARATOR = "\u0000";
+
+let lastThreadRouteRefKey: string | null = null;
+let lastThreadRouteRefValue: ScopedThreadRef | null = null;
+let lastThreadRouteTargetKey: string | null = null;
+let lastThreadRouteTargetValue: ThreadRouteTarget | null = null;
+
 export function buildThreadRouteParams(ref: ScopedThreadRef): {
   environmentId: EnvironmentId;
   threadId: ThreadId;
@@ -35,25 +42,54 @@ export function resolveThreadRouteRef(
     return null;
   }
 
-  return scopeThreadRef(params.environmentId as EnvironmentId, params.threadId as ThreadId);
+  const nextKey = `${params.environmentId}${THREAD_ROUTE_CACHE_SEPARATOR}${params.threadId}`;
+  if (lastThreadRouteRefKey === nextKey && lastThreadRouteRefValue) {
+    return lastThreadRouteRefValue;
+  }
+
+  lastThreadRouteRefKey = nextKey;
+  lastThreadRouteRefValue = scopeThreadRef(
+    params.environmentId as EnvironmentId,
+    params.threadId as ThreadId,
+  );
+  return lastThreadRouteRefValue;
 }
 
 export function resolveThreadRouteTarget(
   params: Partial<Record<"environmentId" | "threadId" | "draftId", string | undefined>>,
 ): ThreadRouteTarget | null {
   if (params.environmentId && params.threadId) {
-    return {
+    const nextKey = `server${THREAD_ROUTE_CACHE_SEPARATOR}${params.environmentId}${THREAD_ROUTE_CACHE_SEPARATOR}${params.threadId}`;
+    if (lastThreadRouteTargetKey === nextKey && lastThreadRouteTargetValue) {
+      return lastThreadRouteTargetValue;
+    }
+
+    const threadRef = resolveThreadRouteRef(params);
+    if (!threadRef) {
+      return null;
+    }
+
+    lastThreadRouteTargetKey = nextKey;
+    lastThreadRouteTargetValue = {
       kind: "server",
-      threadRef: scopeThreadRef(params.environmentId as EnvironmentId, params.threadId as ThreadId),
+      threadRef,
     };
+    return lastThreadRouteTargetValue;
   }
 
   if (!params.draftId) {
     return null;
   }
 
-  return {
+  const nextKey = `draft${THREAD_ROUTE_CACHE_SEPARATOR}${params.draftId}`;
+  if (lastThreadRouteTargetKey === nextKey && lastThreadRouteTargetValue) {
+    return lastThreadRouteTargetValue;
+  }
+
+  lastThreadRouteTargetKey = nextKey;
+  lastThreadRouteTargetValue = {
     kind: "draft",
     draftId: params.draftId as DraftId,
   };
+  return lastThreadRouteTargetValue;
 }

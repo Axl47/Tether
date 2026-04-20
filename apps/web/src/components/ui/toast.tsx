@@ -3,8 +3,7 @@
 import { Toast, type ToastObject } from "@base-ui/react/toast";
 import { useEffect, type CSSProperties, type ReactNode } from "react";
 import { useParams } from "@tanstack/react-router";
-import { scopeThreadRef } from "@t3tools/client-runtime";
-import { type ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import { type ScopedThreadRef, type ThreadId } from "@t3tools/contracts";
 import {
   CircleAlertIcon,
   CircleCheckIcon,
@@ -15,6 +14,7 @@ import {
 
 import { cn } from "~/lib/utils";
 import { buttonVariants } from "~/components/ui/button";
+import { resolveThreadRouteRef } from "~/threadRoutes";
 import {
   buildVisibleToastLayout,
   shouldHideCollapsedToastContent,
@@ -63,9 +63,10 @@ function useActiveThreadRefFromRoute(): ScopedThreadRef | null {
   return useParams({
     strict: false,
     select: (params) =>
-      typeof params.environmentId === "string" && typeof params.threadId === "string"
-        ? scopeThreadRef(params.environmentId as never, ThreadId.makeUnsafe(params.threadId))
-        : null,
+      resolveThreadRouteRef({
+        environmentId: typeof params.environmentId === "string" ? params.environmentId : undefined,
+        threadId: typeof params.threadId === "string" ? params.threadId : undefined,
+      }),
   });
 }
 

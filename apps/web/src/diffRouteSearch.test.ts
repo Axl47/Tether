@@ -53,6 +53,21 @@ describe("parseDiffRouteSearch", () => {
     expect(parsed).toEqual({});
   });
 
+  it("reuses the same parsed object when the logical diff state is unchanged", () => {
+    const first = parseDiffRouteSearch({
+      diff: "1",
+      diffTurnId: "turn-1",
+      diffFilePath: "src/app.ts",
+    });
+    const second = parseDiffRouteSearch({
+      diff: true,
+      diffTurnId: "turn-1",
+      diffFilePath: "src/app.ts",
+    });
+
+    expect(first).toBe(second);
+  });
+
   it("treats numeric closed sentinels as closed", () => {
     const parsed = parseDiffRouteSearch({
       diff: 0,
