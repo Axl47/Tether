@@ -147,6 +147,7 @@ const LOG_FILE_MAX_BYTES = 10 * 1024 * 1024;
 const LOG_FILE_MAX_FILES = 10;
 const APP_RUN_ID = Crypto.randomBytes(6).toString("hex");
 const SERVER_SETTINGS_PATH = Path.join(STATE_DIR, "settings.json");
+const SERVER_ENVIRONMENT_DESCRIPTOR_PATH = "/.well-known/t3/environment";
 const AUTO_UPDATE_STARTUP_DELAY_MS = 15_000;
 const AUTO_UPDATE_POLL_INTERVAL_MS = 4 * 60 * 60 * 1000;
 const BROWSER_COMPOSITION_PROBE_URL =
@@ -479,6 +480,7 @@ async function waitForBackendHttpReady(
   try {
     await waitForHttpReady(baseUrl, {
       ...options,
+      path: options?.path ?? SERVER_ENVIRONMENT_DESCRIPTOR_PATH,
       signal: controller.signal,
     });
   } finally {
@@ -506,7 +508,7 @@ async function waitForBackendWindowReady(baseUrl: string): Promise<"listening" |
 
 function ensureInitialBackendWindowOpen(): void {
   const existingWindow = mainWindow ?? BaseWindow.getAllWindows()[0] ?? null;
-  if (isDevelopment || existingWindow !== null || backendInitialWindowOpenInFlight !== null) {
+  if (existingWindow !== null || backendInitialWindowOpenInFlight !== null) {
     return;
   }
 
@@ -526,7 +528,7 @@ function ensureInitialBackendWindowOpen(): void {
       writeDesktopLogHeader(
         `bootstrap backend readiness warning message=${formatErrorMessage(error)}`,
       );
-      console.warn("[desktop] backend readiness check timed out during packaged bootstrap", error);
+      console.warn("[desktop] backend readiness check timed out during startup", error);
     })
     .finally(() => {
       if (backendInitialWindowOpenInFlight === nextOpen) {
@@ -2273,26 +2275,6 @@ async function bootstrap(): Promise<void> {
   writeDesktopLogHeader("bootstrap ipc handlers registered");
   startBackend();
   writeDesktopLogHeader("bootstrap backend start requested");
-
-  if (isDevelopment) {
-    mainWindow = createWindow();
-    writeDesktopLogHeader("bootstrap main window created");
-    void waitForBackendWindowReady(backendHttpUrl)
-      .then((source) => {
-        writeDesktopLogHeader(`bootstrap backend ready source=${source}`);
-      })
-      .catch((error) => {
-        if (isBackendReadinessAborted(error)) {
-          return;
-        }
-        writeDesktopLogHeader(
-          `bootstrap backend readiness warning message=${formatErrorMessage(error)}`,
-        );
-        console.warn("[desktop] backend readiness check timed out during dev bootstrap", error);
-      });
-    return;
-  }
-
   ensureInitialBackendWindowOpen();
 }
 
@@ -2325,10 +2307,6 @@ app
       const existingWindow = mainWindow ?? BaseWindow.getAllWindows()[0];
       if (existingWindow) {
         revealWindow(existingWindow);
-        return;
-      }
-      if (isDevelopment) {
-        mainWindow = createWindow();
         return;
       }
       ensureInitialBackendWindowOpen();
