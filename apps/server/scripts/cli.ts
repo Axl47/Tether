@@ -144,16 +144,21 @@ const buildCmd = Command.make(
       const fs = yield* FileSystem.FileSystem;
       const repoRoot = yield* RepoRoot;
       const serverDir = path.join(repoRoot, "apps/server");
+      const commandOutputOptions = {
+        cwd: serverDir,
+        stdout: config.verbose ? ("inherit" as const) : ("ignore" as const),
+        stderr: "inherit" as const,
+        // Windows needs shell mode to resolve `.cmd` shims on PATH.
+        shell: process.platform === "win32",
+      };
 
       yield* Effect.log("[cli] Running tsdown...");
       yield* runCommand(
-        ChildProcess.make(process.execPath, ["--run", "build:bundle"], {
-          cwd: serverDir,
-          stdout: config.verbose ? "inherit" : "ignore",
-          stderr: "inherit",
-          // Windows needs shell mode to resolve `.cmd` shims on PATH.
-          shell: process.platform === "win32",
-        }),
+        process.versions.bun
+          ? ChildProcess.make(
+              commandOutputOptions,
+            )`${process.execPath} --bun ./node_modules/.bin/tsdown`
+          : ChildProcess.make(commandOutputOptions)`${process.execPath} --run build:bundle`,
       );
 
       const webDist = path.join(repoRoot, "apps/web/dist");
