@@ -39,6 +39,7 @@ import {
   Cause,
 } from "effect";
 import * as Semaphore from "effect/Semaphore";
+import { createAtomicWriteTempPath } from "./atomicFile.ts";
 import { ServerConfig } from "./config.ts";
 import { type DeepPartial, deepMerge } from "@t3tools/shared/Struct";
 import { fromLenientJson } from "@t3tools/shared/schemaJson";
@@ -233,7 +234,7 @@ const makeServerSettings = Effect.gen(function* () {
   const getSettingsFromCache = Cache.get(settingsCache, cacheKey);
 
   const writeSettingsAtomically = (settings: ServerSettings) => {
-    const tempPath = `${settingsPath}.${process.pid}.${Date.now()}.tmp`;
+    const tempPath = createAtomicWriteTempPath(settingsPath);
     const sparseSettings = stripDefaultServerSettings(settings, DEFAULT_SERVER_SETTINGS) ?? {};
 
     return Effect.succeed(`${JSON.stringify(sparseSettings, null, 2)}\n`).pipe(

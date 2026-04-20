@@ -1,6 +1,7 @@
 import * as nodePath from "node:path";
 import { type ServerProvider, ServerProvider as ServerProviderSchema } from "@t3tools/contracts";
 import { Cause, Effect, FileSystem, Path, Schema } from "effect";
+import { createAtomicWriteTempPath } from "../atomicFile.ts";
 
 export const PROVIDER_CACHE_IDS = [
   "codex",
@@ -97,7 +98,7 @@ export const writeProviderStatusCache = (input: {
   readonly filePath: string;
   readonly provider: ServerProvider;
 }) => {
-  const tempPath = `${input.filePath}.${process.pid}.${Date.now()}.tmp`;
+  const tempPath = createAtomicWriteTempPath(input.filePath);
   return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;

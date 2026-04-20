@@ -44,6 +44,7 @@ import {
   Stream,
 } from "effect";
 import * as Semaphore from "effect/Semaphore";
+import { createAtomicWriteTempPath } from "./atomicFile.ts";
 import { ServerConfig } from "./config.ts";
 import { fromLenientJson } from "@t3tools/shared/schemaJson";
 
@@ -663,7 +664,7 @@ const makeKeybindings = Effect.gen(function* () {
   });
 
   const writeConfigAtomically = (rules: readonly KeybindingRule[]) => {
-    const tempPath = `${keybindingsConfigPath}.${process.pid}.${Date.now()}.tmp`;
+    const tempPath = createAtomicWriteTempPath(keybindingsConfigPath);
 
     return Schema.encodeEffect(KeybindingsConfigPrettyJson)(rules).pipe(
       Effect.map((encoded) => `${encoded}\n`),
