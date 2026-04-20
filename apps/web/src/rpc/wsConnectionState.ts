@@ -57,10 +57,37 @@ function isoNow() {
   return new Date().toISOString();
 }
 
+function areWsConnectionStatusesEqual(
+  left: WsConnectionStatus,
+  right: WsConnectionStatus,
+): boolean {
+  return (
+    left.attemptCount === right.attemptCount &&
+    left.closeCode === right.closeCode &&
+    left.closeReason === right.closeReason &&
+    left.connectedAt === right.connectedAt &&
+    left.disconnectedAt === right.disconnectedAt &&
+    left.hasConnected === right.hasConnected &&
+    left.lastError === right.lastError &&
+    left.lastErrorAt === right.lastErrorAt &&
+    left.nextRetryAt === right.nextRetryAt &&
+    left.online === right.online &&
+    left.phase === right.phase &&
+    left.reconnectAttemptCount === right.reconnectAttemptCount &&
+    left.reconnectMaxAttempts === right.reconnectMaxAttempts &&
+    left.reconnectPhase === right.reconnectPhase &&
+    left.socketUrl === right.socketUrl
+  );
+}
+
 function updateWsConnectionStatus(
   updater: (current: WsConnectionStatus) => WsConnectionStatus,
 ): WsConnectionStatus {
-  const nextStatus = updater(getWsConnectionStatus());
+  const currentStatus = getWsConnectionStatus();
+  const nextStatus = updater(currentStatus);
+  if (areWsConnectionStatusesEqual(currentStatus, nextStatus)) {
+    return currentStatus;
+  }
   appAtomRegistry.set(wsConnectionStatusAtom, nextStatus);
   return nextStatus;
 }

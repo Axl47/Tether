@@ -26,6 +26,27 @@ const usePrimaryEnvironmentBootstrapStore = create<PrimaryEnvironmentBootstrapSt
 
 let primaryEnvironmentDescriptorPromise: Promise<ExecutionEnvironmentDescriptor> | null = null;
 
+function areExecutionEnvironmentDescriptorsEqual(
+  left: ExecutionEnvironmentDescriptor | null,
+  right: ExecutionEnvironmentDescriptor | null,
+): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (left === null || right === null) {
+    return false;
+  }
+
+  return (
+    left.environmentId === right.environmentId &&
+    left.label === right.label &&
+    left.serverVersion === right.serverVersion &&
+    left.platform.os === right.platform.os &&
+    left.platform.arch === right.platform.arch &&
+    left.capabilities.repositoryIdentity === right.capabilities.repositoryIdentity
+  );
+}
+
 function createPrimaryKnownEnvironment(input: {
   readonly source: KnownEnvironment["source"];
   readonly target: KnownEnvironment["target"];
@@ -75,6 +96,10 @@ export function usePrimaryEnvironmentId(): EnvironmentId | null {
 export function writePrimaryEnvironmentDescriptor(
   descriptor: ExecutionEnvironmentDescriptor | null,
 ): void {
+  const currentDescriptor = readPrimaryEnvironmentDescriptor();
+  if (areExecutionEnvironmentDescriptorsEqual(currentDescriptor, descriptor)) {
+    return;
+  }
   usePrimaryEnvironmentBootstrapStore.getState().setDescriptor(descriptor);
 }
 

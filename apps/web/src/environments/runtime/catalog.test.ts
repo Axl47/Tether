@@ -74,6 +74,42 @@ describe("environment runtime catalog stores", () => {
     expect(useSavedEnvironmentRuntimeStore.getState().byId).toEqual({});
   });
 
+  it("does not replace a saved environment record when the next value is unchanged", () => {
+    const environmentId = EnvironmentId.make("environment-1");
+    const record = {
+      environmentId,
+      label: "Remote environment",
+      httpBaseUrl: "https://remote.example.com/",
+      wsBaseUrl: "wss://remote.example.com/",
+      createdAt: "2026-04-09T00:00:00.000Z",
+      lastConnectedAt: null,
+    } as const;
+
+    useSavedEnvironmentRegistryStore.getState().upsert(record);
+    const firstState = useSavedEnvironmentRegistryStore.getState().byId;
+
+    useSavedEnvironmentRegistryStore.getState().upsert(record);
+
+    expect(useSavedEnvironmentRegistryStore.getState().byId).toBe(firstState);
+  });
+
+  it("does not replace a saved environment runtime entry when a patch is a no-op", () => {
+    const environmentId = EnvironmentId.make("environment-1");
+
+    useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {
+      connectionState: "connected",
+      connectedAt: "2026-04-09T00:00:00.000Z",
+    });
+    const firstEntry = useSavedEnvironmentRuntimeStore.getState().byId[environmentId];
+
+    useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {
+      connectionState: "connected",
+      connectedAt: "2026-04-09T00:00:00.000Z",
+    });
+
+    expect(useSavedEnvironmentRuntimeStore.getState().byId[environmentId]).toBe(firstEntry);
+  });
+
   it("does not throw when local api lookup fails during registry persistence", async () => {
     vi.unstubAllGlobals();
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});

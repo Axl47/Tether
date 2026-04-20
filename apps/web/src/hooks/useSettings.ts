@@ -21,6 +21,7 @@ import { ensureLocalApi } from "~/localApi";
 import { Struct } from "effect";
 import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
 import { applySettingsUpdated, getServerConfig, useServerSettings } from "~/rpc/serverState";
+import { selectProjectGroupingSettings, type ProjectGroupingSettings } from "~/logicalProject";
 
 const CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE = "[CLIENT_SETTINGS]";
 
@@ -176,6 +177,10 @@ export function useUpdateSettings() {
     updateSettings,
     resetSettings,
   };
+}
+
+export function useProjectGroupingSettings(): ProjectGroupingSettings {
+  return useSettings(selectProjectGroupingSettings);
 }
 
 export function __resetClientSettingsPersistenceForTests(): void {

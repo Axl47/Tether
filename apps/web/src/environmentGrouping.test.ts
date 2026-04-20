@@ -15,6 +15,7 @@ import {
   deriveLogicalProjectKeyFromSettings,
   derivePhysicalProjectKey,
   resolveProjectGroupingMode,
+  selectProjectGroupingSettings,
 } from "./logicalProject";
 import type { Project, SidebarThreadSummary } from "./types";
 import { DEFAULT_INTERACTION_MODE } from "./types";
@@ -40,6 +41,13 @@ const DEFAULT_GROUPING_SETTINGS = {
   sidebarProjectGroupingMode: "repository" as const,
   sidebarProjectGroupingOverrides: {},
 };
+
+it("reuses project grouping selector snapshots for the same logical settings", () => {
+  const first = selectProjectGroupingSettings(DEFAULT_GROUPING_SETTINGS);
+  const second = selectProjectGroupingSettings(DEFAULT_GROUPING_SETTINGS);
+
+  expect(second).toBe(first);
+});
 
 // ── Factory Helpers ──────────────────────────────────────────────────
 

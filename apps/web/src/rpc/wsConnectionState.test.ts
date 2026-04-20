@@ -33,6 +33,15 @@ describe("wsConnectionState", () => {
     expect(getWsConnectionUiState(getWsConnectionStatus())).toBe("offline");
   });
 
+  it("does not replace the snapshot when the browser online state is unchanged", () => {
+    const initial = getWsConnectionStatus();
+
+    const next = setBrowserOnlineStatus(initial.online);
+
+    expect(next).toBe(initial);
+    expect(getWsConnectionStatus()).toBe(initial);
+  });
+
   it("stays in the initial connecting state until the first disconnect", () => {
     recordWsConnectionAttempt("ws://localhost:3020/ws");
 

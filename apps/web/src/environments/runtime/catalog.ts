@@ -53,6 +53,46 @@ function valuesOfSavedEnvironmentRegistry(
   return Object.values(byId) as ReadonlyArray<SavedEnvironmentRecord>;
 }
 
+function areSavedEnvironmentRecordsEqual(
+  left: SavedEnvironmentRecord | undefined,
+  right: SavedEnvironmentRecord | undefined,
+): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (!left || !right) {
+    return false;
+  }
+
+  return (
+    left.environmentId === right.environmentId &&
+    left.label === right.label &&
+    left.wsBaseUrl === right.wsBaseUrl &&
+    left.httpBaseUrl === right.httpBaseUrl &&
+    left.createdAt === right.createdAt &&
+    left.lastConnectedAt === right.lastConnectedAt
+  );
+}
+
+function areSavedEnvironmentRegistryStatesEqual(
+  left: Record<EnvironmentId, SavedEnvironmentRecord>,
+  right: Record<EnvironmentId, SavedEnvironmentRecord>,
+): boolean {
+  const leftEntries = Object.entries(left);
+  const rightEntries = Object.entries(right);
+  if (leftEntries.length !== rightEntries.length) {
+    return false;
+  }
+
+  for (const [environmentId, leftRecord] of leftEntries) {
+    if (!areSavedEnvironmentRecordsEqual(leftRecord, right[environmentId as EnvironmentId])) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 function persistSavedEnvironmentRegistryState(
   byId: Record<EnvironmentId, SavedEnvironmentRecord>,
 ): void {
@@ -76,11 +116,15 @@ function replaceSavedEnvironmentRegistryState(
 ): void {
   const currentById = useSavedEnvironmentRegistryStore.getState().byId;
   const hydratedById = Object.fromEntries(records.map((record) => [record.environmentId, record]));
+  const nextById = {
+    ...hydratedById,
+    ...currentById,
+  };
+  if (areSavedEnvironmentRegistryStatesEqual(currentById, nextById)) {
+    return;
+  }
   useSavedEnvironmentRegistryStore.setState({
-    byId: {
-      ...hydratedById,
-      ...currentById,
-    },
+    byId: nextById,
   });
 }
 
@@ -117,6 +161,10 @@ export const useSavedEnvironmentRegistryStore = create<SavedEnvironmentRegistryS
   byId: {},
   upsert: (record) =>
     set((state) => {
+      const existing = state.byId[record.environmentId];
+      if (areSavedEnvironmentRecordsEqual(existing, record)) {
+        return state;
+      }
       const byId = {
         ...state.byId,
         [record.environmentId]: record,
@@ -135,7 +183,7 @@ export const useSavedEnvironmentRegistryStore = create<SavedEnvironmentRegistryS
   markConnected: (environmentId, connectedAt) =>
     set((state) => {
       const existing = state.byId[environmentId];
-      if (!existing) {
+      if (!existing || existing.lastConnectedAt === connectedAt) {
         return state;
       }
       const byId = {
@@ -288,6 +336,23 @@ function createDefaultSavedEnvironmentRuntimeState(): SavedEnvironmentRuntimeSta
   };
 }
 
+function areSavedEnvironmentRuntimeStatesEqual(
+  left: SavedEnvironmentRuntimeState,
+  right: SavedEnvironmentRuntimeState,
+): boolean {
+  return (
+    left.connectionState === right.connectionState &&
+    left.authState === right.authState &&
+    left.lastError === right.lastError &&
+    left.lastErrorAt === right.lastErrorAt &&
+    left.role === right.role &&
+    left.descriptor === right.descriptor &&
+    left.serverConfig === right.serverConfig &&
+    left.connectedAt === right.connectedAt &&
+    left.disconnectedAt === right.disconnectedAt
+  );
+}
+
 export const useSavedEnvironmentRuntimeStore = create<SavedEnvironmentRuntimeStoreState>()(
   (set) => ({
     byId: {},
@@ -304,15 +369,23 @@ export const useSavedEnvironmentRuntimeStore = create<SavedEnvironmentRuntimeSto
         };
       }),
     patch: (environmentId, patch) =>
-      set((state) => ({
-        byId: {
-          ...state.byId,
-          [environmentId]: {
-            ...(state.byId[environmentId] ?? createDefaultSavedEnvironmentRuntimeState()),
-            ...patch,
+      set((state) => {
+        const currentEntry =
+          state.byId[environmentId] ?? createDefaultSavedEnvironmentRuntimeState();
+        const nextEntry = {
+          ...currentEntry,
+          ...patch,
+        };
+        if (areSavedEnvironmentRuntimeStatesEqual(currentEntry, nextEntry)) {
+          return state;
+        }
+        return {
+          byId: {
+            ...state.byId,
+            [environmentId]: nextEntry,
           },
-        },
-      })),
+        };
+      }),
     clear: (environmentId) =>
       set((state) => {
         const { [environmentId]: _removed, ...remaining } = state.byId;
