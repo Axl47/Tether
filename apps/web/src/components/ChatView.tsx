@@ -643,6 +643,7 @@ export default function ChatView(props: ChatViewProps) {
     (store) => store.setInteractionMode,
   );
   const clearComposerDraftContent = useComposerDraftStore((store) => store.clearComposerContent);
+  const enqueueQueuedMessage = useComposerDraftStore((store) => store.enqueueQueuedMessage);
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
   const getDraftSessionByLogicalProjectKey = useComposerDraftStore(
     (store) => store.getDraftSessionByLogicalProjectKey,
@@ -2367,6 +2368,8 @@ export default function ChatView(props: ChatViewProps) {
     if (!sendCtx) return;
     const {
       images: composerImages,
+      nonPersistedImageIds: composerNonPersistedImageIds,
+      persistedAttachments: composerPersistedAttachments,
       terminalContexts: composerTerminalContexts,
       selectedProvider: ctxSelectedProvider,
       selectedModel: ctxSelectedModel,
@@ -2422,6 +2425,54 @@ export default function ChatView(props: ChatViewProps) {
           description: toastCopy.description,
         });
       }
+      return;
+    }
+    if (phase === "running" && isServerThread) {
+      const queuedTerminalContextsSnapshot = [...sendableComposerTerminalContexts];
+      const queuedPrompt = appendTerminalContextsToPrompt(
+        promptForSend,
+        queuedTerminalContextsSnapshot,
+      ).trim();
+      enqueueQueuedMessage(activeThread.id, {
+        id: crypto.randomUUID(),
+        createdAt: new Date().toISOString(),
+        prompt: queuedPrompt,
+        images: [...composerImages],
+        nonPersistedImageIds: [...composerNonPersistedImageIds],
+        persistedAttachments: [...composerPersistedAttachments],
+        terminalContexts: queuedTerminalContextsSnapshot,
+        provider: ctxSelectedProvider,
+        model: ctxSelectedModel,
+        runtimeMode,
+        interactionMode,
+        effort:
+          ctxSelectedModelSelection.provider === "codex"
+            ? (ctxSelectedModelSelection.options?.reasoningEffort ?? null)
+            : null,
+        codexFastMode:
+          ctxSelectedModelSelection.provider === "codex" &&
+          ctxSelectedModelSelection.options?.fastMode === true,
+      });
+      if (expiredTerminalContextCount > 0) {
+        const toastCopy = buildExpiredTerminalContextToastCopy(
+          expiredTerminalContextCount,
+          "omitted",
+        );
+        toastManager.add({
+          type: "warning",
+          title: toastCopy.title,
+          description: toastCopy.description,
+        });
+      }
+      promptRef.current = "";
+      clearComposerDraftContent(composerDraftTarget);
+      composerRef.current?.resetCursorState();
+      scheduleComposerFocus();
+      toastManager.add({
+        type: "info",
+        title: "Follow-up queued",
+        description: "This message will send when the current run is ready.",
+      });
       return;
     }
     if (!activeProject) return;

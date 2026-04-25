@@ -40,10 +40,12 @@ import {
   replaceTextRange,
 } from "../../composer-logic";
 import { deriveComposerSendState, readFileAsDataUrl } from "../ChatView.logic";
+import { readEnvironmentApi } from "../../environmentApi";
 import {
   type ComposerImageAttachment,
   type DraftId,
   type PersistedComposerImageAttachment,
+  type QueuedComposerMessageState,
   useComposerDraftStore,
   useComposerThreadDraft,
   useEffectiveComposerModelState,
@@ -87,6 +89,7 @@ import { toastManager } from "../ui/toast";
 import {
   BotIcon,
   CircleAlertIcon,
+  LoaderCircleIcon,
   ListTodoIcon,
   type LucideIcon,
   LockIcon,
@@ -95,6 +98,8 @@ import {
   XIcon,
 } from "lucide-react";
 import { proposedPlanTitle } from "../../proposedPlan";
+import { queuedMessagePreview } from "../../queuedTurns";
+import { useQueuedTurnRuntimeStore } from "../../queuedTurnRuntimeStore";
 import { resolveSelectableProvider, getProviderModels } from "../../providerModels";
 import type { UnifiedSettings } from "@t3tools/contracts/settings";
 import type { SessionPhase, Thread } from "../../types";
@@ -103,8 +108,11 @@ import type { PendingApproval, PendingUserInput } from "../../session-logic";
 import { deriveLatestContextWindowSnapshot } from "../../lib/contextWindow";
 import { formatProviderSkillDisplayName } from "../../providerSkillPresentation";
 import { searchProviderSkills } from "../../providerSkillSearch";
+import { newCommandId } from "../../lib/utils";
 
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
+const EMPTY_QUEUED_MESSAGES: QueuedComposerMessageState[] = [];
+Object.freeze(EMPTY_QUEUED_MESSAGES);
 
 const runtimeModeConfig: Record<
   RuntimeMode,
@@ -335,6 +343,8 @@ export interface ChatComposerHandle {
   getSendContext: () => {
     prompt: string;
     images: ComposerImageAttachment[];
+    nonPersistedImageIds: string[];
+    persistedAttachments: PersistedComposerImageAttachment[];
     terminalContexts: TerminalContextDraft[];
     selectedPromptEffort: string | null;
     selectedModelOptionsForDispatch: unknown;
@@ -530,6 +540,16 @@ export const ChatComposer = memo(
     const composerImages = composerDraft.images;
     const composerTerminalContexts = composerDraft.terminalContexts;
     const nonPersistedComposerImageIds = composerDraft.nonPersistedImageIds;
+    const persistedComposerAttachments = composerDraft.persistedAttachments;
+    const queuedMessages = useComposerDraftStore((store) =>
+      activeThreadId
+        ? (store.queuedMessagesByThreadId[activeThreadId] ?? EMPTY_QUEUED_MESSAGES)
+        : EMPTY_QUEUED_MESSAGES,
+    );
+    const dispatchingQueuedMessageId = useQueuedTurnRuntimeStore((store) =>
+      activeThreadId ? (store.dispatchingQueuedMessageIdByThreadId[activeThreadId] ?? null) : null,
+    );
+    const [steeringQueuedMessageId, setSteeringQueuedMessageId] = useState<string | null>(null);
 
     const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
     const addComposerDraftImage = useComposerDraftStore((store) => store.addImage);
@@ -547,6 +567,8 @@ export const ChatComposer = memo(
     const clearComposerDraftPersistedAttachments = useComposerDraftStore(
       (store) => store.clearPersistedAttachments,
     );
+    const removeQueuedMessage = useComposerDraftStore((store) => store.removeQueuedMessage);
+    const promoteQueuedMessage = useComposerDraftStore((store) => store.promoteQueuedMessage);
     const syncComposerDraftPersistedAttachments = useComposerDraftStore(
       (store) => store.syncPersistedAttachments,
     );
@@ -835,6 +857,16 @@ export const ChatComposer = memo(
     const nonPersistedComposerImageIdSet = useMemo(
       () => new Set(nonPersistedComposerImageIds),
       [nonPersistedComposerImageIds],
+    );
+    const queuedNonPersistedImageIdSetByQueuedMessageId = useMemo(
+      () =>
+        new Map(
+          queuedMessages.map((queuedMessage) => [
+            queuedMessage.id,
+            new Set(queuedMessage.nonPersistedImageIds),
+          ]),
+        ),
+      [queuedMessages],
     );
 
     const isComposerApprovalState = activePendingApproval !== null;
@@ -1481,6 +1513,54 @@ export const ChatComposer = memo(
       [composerHighlightedItemId, composerMenuItems],
     );
 
+    useEffect(() => {
+      if (!steeringQueuedMessageId) {
+        return;
+      }
+      const steeringStillQueued = queuedMessages.some(
+        (queuedMessage) => queuedMessage.id === steeringQueuedMessageId,
+      );
+      if (
+        !steeringStillQueued ||
+        phase !== "running" ||
+        dispatchingQueuedMessageId === steeringQueuedMessageId
+      ) {
+        setSteeringQueuedMessageId(null);
+      }
+    }, [dispatchingQueuedMessageId, phase, queuedMessages, steeringQueuedMessageId]);
+
+    const handleSteerQueuedMessage = useCallback(
+      async (queuedMessageId: string) => {
+        if (!activeThread) {
+          return;
+        }
+        promoteQueuedMessage(activeThread.id, queuedMessageId);
+        if (phase !== "running") {
+          return;
+        }
+        const api = readEnvironmentApi(environmentId);
+        if (!api) {
+          return;
+        }
+        setSteeringQueuedMessageId(queuedMessageId);
+        try {
+          await api.orchestration.dispatchCommand({
+            type: "thread.turn.interrupt",
+            commandId: newCommandId(),
+            threadId: activeThread.id,
+            createdAt: new Date().toISOString(),
+          });
+        } catch (error) {
+          setSteeringQueuedMessageId(null);
+          setThreadError(
+            activeThread.id,
+            error instanceof Error ? error.message : "Failed to steer queued follow-up.",
+          );
+        }
+      },
+      [activeThread, environmentId, phase, promoteQueuedMessage, setThreadError],
+    );
+
     // ------------------------------------------------------------------
     // Callbacks: command key
     // ------------------------------------------------------------------
@@ -1693,6 +1773,8 @@ export const ChatComposer = memo(
         getSendContext: () => ({
           prompt: promptRef.current,
           images: composerImagesRef.current,
+          nonPersistedImageIds: nonPersistedComposerImageIds,
+          persistedAttachments: persistedComposerAttachments,
           terminalContexts: composerTerminalContextsRef.current,
           selectedPromptEffort,
           selectedModelOptionsForDispatch,
@@ -1708,6 +1790,8 @@ export const ChatComposer = memo(
         composerCursor,
         composerTerminalContexts,
         insertComposerDraftTerminalContext,
+        nonPersistedComposerImageIds,
+        persistedComposerAttachments,
         promptRef,
         composerImagesRef,
         composerTerminalContextsRef,
@@ -1780,6 +1864,88 @@ export const ChatComposer = memo(
                 hasComposerHeader ? "pt-2.5 sm:pt-3" : "pt-3.5 sm:pt-4",
               )}
             >
+              {queuedMessages.length > 0 ? (
+                <div className="mb-3 space-y-2">
+                  {queuedMessages.map((queuedMessage, index) => {
+                    const isDispatching = dispatchingQueuedMessageId === queuedMessage.id;
+                    const isSteering = steeringQueuedMessageId === queuedMessage.id;
+                    const hasNonPersistedImages =
+                      (queuedNonPersistedImageIdSetByQueuedMessageId.get(queuedMessage.id)?.size ??
+                        0) > 0;
+                    return (
+                      <div
+                        key={queuedMessage.id}
+                        data-testid={`queued-message-card-${queuedMessage.id}`}
+                        className="flex items-start gap-2 rounded-lg border border-border/75 bg-muted/20 px-3 py-2"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground/75 uppercase">
+                              {index === 0 ? "Queued next" : "Queued"}
+                            </span>
+                            {hasNonPersistedImages ? (
+                              <Tooltip>
+                                <TooltipTrigger
+                                  render={
+                                    <span
+                                      role="img"
+                                      aria-label="Queued attachment may not persist"
+                                      className="inline-flex items-center justify-center rounded bg-background/85 p-0.5 text-amber-600"
+                                    >
+                                      <CircleAlertIcon className="size-3" />
+                                    </span>
+                                  }
+                                />
+                                <TooltipPopup
+                                  side="top"
+                                  className="max-w-64 whitespace-normal leading-tight"
+                                >
+                                  Queued attachment could not be saved locally and may be lost on
+                                  reload.
+                                </TooltipPopup>
+                              </Tooltip>
+                            ) : null}
+                            {isDispatching ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
+                                <LoaderCircleIcon className="size-3 animate-spin" />
+                                Sending
+                              </span>
+                            ) : null}
+                          </div>
+                          <p className="mt-1 truncate text-sm text-foreground/88">
+                            {queuedMessagePreview(queuedMessage)}
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          className="h-8 rounded-full px-3"
+                          disabled={isDispatching || isSteering}
+                          onClick={() => void handleSteerQueuedMessage(queuedMessage.id)}
+                        >
+                          {isSteering ? "Steering..." : "Steer"}
+                        </Button>
+                        <Button
+                          type="button"
+                          size="icon-xs"
+                          variant="ghost"
+                          className="rounded-full"
+                          disabled={isDispatching}
+                          onClick={() =>
+                            activeThreadId && removeQueuedMessage(activeThreadId, queuedMessage.id)
+                          }
+                          aria-label="Delete queued message"
+                          title="Delete queued message"
+                        >
+                          <XIcon />
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
+
               {composerMenuOpen && !isComposerApprovalState && (
                 <div className="absolute inset-x-0 bottom-full z-20 mb-2 px-1">
                   <ComposerCommandMenu
