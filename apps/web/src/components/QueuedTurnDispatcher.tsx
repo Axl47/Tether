@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 
 import { useAppSettings } from "../appSettings";
 import { useComposerDraftStore } from "../composerDraftStore";
-import { readNativeApi } from "../nativeApi";
+import { readEnvironmentApi } from "../environmentApi";
 import { useQueuedTurnRuntimeStore } from "../queuedTurnRuntimeStore";
 import { useStore } from "../store";
 import { canAutoDispatchQueuedTurn, dispatchQueuedTurn } from "../queuedTurns";
@@ -22,12 +22,12 @@ export function QueuedTurnDispatcher() {
   );
 
   useEffect(() => {
-    const api = readNativeApi();
-    if (!api) {
-      return;
-    }
-
     for (const thread of threads) {
+      const api = readEnvironmentApi(thread.environmentId);
+      if (!api) {
+        continue;
+      }
+
       const queue = queuedMessagesByThreadId[thread.id];
       const queueHead = queue?.[0];
       const canDispatch = canAutoDispatchQueuedTurn({

@@ -1,4 +1,9 @@
-import type { CodexReasoningEffort, NativeApi, ProviderKind, ThreadId } from "@t3tools/contracts";
+import type {
+  CodexReasoningEffort,
+  EnvironmentApi,
+  ProviderKind,
+  ThreadId,
+} from "@t3tools/contracts";
 import { createModelSelection, getDefaultReasoningEffort } from "@t3tools/shared/model";
 
 import { type QueuedComposerMessageState } from "./composerDraftStore";
@@ -79,7 +84,7 @@ function queuedProviderOptions(input: {
 }
 
 async function persistQueuedThreadSettings(input: {
-  api: NativeApi;
+  api: EnvironmentApi;
   thread: Thread;
   snapshot: QueuedComposerMessageState;
   createdAt: string;
@@ -174,7 +179,7 @@ export function canAutoDispatchQueuedTurn(input: {
 }
 
 export async function dispatchQueuedTurn(input: {
-  api: NativeApi;
+  api: EnvironmentApi;
   thread: Thread;
   snapshot: QueuedComposerMessageState;
   settings: {
