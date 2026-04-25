@@ -2,6 +2,7 @@
 created_at: 2026-03-20T18:01
 updated_at: 2026-04-10T16:28
 ---
+
 # Scripts
 
 - `bun run dev` — Starts contracts, server, and web in `turbo watch` mode.
@@ -9,7 +10,7 @@ updated_at: 2026-04-10T16:28
 - `bun run dev:web` — Starts just the Vite dev server for the web app.
 - Dev commands default `TETHER_STATE_DIR` to `~/.t3/dev` to keep dev state isolated from desktop/prod state.
 - Override server CLI-equivalent flags from root dev commands with `--`, for example:
-  `bun run dev -- --state-dir ~/.t3/another-dev-state`
+  `bun run dev -- --base-dir ~/.t3-2`
 - `bun run start` — Runs the production server (serves built web app as static files).
 - `bun run build` — Builds contracts, web app, and server through Turbo.
 - `bun run typecheck` — Strict TypeScript checks for all packages.

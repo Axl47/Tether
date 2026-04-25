@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 
-import { isCommandAvailable } from "./open";
+import { isCommandAvailable } from "./open.ts";
 
 export interface CliLaunchSpec {
   readonly command: string;

@@ -1,5 +1,5 @@
 import type { CodexReasoningEffort, NativeApi, ProviderKind, ThreadId } from "@t3tools/contracts";
-import { getDefaultReasoningEffort } from "@t3tools/shared/model";
+import { createModelSelection, getDefaultReasoningEffort } from "@t3tools/shared/model";
 
 import { type QueuedComposerMessageState } from "./composerDraftStore";
 import { derivePendingApprovals, derivePendingUserInputs, derivePhase } from "./session-logic";
@@ -39,11 +39,9 @@ function resolveQueuedProvider(thread: Thread, snapshot: QueuedComposerMessageSt
   return snapshot.provider ?? thread.session?.provider ?? "codex";
 }
 
-function queuedModelOptions(snapshot: QueuedComposerMessageState):
-  | {
-      codex: { reasoningEffort?: CodexReasoningEffort; fastMode?: true };
-    }
-  | undefined {
+function queuedModelOptions(
+  snapshot: QueuedComposerMessageState,
+): { reasoningEffort?: CodexReasoningEffort; fastMode?: true } | undefined {
   if (snapshot.provider !== "codex") {
     return undefined;
   }
@@ -58,7 +56,7 @@ function queuedModelOptions(snapshot: QueuedComposerMessageState):
   if (snapshot.codexFastMode) {
     codexOptions.fastMode = true;
   }
-  return Object.keys(codexOptions).length > 0 ? { codex: codexOptions } : undefined;
+  return Object.keys(codexOptions).length > 0 ? codexOptions : undefined;
 }
 
 function queuedProviderOptions(input: {
@@ -86,16 +84,31 @@ async function persistQueuedThreadSettings(input: {
   snapshot: QueuedComposerMessageState;
   createdAt: string;
 }): Promise<void> {
-  const nextModel = input.snapshot.model ?? undefined;
+  const nextProvider = input.snapshot.provider ?? input.thread.modelSelection.provider;
+  const nextModel = input.snapshot.model ?? input.thread.modelSelection.model;
+  const nextModelSelection = createModelSelection(
+    nextProvider,
+    nextModel,
+    queuedModelOptions({
+      ...input.snapshot,
+      provider: nextProvider,
+    }),
+  );
   const nextRuntimeMode = input.snapshot.runtimeMode ?? input.thread.runtimeMode;
   const nextInteractionMode = input.snapshot.interactionMode ?? input.thread.interactionMode;
+  const currentModelSelection = input.thread.modelSelection;
+  const modelSelectionChanged =
+    currentModelSelection.provider !== nextModelSelection.provider ||
+    currentModelSelection.model !== nextModelSelection.model ||
+    JSON.stringify(currentModelSelection.options ?? null) !==
+      JSON.stringify(nextModelSelection.options ?? null);
 
-  if (nextModel !== undefined && nextModel !== input.thread.model) {
+  if (modelSelectionChanged) {
     await input.api.orchestration.dispatchCommand({
       type: "thread.meta.update",
       commandId: newCommandId(),
       threadId: input.thread.id,
-      model: nextModel,
+      modelSelection: nextModelSelection,
     });
   }
 
@@ -188,6 +201,11 @@ export async function dispatchQueuedTurn(input: {
     ...input.snapshot,
     provider,
   });
+  const modelSelection = createModelSelection(
+    provider,
+    input.snapshot.model ?? input.thread.modelSelection.model,
+    modelOptions,
+  );
   const providerOptions = queuedProviderOptions({
     provider,
     codexBinaryPath: input.settings.codexBinaryPath,
@@ -218,8 +236,7 @@ export async function dispatchQueuedTurn(input: {
       attachments: turnAttachments,
     },
     provider,
-    model: input.snapshot.model ?? undefined,
-    ...(modelOptions ? { modelOptions } : {}),
+    modelSelection,
     ...(providerOptions ? { providerOptions } : {}),
     assistantDeliveryMode: input.settings.enableAssistantStreaming ? "streaming" : "buffered",
     runtimeMode,

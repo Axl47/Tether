@@ -4,6 +4,7 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { PanelLeftCloseIcon, PanelLeftIcon } from "lucide-react";
 import * as React from "react";
 import { cn } from "~/lib/utils";
+import { shouldApplyControlledOpenChange } from "~/lib/controlledOpenState";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { ScrollArea } from "~/components/ui/scroll-area";
@@ -118,6 +119,9 @@ function SidebarProvider({
   const setOpen = React.useCallback(
     (value: boolean | ((value: boolean) => boolean)) => {
       const openState = typeof value === "function" ? value(open) : value;
+      if (!shouldApplyControlledOpenChange(open, openState)) {
+        return;
+      }
       if (setOpenProp) {
         setOpenProp(openState);
       } else {

@@ -49,6 +49,7 @@ import {
   type GitStatusResult,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
+import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import { useAppSettings } from "../appSettings";
@@ -56,9 +57,10 @@ import { isElectron } from "../env";
 import { APP_STAGE_LABEL, APP_VERSION } from "../branding";
 import { buildLocalDraftThread, hasDraftThreadContent } from "../draftThreads";
 import { copyTextToClipboard } from "../lib/clipboard";
-import { newCommandId, newProjectId, newThreadId } from "../lib/utils";
+import { newCommandId, newDraftId, newProjectId, newThreadId } from "../lib/utils";
 import { resolveConfiguredWsUrl, resolveServerHttpOriginFromWsUrl } from "../lib/wsUrl";
 import { DEFAULT_SIDEBAR_THREAD_SORT, SIDEBAR_THREAD_SORT_OPTIONS } from "../sidebarThreadSort";
+import { usePrimaryEnvironmentId } from "../environments/primary";
 import { useStore } from "../store";
 import { isChatNewLocalShortcut, isChatNewShortcut, shortcutLabelForCommand } from "../keybindings";
 import { derivePendingApprovals, derivePendingUserInputs } from "../session-logic";
@@ -387,7 +389,7 @@ export default function Sidebar() {
   const draftsByThreadId = useComposerDraftStore((store) => store.draftsByThreadId);
   const draftThreadsByThreadId = useComposerDraftStore((store) => store.draftThreadsByThreadId);
   const getDraftThread = useComposerDraftStore((store) => store.getDraftThread);
-  const terminalStateByThreadId = useTerminalStateStore((state) => state.terminalStateByThreadId);
+  const terminalStateByThreadKey = useTerminalStateStore((state) => state.terminalStateByThreadKey);
   const pendingRunByThreadId = useThreadRunStateStore((state) => state.pendingRunByThreadId);
   const clearPendingRun = useThreadRunStateStore((state) => state.clearPendingRun);
   const clearTerminalState = useTerminalStateStore((state) => state.clearTerminalState);
@@ -410,7 +412,10 @@ export default function Sidebar() {
     select: (config) => config.keybindings,
   });
   const queryClient = useQueryClient();
-  const removeWorktreeMutation = useMutation(gitRemoveWorktreeMutationOptions({ queryClient }));
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const removeWorktreeMutation = useMutation(
+    gitRemoveWorktreeMutationOptions({ environmentId: primaryEnvironmentId, queryClient }),
+  );
   const [addingProject, setAddingProject] = useState(false);
   const [newCwd, setNewCwd] = useState("");
   const [isPickingFolder, setIsPickingFolder] = useState(false);
@@ -591,21 +596,31 @@ export default function Sidebar() {
 
   const navigateToThread = useCallback(
     async (threadId: ThreadId, options?: { replace?: boolean }) => {
+      const targetThread = threads.find((thread) => thread.id === threadId);
+      if (!targetThread) {
+        return;
+      }
       if (options?.replace === true) {
         await navigate({
-          to: "/$threadId",
-          params: { threadId },
+          to: "/$environmentId/$threadId",
+          params: {
+            environmentId: targetThread.environmentId,
+            threadId,
+          },
           replace: true,
         });
       } else {
         await navigate({
-          to: "/$threadId",
-          params: { threadId },
+          to: "/$environmentId/$threadId",
+          params: {
+            environmentId: targetThread.environmentId,
+            threadId,
+          },
         });
       }
       closeMobileSidebar();
     },
-    [closeMobileSidebar, navigate],
+    [closeMobileSidebar, navigate, threads],
   );
 
   const handleNewThread = useCallback(
@@ -617,10 +632,17 @@ export default function Sidebar() {
         envMode?: DraftThreadEnvMode;
       },
     ): Promise<void> => {
+      const draftId = newDraftId();
       const threadId = newThreadId();
       const createdAt = new Date().toISOString();
       return (async () => {
-        setProjectDraftThreadId(projectId, threadId, {
+        const project = projects.find((entry) => entry.id === projectId);
+        const environmentId = project?.environmentId ?? primaryEnvironmentId;
+        if (!environmentId) {
+          return;
+        }
+        setProjectDraftThreadId(scopeProjectRef(environmentId, projectId), draftId, {
+          threadId,
           createdAt,
           branch: options?.branch ?? null,
           worktreePath: options?.worktreePath ?? null,
@@ -628,10 +650,14 @@ export default function Sidebar() {
           runtimeMode: DEFAULT_RUNTIME_MODE,
         });
 
-        await navigateToThread(threadId);
+        await navigate({
+          to: "/draft/$draftId",
+          params: { draftId },
+        });
+        closeMobileSidebar();
       })();
     },
-    [navigateToThread, setProjectDraftThreadId],
+    [closeMobileSidebar, navigate, primaryEnvironmentId, projects, setProjectDraftThreadId],
   );
 
   const focusMostRecentThreadForProject = useCallback(
@@ -683,7 +709,10 @@ export default function Sidebar() {
           projectId,
           title,
           workspaceRoot: cwd,
-          defaultModel: DEFAULT_MODEL_BY_PROVIDER.codex,
+          defaultModelSelection: {
+            provider: "codex",
+            model: DEFAULT_MODEL_BY_PROVIDER.codex,
+          },
           createdAt,
         });
         await handleNewThread(projectId).catch(() => undefined);
@@ -940,10 +969,13 @@ export default function Sidebar() {
         try {
           const snapshot = await api.orchestration.forceDeleteThread({ threadId });
           syncServerReadModel(snapshot);
-          clearComposerDraftForThread(threadId);
-          clearProjectDraftThreadById(thread.projectId, thread.id);
+          clearComposerDraftForThread(scopeThreadRef(thread.environmentId, thread.id));
+          clearProjectDraftThreadById(
+            scopeProjectRef(thread.environmentId, thread.projectId),
+            scopeThreadRef(thread.environmentId, thread.id),
+          );
           clearPendingRun(threadId);
-          clearTerminalState(threadId);
+          clearTerminalState(scopeThreadRef(thread.environmentId, thread.id));
           if (shouldNavigateToFallback) {
             if (fallbackThreadId) {
               void navigateToThread(fallbackThreadId, { replace: true });
@@ -994,8 +1026,8 @@ export default function Sidebar() {
         } catch {
           // Terminal may already be closed
         }
-        clearComposerDraftForThread(threadId);
-        clearTerminalState(threadId);
+        clearComposerDraftForThread(scopeThreadRef(thread.environmentId, thread.id));
+        clearTerminalState(scopeThreadRef(thread.environmentId, thread.id));
         if (shouldNavigateToFallback) {
           if (fallbackThreadId) {
             void navigateToThread(fallbackThreadId, { replace: true });
@@ -1048,10 +1080,13 @@ export default function Sidebar() {
         commandId: newCommandId(),
         threadId,
       });
-      clearComposerDraftForThread(threadId);
-      clearProjectDraftThreadById(thread.projectId, thread.id);
+      clearComposerDraftForThread(scopeThreadRef(thread.environmentId, thread.id));
+      clearProjectDraftThreadById(
+        scopeProjectRef(thread.environmentId, thread.projectId),
+        scopeThreadRef(thread.environmentId, thread.id),
+      );
       clearPendingRun(threadId);
-      clearTerminalState(threadId);
+      clearTerminalState(scopeThreadRef(thread.environmentId, thread.id));
       if (shouldNavigateToFallback) {
         if (fallbackThreadId) {
           void navigateToThread(fallbackThreadId, { replace: true });
@@ -1131,7 +1166,7 @@ export default function Sidebar() {
       if (!confirmed) return;
 
       try {
-        clearProjectDraftThreadId(projectId);
+        clearProjectDraftThreadId(scopeProjectRef(project.environmentId, projectId));
         await api.orchestration.dispatchCommand({
           type: "project.delete",
           commandId: newCommandId(),
@@ -1973,8 +2008,10 @@ export default function Sidebar() {
                               hasDraftThreadContent(draftsByThreadId[thread.id]);
                             const prStatus = prStatusIndicator(prByThreadId.get(thread.id) ?? null);
                             const terminalStatus = terminalStatusFromRunningIds(
-                              selectThreadTerminalState(terminalStateByThreadId, thread.id)
-                                .runningTerminalIds,
+                              selectThreadTerminalState(
+                                terminalStateByThreadKey,
+                                scopeThreadRef(thread.environmentId, thread.id),
+                              ).runningTerminalIds,
                             );
                             const threadTimestamp =
                               threadSort === "activity"
@@ -2383,8 +2420,10 @@ export default function Sidebar() {
                                   prByThreadId.get(thread.id) ?? null,
                                 );
                                 const terminalStatus = terminalStatusFromRunningIds(
-                                  selectThreadTerminalState(terminalStateByThreadId, thread.id)
-                                    .runningTerminalIds,
+                                  selectThreadTerminalState(
+                                    terminalStateByThreadKey,
+                                    scopeThreadRef(thread.environmentId, thread.id),
+                                  ).runningTerminalIds,
                                 );
                                 const threadTimestamp =
                                   threadSort === "activity"

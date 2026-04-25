@@ -1,14 +1,15 @@
 {
   "name": "@t3tools/desktop",
-  "version": "0.0.10",
+  "version": "0.0.20",
   "private": true,
-  "main": "dist-electron/main.js",
+  "type": "module",
+  "main": "dist-electron/main.cjs",
   "scripts": {
     "dev": "bun run --parallel dev:bundle dev:electron",
-    "dev:bundle": "bun --bun ./node_modules/.bin/tsdown --watch",
-    "dev:electron": "bun run scripts/dev-electron.mjs",
-    "build": "bun --bun ./node_modules/.bin/tsdown",
-    "start": "bun run scripts/start-electron.mjs",
+    "dev:bundle": "tsdown --watch",
+    "dev:electron": "node scripts/dev-electron.mjs",
+    "build": "tsdown",
+    "start": "node scripts/start-electron.mjs",
     "typecheck": "tsc --noEmit",
     "test": "bun --bun ./node_modules/.bin/vitest run --passWithNoTests",
     "smoke-test": "node scripts/smoke-test.mjs"
@@ -22,10 +23,10 @@
     "@t3tools/contracts": "workspace:*",
     "@t3tools/shared": "workspace:*",
     "@types/node": "catalog:",
+    "effect-acp": "workspace:*",
     "tsdown": "catalog:",
     "typescript": "catalog:",
-    "vitest": "catalog:",
-    "wait-on": "^8.0.2"
+    "vitest": "catalog:"
   },
   "productName": "Tether (Alpha)"
 }

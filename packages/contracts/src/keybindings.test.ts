@@ -7,7 +7,7 @@ import {
   KeybindingRule,
   ResolvedKeybindingRule,
   ResolvedKeybindingsConfig,
-} from "./keybindings";
+} from "./keybindings.ts";
 
 const decode = <S extends Schema.Top>(
   schema: S,
@@ -52,7 +52,6 @@ it.effect("parses keybinding rules", () =>
       command: "chat.newLocal",
     });
     assert.strictEqual(parsedLocal.command, "chat.newLocal");
-
     const parsedSplitRight = yield* decode(KeybindingRule, {
       key: "cmd+d",
       command: "chat.splitRight",
@@ -64,6 +63,12 @@ it.effect("parses keybinding rules", () =>
       command: "chat.replaceFocusedPane",
     });
     assert.strictEqual(parsedReplaceFocusedPane.command, "chat.replaceFocusedPane");
+
+    const parsedThreadPrevious = yield* decode(KeybindingRule, {
+      key: "mod+shift+[",
+      command: "thread.previous",
+    });
+    assert.strictEqual(parsedThreadPrevious.command, "thread.previous");
   }),
 );
 
@@ -138,8 +143,19 @@ it.effect("parses resolved keybindings arrays", () =>
           modKey: true,
         },
       },
+      {
+        command: "thread.jump.3",
+        shortcut: {
+          key: "3",
+          metaKey: false,
+          ctrlKey: false,
+          shiftKey: false,
+          altKey: false,
+          modKey: true,
+        },
+      },
     ]);
-    assert.lengthOf(parsed, 1);
+    assert.lengthOf(parsed, 2);
   }),
 );
 

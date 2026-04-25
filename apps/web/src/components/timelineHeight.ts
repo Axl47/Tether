@@ -8,7 +8,6 @@ const LINE_HEIGHT_PX = 22;
 const ASSISTANT_BASE_HEIGHT_PX = 78;
 const USER_BASE_HEIGHT_PX = 96;
 const ATTACHMENTS_PER_ROW = 2;
-// Attachment thumbnails render with `max-h-[220px]` plus ~8px row gap.
 const USER_ATTACHMENT_ROW_HEIGHT_PX = 228;
 const ASSISTANT_ATTACHMENT_ROW_HEIGHT_PX = 228;
 const USER_BUBBLE_WIDTH_RATIO = 0.8;
@@ -32,7 +31,6 @@ interface TimelineHeightEstimateLayout {
 function estimateWrappedLineCount(text: string, charsPerLine: number): number {
   if (text.length === 0) return 1;
 
-  // Avoid allocating via split for long logs; iterate once and count wrapped lines.
   let lines = 0;
   let currentLineLength = 0;
   for (let index = 0; index < text.length; index += 1) {
@@ -85,8 +83,11 @@ export function estimateTimelineMessageHeight(
       inlineAssistantImage ? 1 : 0,
     );
     const attachmentRows = Math.ceil(attachmentCount / ATTACHMENTS_PER_ROW);
-    const attachmentHeight = attachmentRows * ASSISTANT_ATTACHMENT_ROW_HEIGHT_PX;
-    return ASSISTANT_BASE_HEIGHT_PX + estimatedLines * LINE_HEIGHT_PX + attachmentHeight;
+    return (
+      ASSISTANT_BASE_HEIGHT_PX +
+      estimatedLines * LINE_HEIGHT_PX +
+      attachmentRows * ASSISTANT_ATTACHMENT_ROW_HEIGHT_PX
+    );
   }
 
   if (message.role === "user") {
@@ -104,13 +105,15 @@ export function estimateTimelineMessageHeight(
     const estimatedLines = estimateWrappedLineCount(renderedText, charsPerLine);
     const attachmentCount = message.attachments?.length ?? 0;
     const attachmentRows = Math.ceil(attachmentCount / ATTACHMENTS_PER_ROW);
-    const attachmentHeight = attachmentRows * USER_ATTACHMENT_ROW_HEIGHT_PX;
-    return USER_BASE_HEIGHT_PX + estimatedLines * LINE_HEIGHT_PX + attachmentHeight;
+    return (
+      USER_BASE_HEIGHT_PX +
+      estimatedLines * LINE_HEIGHT_PX +
+      attachmentRows * USER_ATTACHMENT_ROW_HEIGHT_PX
+    );
   }
 
-  // `system` messages are not rendered in the chat timeline, but keep a stable
-  // explicit branch in case they are present in timeline data.
   const charsPerLine = estimateCharsPerLineForAssistant(layout.timelineWidthPx);
-  const estimatedLines = estimateWrappedLineCount(message.text, charsPerLine);
-  return ASSISTANT_BASE_HEIGHT_PX + estimatedLines * LINE_HEIGHT_PX;
+  return (
+    ASSISTANT_BASE_HEIGHT_PX + estimateWrappedLineCount(message.text, charsPerLine) * LINE_HEIGHT_PX
+  );
 }

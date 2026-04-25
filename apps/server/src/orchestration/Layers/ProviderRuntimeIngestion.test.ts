@@ -171,11 +171,11 @@ describe("ProviderRuntimeIngestion", () => {
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
       Layer.provideMerge(NodeServices.layer),
     );
-    runtime = ManagedRuntime.make(layer);
+    runtime = ManagedRuntime.make(layer as any);
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
     const ingestion = await runtime.runPromise(Effect.service(ProviderRuntimeIngestionService));
     scope = await Effect.runPromise(Scope.make("sequential"));
-    await Effect.runPromise(ingestion.start.pipe(Scope.provide(scope)));
+    await Effect.runPromise(ingestion.start().pipe(Scope.provide(scope)));
     const drain = () => Effect.runPromise(ingestion.drain);
 
     const createdAt = new Date().toISOString();
@@ -186,7 +186,7 @@ describe("ProviderRuntimeIngestion", () => {
         projectId: asProjectId("project-1"),
         title: "Provider Project",
         workspaceRoot,
-        defaultModel: "gpt-5-codex",
+        defaultModelSelection: { provider: "codex", model: "gpt-5-codex" },
         createdAt,
       }),
     );
@@ -197,7 +197,7 @@ describe("ProviderRuntimeIngestion", () => {
         threadId: ThreadId.makeUnsafe("thread-1"),
         projectId: asProjectId("project-1"),
         title: "Thread",
-        model: "gpt-5-codex",
+        modelSelection: { provider: "codex", model: "gpt-5-codex" },
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",
         branch: null,
@@ -1047,7 +1047,7 @@ describe("ProviderRuntimeIngestion", () => {
     harness.emit({
       type: "turn.completed",
       eventId: asEventId("evt-claude-context-window"),
-      provider: "claudeCode",
+      provider: "claudeAgent",
       createdAt: now,
       threadId: asThreadId("thread-1"),
       turnId: TurnId.makeUnsafe("turn-claude-1"),
@@ -1077,10 +1077,11 @@ describe("ProviderRuntimeIngestion", () => {
     const thread = await waitForThread(
       harness.engine,
       (entry) =>
-        entry.contextWindow?.provider === "claudeCode" && entry.contextWindow.usedTokens === 89_000,
+        entry.contextWindow?.provider === "claudeAgent" &&
+        entry.contextWindow.usedTokens === 89_000,
     );
     expect(thread.contextWindow).toMatchObject({
-      provider: "claudeCode",
+      provider: "claudeAgent",
       usedTokens: 89_000,
       maxTokens: 200_000,
       remainingTokens: 111_000,
@@ -1136,7 +1137,7 @@ describe("ProviderRuntimeIngestion", () => {
         threadId: sourceThreadId,
         projectId: asProjectId("project-1"),
         title: "Plan Source",
-        model: "gpt-5-codex",
+        modelSelection: { provider: "codex", model: "gpt-5-codex" },
         interactionMode: "plan",
         runtimeMode: "approval-required",
         branch: null,
@@ -1168,7 +1169,7 @@ describe("ProviderRuntimeIngestion", () => {
         threadId: targetThreadId,
         projectId: asProjectId("project-1"),
         title: "Plan Target",
-        model: "gpt-5-codex",
+        modelSelection: { provider: "codex", model: "gpt-5-codex" },
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",
         branch: null,
@@ -1317,7 +1318,7 @@ describe("ProviderRuntimeIngestion", () => {
         threadId: sourceThreadId,
         projectId: asProjectId("project-1"),
         title: "Plan Source",
-        model: "gpt-5-codex",
+        modelSelection: { provider: "codex", model: "gpt-5-codex" },
         interactionMode: "plan",
         runtimeMode: "approval-required",
         branch: null,
@@ -1467,7 +1468,7 @@ describe("ProviderRuntimeIngestion", () => {
         threadId: sourceThreadId,
         projectId: asProjectId("project-1"),
         title: "Plan Source",
-        model: "gpt-5-codex",
+        modelSelection: { provider: "codex", model: "gpt-5-codex" },
         interactionMode: "plan",
         runtimeMode: "approval-required",
         branch: null,
@@ -1499,7 +1500,7 @@ describe("ProviderRuntimeIngestion", () => {
         threadId: targetThreadId,
         projectId: asProjectId("project-1"),
         title: "Plan Target",
-        model: "gpt-5-codex",
+        modelSelection: { provider: "codex", model: "gpt-5-codex" },
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",
         branch: null,

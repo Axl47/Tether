@@ -14,6 +14,22 @@ import { resolveCatalogDependencies } from "../../../scripts/lib/resolve-catalog
 import rootPackageJson from "../../../package.json" with { type: "json" };
 import serverPackageJson from "../package.json" with { type: "json" };
 
+interface PackageJson {
+  name: string;
+  repository: {
+    type: string;
+    url: string;
+    directory: string;
+  };
+  bin: Record<string, string>;
+  type: string;
+  version: string;
+  engines: Record<string, string>;
+  files: string[];
+  dependencies: Record<string, string>;
+  overrides: Record<string, string>;
+}
+
 class CliError extends Data.TaggedError("CliError")<{
   readonly message: string;
   readonly cause?: unknown;
@@ -128,16 +144,21 @@ const buildCmd = Command.make(
       const fs = yield* FileSystem.FileSystem;
       const repoRoot = yield* RepoRoot;
       const serverDir = path.join(repoRoot, "apps/server");
+      const commandOutputOptions = {
+        cwd: serverDir,
+        stdout: config.verbose ? ("inherit" as const) : ("ignore" as const),
+        stderr: "inherit" as const,
+        // Windows needs shell mode to resolve `.cmd` shims on PATH.
+        shell: process.platform === "win32",
+      };
 
       yield* Effect.log("[cli] Running tsdown...");
       yield* runCommand(
-        ChildProcess.make({
-          cwd: serverDir,
-          stdout: config.verbose ? "inherit" : "ignore",
-          stderr: "inherit",
-          // Windows needs shell mode to resolve .cmd shims (e.g. bun.cmd).
-          shell: process.platform === "win32",
-        })`bun tsdown`,
+        process.versions.bun
+          ? ChildProcess.make(
+              commandOutputOptions,
+            )`${process.execPath} --bun ./node_modules/.bin/tsdown`
+          : ChildProcess.make(commandOutputOptions)`${process.execPath} --run build:bundle`,
       );
 
       const webDist = path.join(repoRoot, "apps/web/dist");
@@ -177,7 +198,7 @@ const publishCmd = Command.make(
       const backupPath = `${packageJsonPath}.bak`;
 
       // Assert build assets exist
-      for (const relPath of ["dist/index.mjs", "dist/client/index.html"]) {
+      for (const relPath of ["dist/bin.mjs", "dist/client/index.html"]) {
         const abs = path.join(serverDir, relPath);
         if (!(yield* fs.exists(abs))) {
           return yield* new CliError({
@@ -187,12 +208,10 @@ const publishCmd = Command.make(
       }
 
       yield* Effect.acquireUseRelease(
-        // Acquire: backup package.json, resolve catalog: deps, strip devDependencies/scripts
+        // Acquire: backup package.json, resolve catalog dependencies, and strip devDependencies/scripts
         Effect.gen(function* () {
-          // Resolve catalog dependencies before any file mutations. If this throws,
-          // acquire fails and no release hook runs, so filesystem must still be untouched.
           const version = Option.getOrElse(config.appVersion, () => serverPackageJson.version);
-          const pkg = {
+          const pkg: PackageJson = {
             name: serverPackageJson.name,
             repository: serverPackageJson.repository,
             bin: serverPackageJson.bin,
@@ -200,19 +219,22 @@ const publishCmd = Command.make(
             version,
             engines: serverPackageJson.engines,
             files: serverPackageJson.files,
-            dependencies: serverPackageJson.dependencies as Record<string, unknown>,
+            dependencies: resolveCatalogDependencies(
+              serverPackageJson.dependencies,
+              rootPackageJson.workspaces.catalog,
+              "apps/server",
+            ),
+            overrides: resolveCatalogDependencies(
+              rootPackageJson.overrides,
+              rootPackageJson.workspaces.catalog,
+              "apps/server",
+            ),
           };
-
-          pkg.dependencies = resolveCatalogDependencies(
-            pkg.dependencies,
-            rootPackageJson.workspaces.catalog,
-            "apps/server dependencies",
-          );
 
           const original = yield* fs.readFileString(packageJsonPath);
           yield* fs.writeFileString(backupPath, original);
           yield* fs.writeFileString(packageJsonPath, `${JSON.stringify(pkg, null, 2)}\n`);
-          yield* Effect.log("[cli] Resolved package.json for publish");
+          yield* Effect.log("[cli] Prepared package.json for publish");
 
           const iconBackups = yield* applyPublishIconOverrides(repoRoot, serverDir);
           return { iconBackups };

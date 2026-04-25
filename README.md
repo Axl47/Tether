@@ -1,17 +1,18 @@
 ---
 created_at: 2026-03-20T18:01
-updated_at: 2026-04-10T16:28
+updated_at: 2026-04-19T19:21Z
 ---
+
 # Tether
 
-Tether is a minimal GUI for coding agents that has grown into a more capable, reliability-first multi-provider workbench. It is still Codex-first, but this fork also adds Claude Code and Gemini provider support, stronger thread/session UX, and better remote-browser ergonomics for everyday use across multiple machines.
+Tether is a minimal GUI for coding agents that has grown into a more capable, reliability-first multi-provider workbench. It remains Codex-first, while this fork also carries broader provider work, stronger thread and session UX, better remote-browser ergonomics, and several Tether-specific product refinements.
 
 > [!WARNING]
-> You need [Codex CLI](https://github.com/openai/codex) installed and authorized for Tether to work. Claude Code and Gemini CLI are optional, and are only needed if you want to use those provider paths.
+> You need [Codex CLI](https://github.com/openai/codex) installed and authorized for Tether to work. Other provider paths such as Claude Code, Gemini, Cursor ACP, or OpenCode may also require their own local installs and authentication depending on which paths you use.
 
 ## Why This Fork
 
-The original project already had a strong backend and orchestration foundation. This fork pushes further on the product and frontend experience so the app holds up under heavy daily use:
+The original project already had a strong backend and orchestration foundation. This fork pushes further on product and frontend behavior so the app holds up under heavier daily use:
 
 - Better thread awareness for long-running, paused, resumed, and high-volume work
 - Project-wide thread auto-rename and stronger sidebar management
@@ -20,33 +21,7 @@ The original project already had a strong backend and orchestration foundation. 
 - Reliability-first behavior around persistence, orchestration, and recovery
 - Multi-provider support without hard-coding one-off orchestration paths
 
-## What’s Different
-
-1. Multi-provider support
-   - Codex support through the existing app-server integration
-   - Claude Code provider support
-   - Gemini provider support
-   - Provider-aware model and runtime handling across the server and web app
-2. Thread and chat UX
-   - Paused-thread visibility in the sidebar
-   - Thread context jump support and context-window indicators
-   - Project-wide thread auto-rename
-   - Queued follow-ups, steering, and drag reordering
-   - Better sidebar sorting, search, status visibility, and draft-thread handling
-   - Better mobile behavior and higher-volume thread management
-3. Reliability and tooling
-   - Fixed write-only SQLite statement handling in persistence
-   - Improved remote-host and multi-instance development workflows
-   - Better support for using the app from browsers across your network
-
-## Running Tether
-
-Prerequisites:
-
-- [Bun](https://bun.sh/)
-- Codex CLI installed and authenticated
-- Claude Code installed if you want to use the Claude provider path
-- Gemini CLI installed if you want to use the Gemini provider path
+## Installation
 
 Install dependencies:
 
@@ -66,6 +41,16 @@ Useful variants:
 bun run dev:server
 bun run dev:web
 bun run dev:desktop
+```
+
+## Desktop App
+
+Install the latest desktop build from GitHub Releases or your preferred package manager. Upstream T3 Code package examples still broadly apply:
+
+```bash
+winget install T3Tools.T3Code
+brew install --cask t3-code
+yay -S t3code-bin
 ```
 
 ## Quality Gates
@@ -98,7 +83,17 @@ Do not use `bun test` in this repository.
 
 This fork is willing to make larger architectural changes when they improve correctness, recoverability, and long-term maintainability.
 
+Observability guide: [docs/observability.md](./docs/observability.md)
+
 ## Contributing
+
+Before local development, prepare the environment and install dependencies:
+
+```bash
+# Optional: only needed if you use mise for dev tool management.
+mise install
+bun install .
+```
 
 Read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening an issue or PR.
 

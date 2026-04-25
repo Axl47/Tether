@@ -29,7 +29,7 @@ describe("materializeGeminiAssistantImageAttachment", () => {
           name: "generated.png",
         },
         threadId: asThreadId("thread-image-output"),
-        stateDir,
+        attachmentsDir: path.join(stateDir, "attachments"),
         fileSystem,
       });
 

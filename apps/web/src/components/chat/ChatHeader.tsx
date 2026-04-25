@@ -1,14 +1,16 @@
 import {
+  type EnvironmentId,
   type EditorId,
   type ProjectScript,
   type ResolvedKeybindingsConfig,
   type ThreadId,
 } from "@t3tools/contracts";
+import { scopeThreadRef } from "@t3tools/client-runtime";
 import { memo } from "react";
 import GitActionsControl from "../GitActionsControl";
-import { DiffIcon, XIcon } from "lucide-react";
+import { type DraftId } from "~/composerDraftStore";
+import { DiffIcon, TerminalSquareIcon } from "lucide-react";
 import { Badge } from "../ui/badge";
-import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
 import { Toggle } from "../ui/toggle";
@@ -16,7 +18,9 @@ import { SidebarTrigger } from "../ui/sidebar";
 import { OpenInPicker } from "./OpenInPicker";
 
 interface ChatHeaderProps {
+  activeThreadEnvironmentId: EnvironmentId;
   activeThreadId: ThreadId;
+  draftId?: DraftId;
   activeThreadTitle: string;
   activeProjectName: string | undefined;
   isGitRepo: boolean;
@@ -25,20 +29,24 @@ interface ChatHeaderProps {
   preferredScriptId: string | null;
   keybindings: ResolvedKeybindingsConfig;
   availableEditors: ReadonlyArray<EditorId>;
+  terminalAvailable: boolean;
+  terminalOpen: boolean;
+  terminalToggleShortcutLabel: string | null;
   diffToggleShortcutLabel: string | null;
   gitCwd: string | null;
   diffOpen: boolean;
-  enableOpenFavoriteShortcut?: boolean;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<void>;
   onUpdateProjectScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void>;
   onDeleteProjectScript: (scriptId: string) => Promise<void>;
+  onToggleTerminal: () => void;
   onToggleDiff: () => void;
-  onCloseSplitPane?: (() => void) | undefined;
 }
 
 export const ChatHeader = memo(function ChatHeader({
+  activeThreadEnvironmentId,
   activeThreadId,
+  draftId,
   activeThreadTitle,
   activeProjectName,
   isGitRepo,
@@ -47,19 +55,21 @@ export const ChatHeader = memo(function ChatHeader({
   preferredScriptId,
   keybindings,
   availableEditors,
+  terminalAvailable,
+  terminalOpen,
+  terminalToggleShortcutLabel,
   diffToggleShortcutLabel,
   gitCwd,
   diffOpen,
-  enableOpenFavoriteShortcut = true,
   onRunProjectScript,
   onAddProjectScript,
   onUpdateProjectScript,
   onDeleteProjectScript,
+  onToggleTerminal,
   onToggleDiff,
-  onCloseSplitPane,
 }: ChatHeaderProps) {
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-2">
+    <div className="@container/header-actions flex min-w-0 flex-1 items-center gap-2">
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden sm:gap-3">
         <SidebarTrigger className="size-7 shrink-0 md:hidden" />
         <h2
@@ -69,8 +79,8 @@ export const ChatHeader = memo(function ChatHeader({
           {activeThreadTitle}
         </h2>
         {activeProjectName && (
-          <Badge variant="outline" className="min-w-0 shrink truncate">
-            {activeProjectName}
+          <Badge variant="outline" className="min-w-0 shrink overflow-hidden">
+            <span className="min-w-0 truncate">{activeProjectName}</span>
           </Badge>
         )}
         {activeProjectName && !isGitRepo && (
@@ -79,7 +89,7 @@ export const ChatHeader = memo(function ChatHeader({
           </Badge>
         )}
       </div>
-      <div className="@container/header-actions flex min-w-0 flex-1 items-center justify-end gap-2 @sm/header-actions:gap-3">
+      <div className="flex shrink-0 items-center justify-end gap-2 @3xl/header-actions:gap-3">
         {activeProjectScripts && (
           <ProjectScriptsControl
             scripts={activeProjectScripts}
@@ -96,16 +106,39 @@ export const ChatHeader = memo(function ChatHeader({
             keybindings={keybindings}
             availableEditors={availableEditors}
             openInCwd={openInCwd}
-            enableShortcut={enableOpenFavoriteShortcut}
           />
         )}
         {activeProjectName && (
           <GitActionsControl
             gitCwd={gitCwd}
-            activeThreadId={activeThreadId}
-            availableEditors={availableEditors}
+            activeThreadRef={scopeThreadRef(activeThreadEnvironmentId, activeThreadId)}
+            {...(draftId ? { draftId } : {})}
           />
         )}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Toggle
+                className="shrink-0"
+                pressed={terminalOpen}
+                onPressedChange={onToggleTerminal}
+                aria-label="Toggle terminal drawer"
+                variant="outline"
+                size="xs"
+                disabled={!terminalAvailable}
+              >
+                <TerminalSquareIcon className="size-3" />
+              </Toggle>
+            }
+          />
+          <TooltipPopup side="bottom">
+            {!terminalAvailable
+              ? "Terminal is unavailable until this thread has an active project."
+              : terminalToggleShortcutLabel
+                ? `Toggle terminal drawer (${terminalToggleShortcutLabel})`
+                : "Toggle terminal drawer"}
+          </TooltipPopup>
+        </Tooltip>
         <Tooltip>
           <TooltipTrigger
             render={
@@ -130,24 +163,6 @@ export const ChatHeader = memo(function ChatHeader({
                 : "Toggle diff panel"}
           </TooltipPopup>
         </Tooltip>
-        {onCloseSplitPane && (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  className="shrink-0"
-                  onClick={onCloseSplitPane}
-                  aria-label="Close split pane"
-                  variant="outline"
-                  size="xs"
-                >
-                  <XIcon className="size-3" />
-                </Button>
-              }
-            />
-            <TooltipPopup side="bottom">Close split pane</TooltipPopup>
-          </Tooltip>
-        )}
       </div>
     </div>
   );

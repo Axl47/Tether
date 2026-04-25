@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { GeminiCliManager } from "./geminiCliManager";
+import { GeminiCliManager } from "./geminiCliManager.ts";
 
 function promptText(
   prompt: ReadonlyArray<
@@ -43,7 +43,7 @@ describe("GeminiCliManager", () => {
 
     const manager = new GeminiCliManager({
       prewarmSessions: false,
-      runtimeFactory: async (model, handlers) => {
+      runtimeFactory: async (model: string, handlers: any) => {
         createdRuntimes.push(model);
         return {
           model,
@@ -118,7 +118,7 @@ describe("GeminiCliManager", () => {
     const events: Array<Record<string, unknown>> = [];
     const manager = new GeminiCliManager({
       prewarmSessions: false,
-      runtimeFactory: async (_model, handlers) => ({
+      runtimeFactory: async (_model: string, handlers: any) => ({
         model: "gemini-2.5-pro",
         initialize: async () => undefined,
         newSession: vi.fn(async () => ({
@@ -183,7 +183,7 @@ describe("GeminiCliManager", () => {
     const events: Array<Record<string, unknown>> = [];
     const manager = new GeminiCliManager({
       prewarmSessions: false,
-      runtimeFactory: async (_model, handlers) => ({
+      runtimeFactory: async (_model: string, handlers: any) => ({
         model: "gemini-2.5-pro",
         initialize: async () => undefined,
         newSession: vi.fn(async () => ({
@@ -281,7 +281,7 @@ describe("GeminiCliManager", () => {
     const seenPrompts: Array<ReadonlyArray<Record<string, unknown>>> = [];
     const manager = new GeminiCliManager({
       prewarmSessions: false,
-      runtimeFactory: async (_model, handlers) => ({
+      runtimeFactory: async (_model: string, handlers: any) => ({
         model: "gemini-2.5-pro",
         initialize: async () => undefined,
         newSession: vi.fn(async () => ({
@@ -333,7 +333,7 @@ describe("GeminiCliManager", () => {
     const seenPrompts: Array<ReadonlyArray<Record<string, unknown>>> = [];
     const manager = new GeminiCliManager({
       prewarmSessions: false,
-      runtimeFactory: async (_model, handlers) => ({
+      runtimeFactory: async (_model: string, handlers: any) => ({
         model: "gemini-2.5-pro",
         initialize: async () => undefined,
         newSession: vi.fn(async () => ({
@@ -385,7 +385,7 @@ describe("GeminiCliManager", () => {
     const events: Array<Record<string, unknown>> = [];
     const manager = new GeminiCliManager({
       prewarmSessions: false,
-      runtimeFactory: async (_model, handlers) => ({
+      runtimeFactory: async (_model: string, handlers: any) => ({
         model: "gemini-3-pro-preview",
         initialize: async () => undefined,
         newSession: vi.fn(async () => ({
@@ -448,7 +448,7 @@ describe("GeminiCliManager", () => {
     const events: Array<Record<string, unknown>> = [];
     const manager = new GeminiCliManager({
       prewarmSessions: false,
-      runtimeFactory: async (_model, handlers) => ({
+      runtimeFactory: async (_model: string, handlers: any) => ({
         model: "gemini-3-pro-preview",
         initialize: async () => undefined,
         newSession: vi.fn(async () => ({

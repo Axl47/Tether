@@ -2,6 +2,7 @@
 created_at: 2026-03-08T17:24
 updated_at: 2026-04-10T16:28
 ---
+
 # CI quality gates
 
 - `.github/workflows/ci.yml` runs `bun run lint`, `bun run typecheck`, and `bun run test` on pull requests and pushes to `main`.

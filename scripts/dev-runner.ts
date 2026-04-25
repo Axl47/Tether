@@ -1,11 +1,11 @@
 #!/usr/bin/env bun
 
-import { homedir } from "node:os";
+import * as NodeOS from "node:os";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { NetService } from "@t3tools/shared/Net";
-import { Config, Data, Effect, Hash, Logger, Option, Path, Schema } from "effect";
+import { Config, Data, Effect, Hash, Layer, Logger, Option, Path, Schema } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { ChildProcess } from "effect/unstable/process";
 
@@ -13,9 +13,14 @@ const BASE_SERVER_PORT = 3773;
 const BASE_WEB_PORT = 5733;
 const MAX_HASH_OFFSET = 3000;
 const MAX_PORT = 65535;
+const DESKTOP_DEV_LOOPBACK_HOST = "127.0.0.1";
+const DEV_PORT_PROBE_HOSTS = ["127.0.0.1", "0.0.0.0", "::1", "::"] as const;
 
+export const DEFAULT_T3_HOME = Effect.map(Effect.service(Path.Path), (path) =>
+  path.join(NodeOS.homedir(), ".t3"),
+);
 export const DEFAULT_DEV_STATE_DIR = Effect.map(Effect.service(Path.Path), (path) =>
-  path.join(homedir(), ".t3", "dev"),
+  path.join(NodeOS.homedir(), ".t3", "dev"),
 );
 
 const MODE_ARGS = {
@@ -68,10 +73,25 @@ const optionalUrlConfig = (name: string): Config.Config<URL | undefined> =>
     Config.option,
     Config.map((value) => Option.getOrUndefined(value)),
   );
+const fallbackOptionalConfig = <A>(
+  primary: Config.Config<A | undefined>,
+  fallback: Config.Config<A | undefined>,
+): Config.Config<A | undefined> =>
+  Config.all({ primary, fallback }).pipe(
+    Config.map(({ primary, fallback }) => primary ?? fallback),
+  );
+const fallbackOptionalStringConfig = (primary: string, fallback: string) =>
+  fallbackOptionalConfig(optionalStringConfig(primary), optionalStringConfig(fallback));
+const fallbackOptionalBooleanConfig = (primary: string, fallback: string) =>
+  fallbackOptionalConfig(optionalBooleanConfig(primary), optionalBooleanConfig(fallback));
+const fallbackOptionalPortConfig = (primary: string, fallback: string) =>
+  fallbackOptionalConfig(optionalPortConfig(primary), optionalPortConfig(fallback));
+const fallbackOptionalIntegerConfig = (primary: string, fallback: string) =>
+  fallbackOptionalConfig(optionalIntegerConfig(primary), optionalIntegerConfig(fallback));
 
 const OffsetConfig = Config.all({
-  portOffset: optionalIntegerConfig("TETHER_PORT_OFFSET"),
-  devInstance: optionalStringConfig("TETHER_DEV_INSTANCE"),
+  portOffset: fallbackOptionalIntegerConfig("TETHER_PORT_OFFSET", "T3CODE_PORT_OFFSET"),
+  devInstance: fallbackOptionalStringConfig("TETHER_DEV_INSTANCE", "T3CODE_DEV_INSTANCE"),
 });
 
 export function resolveOffset(config: {
@@ -104,13 +124,26 @@ export function resolveOffset(config: {
   return { offset, source: `hashed TETHER_DEV_INSTANCE=${seed}` };
 }
 
+function resolveBaseDir(baseDir: string | undefined): Effect.Effect<string, never, Path.Path> {
+  return Effect.gen(function* () {
+    const path = yield* Path.Path;
+    const configured = baseDir?.trim();
+
+    if (configured) {
+      return path.resolve(configured);
+    }
+
+    return yield* DEFAULT_T3_HOME;
+  });
+}
+
 function resolveStateDir(stateDir: string | undefined): Effect.Effect<string, never, Path.Path> {
   return Effect.gen(function* () {
     const path = yield* Path.Path;
     const configured = stateDir?.trim();
 
     if (configured) {
-      // Resolve relative paths against cwd (monorepo root) before turbo changes directories.
+      // Resolve relative paths against cwd before turbo changes working directories.
       return path.resolve(configured);
     }
 
@@ -125,6 +158,7 @@ interface CreateDevRunnerEnvInput {
   readonly webOffset: number;
   readonly stateDir: string | undefined;
   readonly authToken: string | undefined;
+  readonly t3Home: string | undefined;
   readonly noBrowser: boolean | undefined;
   readonly autoBootstrapProjectFromCwd: boolean | undefined;
   readonly logWebSocketEvents: boolean | undefined;
@@ -148,10 +182,12 @@ function resolveBrowserHost(input: {
   if (publicHost) {
     return publicHost;
   }
+
   const host = input.host?.trim();
   if (host && !isWildcardHost(host)) {
     return host;
   }
+
   return "localhost";
 }
 
@@ -163,12 +199,13 @@ function resolveWebSocketHost(input: {
   if (publicHost) {
     return publicHost;
   }
+
   const host = input.host?.trim();
   if (host) {
     return host;
   }
-  // Use wildcard by default so the browser can substitute its own hostname
-  // when opening from localhost, LAN IP, or another routed host.
+
+  // Use wildcard by default so localhost, LAN, and tunneled hosts can all connect.
   return "0.0.0.0";
 }
 
@@ -179,6 +216,7 @@ export function createDevRunnerEnv({
   webOffset,
   stateDir,
   authToken,
+  t3Home,
   noBrowser,
   autoBootstrapProjectFromCwd,
   logWebSocketEvents,
@@ -190,23 +228,55 @@ export function createDevRunnerEnv({
   return Effect.gen(function* () {
     const serverPort = port ?? BASE_SERVER_PORT + serverOffset;
     const webPort = BASE_WEB_PORT + webOffset;
+    const resolvedBaseDir = yield* resolveBaseDir(t3Home);
     const resolvedStateDir = yield* resolveStateDir(stateDir);
     const browserHost = resolveBrowserHost({ host, publicHost });
     const webSocketHost = resolveWebSocketHost({ host, publicHost });
+    const isDesktopMode = mode === "dev:desktop";
 
     const output: NodeJS.ProcessEnv = {
       ...baseEnv,
-      TETHER_PORT: String(serverPort),
       PORT: String(webPort),
       ELECTRON_RENDERER_PORT: String(webPort),
-      TETHER_STATE_DIR: resolvedStateDir,
-      VITE_WS_URL: `ws://${formatHostForUrl(webSocketHost)}:${serverPort}`,
       VITE_DEV_SERVER_URL:
-        devUrl?.toString() ?? `http://${formatHostForUrl(browserHost)}:${webPort}`,
+        devUrl?.toString() ??
+        `http://${formatHostForUrl(isDesktopMode ? DESKTOP_DEV_LOOPBACK_HOST : browserHost)}:${webPort}`,
+      T3CODE_HOME: resolvedBaseDir,
+      T3CODE_PORT: String(serverPort),
+      TETHER_PORT: String(serverPort),
+      TETHER_STATE_DIR: resolvedStateDir,
     };
 
-    if (host !== undefined) {
+    if (!isDesktopMode) {
+      output.VITE_HTTP_URL = `http://${formatHostForUrl(browserHost)}:${serverPort}`;
+      output.VITE_WS_URL = `ws://${formatHostForUrl(webSocketHost)}:${serverPort}`;
+    } else {
+      output.VITE_HTTP_URL = `http://${DESKTOP_DEV_LOOPBACK_HOST}:${serverPort}`;
+      output.VITE_WS_URL = `ws://${DESKTOP_DEV_LOOPBACK_HOST}:${serverPort}`;
+      delete output.T3CODE_MODE;
+      delete output.T3CODE_NO_BROWSER;
+      delete output.T3CODE_HOST;
+      delete output.TETHER_MODE;
+      delete output.TETHER_NO_BROWSER;
+      delete output.TETHER_HOST;
+      delete output.TETHER_PUBLIC_HOST;
+    }
+
+    if (!isDesktopMode && host !== undefined) {
+      output.T3CODE_HOST = host;
       output.TETHER_HOST = host;
+    } else if (!isDesktopMode) {
+      delete output.T3CODE_HOST;
+      delete output.TETHER_HOST;
+    }
+
+    if (!isDesktopMode && noBrowser !== undefined) {
+      const flag = noBrowser ? "1" : "0";
+      output.T3CODE_NO_BROWSER = flag;
+      output.TETHER_NO_BROWSER = flag;
+    } else if (!isDesktopMode) {
+      delete output.T3CODE_NO_BROWSER;
+      delete output.TETHER_NO_BROWSER;
     }
 
     if (publicHost !== undefined) {
@@ -221,31 +291,34 @@ export function createDevRunnerEnv({
       delete output.TETHER_AUTH_TOKEN;
     }
 
-    if (noBrowser !== undefined) {
-      output.TETHER_NO_BROWSER = noBrowser ? "1" : "0";
-    } else {
-      delete output.TETHER_NO_BROWSER;
-    }
-
     if (autoBootstrapProjectFromCwd !== undefined) {
-      output.TETHER_AUTO_BOOTSTRAP_PROJECT_FROM_CWD = autoBootstrapProjectFromCwd ? "1" : "0";
+      const flag = autoBootstrapProjectFromCwd ? "1" : "0";
+      output.T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD = flag;
+      output.TETHER_AUTO_BOOTSTRAP_PROJECT_FROM_CWD = flag;
     } else {
+      delete output.T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD;
       delete output.TETHER_AUTO_BOOTSTRAP_PROJECT_FROM_CWD;
     }
 
     if (logWebSocketEvents !== undefined) {
-      output.TETHER_LOG_WS_EVENTS = logWebSocketEvents ? "1" : "0";
+      const flag = logWebSocketEvents ? "1" : "0";
+      output.T3CODE_LOG_WS_EVENTS = flag;
+      output.TETHER_LOG_WS_EVENTS = flag;
     } else {
+      delete output.T3CODE_LOG_WS_EVENTS;
       delete output.TETHER_LOG_WS_EVENTS;
     }
 
-    if (mode === "dev") {
+    if (mode === "dev" || mode === "dev:server" || mode === "dev:web") {
+      output.T3CODE_MODE = "web";
       output.TETHER_MODE = "web";
+      delete output.T3CODE_DESKTOP_WS_URL;
       delete output.TETHER_DESKTOP_WS_URL;
     }
 
-    if (mode === "dev:server" || mode === "dev:web") {
-      output.TETHER_MODE = "web";
+    if (isDesktopMode) {
+      output.HOST = DESKTOP_DEV_LOOPBACK_HOST;
+      delete output.T3CODE_DESKTOP_WS_URL;
       delete output.TETHER_DESKTOP_WS_URL;
     }
 
@@ -263,10 +336,28 @@ function portPairForOffset(offset: number): {
   };
 }
 
+export function checkPortAvailabilityOnHosts<R>(
+  port: number,
+  hosts: ReadonlyArray<string>,
+  canListenOnHost: (port: number, host: string) => Effect.Effect<boolean, never, R>,
+): Effect.Effect<boolean, never, R> {
+  return Effect.gen(function* () {
+    for (const host of hosts) {
+      if (!(yield* canListenOnHost(port, host))) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+}
+
 const defaultCheckPortAvailability: PortAvailabilityCheck<NetService> = (port) =>
   Effect.gen(function* () {
     const net = yield* NetService;
-    return yield* net.isPortAvailableOnLoopback(port);
+    return yield* checkPortAvailabilityOnHosts(port, DEV_PORT_PROBE_HOSTS, (candidatePort, host) =>
+      net.canListenOnHost(candidatePort, host),
+    );
   });
 
 interface FindFirstAvailableOffsetInput<R = NetService> {
@@ -389,6 +480,7 @@ interface DevRunnerCliInput {
   readonly mode: DevMode;
   readonly stateDir: string | undefined;
   readonly authToken: string | undefined;
+  readonly t3Home: string | undefined;
   readonly noBrowser: boolean | undefined;
   readonly autoBootstrapProjectFromCwd: boolean | undefined;
   readonly logWebSocketEvents: boolean | undefined;
@@ -399,35 +491,6 @@ interface DevRunnerCliInput {
   readonly dryRun: boolean;
   readonly turboArgs: ReadonlyArray<string>;
 }
-
-const readOptionalBooleanEnv = (name: string): boolean | undefined => {
-  const value = process.env[name];
-  if (value === undefined) {
-    return undefined;
-  }
-  if (value === "1" || value.toLowerCase() === "true") {
-    return true;
-  }
-  if (value === "0" || value.toLowerCase() === "false") {
-    return false;
-  }
-  return undefined;
-};
-
-const resolveOptionalBooleanOverride = (
-  explicitValue: boolean | undefined,
-  envValue: boolean | undefined,
-): boolean | undefined => {
-  if (explicitValue === true) {
-    return true;
-  }
-
-  if (explicitValue === false) {
-    return envValue;
-  }
-
-  return envValue;
-};
 
 export function runDevRunnerWithInput(input: DevRunnerCliInput) {
   return Effect.gen(function* () {
@@ -450,12 +513,6 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
         }),
     });
 
-    const envOverrides = {
-      noBrowser: readOptionalBooleanEnv("TETHER_NO_BROWSER"),
-      autoBootstrapProjectFromCwd: readOptionalBooleanEnv("TETHER_AUTO_BOOTSTRAP_PROJECT_FROM_CWD"),
-      logWebSocketEvents: readOptionalBooleanEnv("TETHER_LOG_WS_EVENTS"),
-    };
-
     const { serverOffset, webOffset } = yield* resolveModePortOffsets({
       mode: input.mode,
       startOffset: offset,
@@ -470,15 +527,10 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       webOffset,
       stateDir: input.stateDir,
       authToken: input.authToken,
-      noBrowser: resolveOptionalBooleanOverride(input.noBrowser, envOverrides.noBrowser),
-      autoBootstrapProjectFromCwd: resolveOptionalBooleanOverride(
-        input.autoBootstrapProjectFromCwd,
-        envOverrides.autoBootstrapProjectFromCwd,
-      ),
-      logWebSocketEvents: resolveOptionalBooleanOverride(
-        input.logWebSocketEvents,
-        envOverrides.logWebSocketEvents,
-      ),
+      t3Home: input.t3Home,
+      noBrowser: input.noBrowser,
+      autoBootstrapProjectFromCwd: input.autoBootstrapProjectFromCwd,
+      logWebSocketEvents: input.logWebSocketEvents,
       host: input.host,
       publicHost: input.publicHost,
       port: input.port,
@@ -491,7 +543,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
         : "";
 
     yield* Effect.logInfo(
-      `[dev-runner] mode=${input.mode} source=${source}${selectionSuffix} serverPort=${String(env.TETHER_PORT)} webPort=${String(env.PORT)} stateDir=${String(env.TETHER_STATE_DIR)}`,
+      `[dev-runner] mode=${input.mode} source=${source}${selectionSuffix} serverPort=${String(env.T3CODE_PORT)} webPort=${String(env.PORT)} baseDir=${String(env.T3CODE_HOME)} stateDir=${String(env.TETHER_STATE_DIR)}`,
     );
 
     if (input.dryRun) {
@@ -548,39 +600,50 @@ const devRunnerCli = Command.make("dev-runner", {
     Flag.withAlias("token"),
     Flag.withFallbackConfig(optionalStringConfig("TETHER_AUTH_TOKEN")),
   ),
+  t3Home: Flag.string("home-dir").pipe(
+    Flag.withDescription("Base directory for app data (equivalent to T3CODE_HOME)."),
+    Flag.withFallbackConfig(optionalStringConfig("T3CODE_HOME")),
+  ),
   noBrowser: Flag.boolean("no-browser").pipe(
     Flag.withDescription("Browser auto-open toggle (equivalent to TETHER_NO_BROWSER)."),
-    Flag.withFallbackConfig(optionalBooleanConfig("TETHER_NO_BROWSER")),
+    Flag.withFallbackConfig(
+      fallbackOptionalBooleanConfig("TETHER_NO_BROWSER", "T3CODE_NO_BROWSER"),
+    ),
   ),
   autoBootstrapProjectFromCwd: Flag.boolean("auto-bootstrap-project-from-cwd").pipe(
     Flag.withDescription(
       "Auto-bootstrap toggle (equivalent to TETHER_AUTO_BOOTSTRAP_PROJECT_FROM_CWD).",
     ),
-    Flag.withFallbackConfig(optionalBooleanConfig("TETHER_AUTO_BOOTSTRAP_PROJECT_FROM_CWD")),
+    Flag.withFallbackConfig(
+      fallbackOptionalBooleanConfig(
+        "TETHER_AUTO_BOOTSTRAP_PROJECT_FROM_CWD",
+        "T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD",
+      ),
+    ),
   ),
   logWebSocketEvents: Flag.boolean("log-websocket-events").pipe(
     Flag.withDescription("WebSocket event logging toggle (equivalent to TETHER_LOG_WS_EVENTS)."),
     Flag.withAlias("log-ws-events"),
-    Flag.withFallbackConfig(optionalBooleanConfig("TETHER_LOG_WS_EVENTS")),
+    Flag.withFallbackConfig(
+      fallbackOptionalBooleanConfig("TETHER_LOG_WS_EVENTS", "T3CODE_LOG_WS_EVENTS"),
+    ),
   ),
   host: Flag.string("host").pipe(
     Flag.withDescription("Server host/interface override (forwards to TETHER_HOST)."),
-    Flag.withFallbackConfig(optionalStringConfig("TETHER_HOST")),
+    Flag.withFallbackConfig(fallbackOptionalStringConfig("TETHER_HOST", "T3CODE_HOST")),
   ),
   publicHost: Flag.string("public-host").pipe(
     Flag.withDescription(
       "Browser-facing host/IP for remote dev URLs (forwards to TETHER_PUBLIC_HOST).",
     ),
     Flag.withFallbackConfig(
-      Config.orElse(optionalStringConfig("TETHER_PUBLIC_HOST"), () =>
-        optionalStringConfig("T3CODE_PUBLIC_HOST"),
-      ),
+      fallbackOptionalStringConfig("TETHER_PUBLIC_HOST", "T3CODE_PUBLIC_HOST"),
     ),
   ),
   port: Flag.integer("port").pipe(
     Flag.withSchema(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }))),
     Flag.withDescription("Server port override (forwards to TETHER_PORT)."),
-    Flag.withFallbackConfig(optionalPortConfig("TETHER_PORT")),
+    Flag.withFallbackConfig(fallbackOptionalPortConfig("TETHER_PORT", "T3CODE_PORT")),
   ),
   devUrl: Flag.string("dev-url").pipe(
     Flag.withSchema(Schema.URLFromString),
@@ -600,11 +663,16 @@ const devRunnerCli = Command.make("dev-runner", {
   Command.withHandler((input) => runDevRunnerWithInput(input)),
 );
 
-const runtimeProgram = Command.run(devRunnerCli, { version: "0.0.0" }).pipe(
-  Effect.scoped,
-  Effect.provide([Logger.layer([Logger.consolePretty()]), NodeServices.layer, NetService.layer]),
-) as Effect.Effect<void, unknown, never>;
+const cliRuntimeLayer = Layer.mergeAll(
+  Logger.layer([Logger.consolePretty()]),
+  NodeServices.layer,
+  NetService.layer,
+);
 
 if (import.meta.main) {
-  NodeRuntime.runMain(runtimeProgram);
+  Command.run(devRunnerCli, { version: "0.0.0" }).pipe(
+    Effect.scoped,
+    Effect.provide(cliRuntimeLayer),
+    NodeRuntime.runMain,
+  );
 }

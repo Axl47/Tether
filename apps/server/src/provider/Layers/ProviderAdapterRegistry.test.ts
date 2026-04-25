@@ -1,15 +1,21 @@
 import type { ProviderKind } from "@t3tools/contracts";
 import { it, assert, vi } from "@effect/vitest";
 import { assertFailure } from "@effect/vitest/utils";
-import * as NodeServices from "@effect/platform-node/NodeServices";
+
 import { Effect, Layer, Stream } from "effect";
 
-import { ProviderUnsupportedError } from "../Errors.ts";
-import { ClaudeCodeAdapter, type ClaudeCodeAdapterShape } from "../Services/ClaudeCodeAdapter.ts";
-import { CodexAdapter, type CodexAdapterShape } from "../Services/CodexAdapter.ts";
-import { GeminiAdapter, type GeminiAdapterShape } from "../Services/GeminiAdapter.ts";
+import { ClaudeAdapter } from "../Services/ClaudeAdapter.ts";
+import type { ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
+import { CodexAdapter } from "../Services/CodexAdapter.ts";
+import type { CodexAdapterShape } from "../Services/CodexAdapter.ts";
+import { CursorAdapter } from "../Services/CursorAdapter.ts";
+import type { CursorAdapterShape } from "../Services/CursorAdapter.ts";
+import { OpenCodeAdapter } from "../Services/OpenCodeAdapter.ts";
+import type { OpenCodeAdapterShape } from "../Services/OpenCodeAdapter.ts";
 import { ProviderAdapterRegistry } from "../Services/ProviderAdapterRegistry.ts";
 import { ProviderAdapterRegistryLive } from "./ProviderAdapterRegistry.ts";
+import { ProviderUnsupportedError } from "../Errors.ts";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 
 const fakeCodexAdapter: CodexAdapterShape = {
   provider: "codex",
@@ -28,9 +34,9 @@ const fakeCodexAdapter: CodexAdapterShape = {
   streamEvents: Stream.empty,
 };
 
-const fakeClaudeCodeAdapter: ClaudeCodeAdapterShape = {
-  provider: "claudeCode",
-  capabilities: { sessionModelSwitch: "restart-session" },
+const fakeClaudeAdapter: ClaudeAdapterShape = {
+  provider: "claudeAgent",
+  capabilities: { sessionModelSwitch: "in-session" },
   startSession: vi.fn(),
   sendTurn: vi.fn(),
   interruptTurn: vi.fn(),
@@ -45,9 +51,26 @@ const fakeClaudeCodeAdapter: ClaudeCodeAdapterShape = {
   streamEvents: Stream.empty,
 };
 
-const fakeGeminiAdapter: GeminiAdapterShape = {
-  provider: "gemini",
-  capabilities: { sessionModelSwitch: "restart-session" },
+const fakeOpenCodeAdapter: OpenCodeAdapterShape = {
+  provider: "opencode",
+  capabilities: { sessionModelSwitch: "in-session" },
+  startSession: vi.fn(),
+  sendTurn: vi.fn(),
+  interruptTurn: vi.fn(),
+  respondToRequest: vi.fn(),
+  respondToUserInput: vi.fn(),
+  stopSession: vi.fn(),
+  listSessions: vi.fn(),
+  hasSession: vi.fn(),
+  readThread: vi.fn(),
+  rollbackThread: vi.fn(),
+  stopAll: vi.fn(),
+  streamEvents: Stream.empty,
+};
+
+const fakeCursorAdapter: CursorAdapterShape = {
+  provider: "cursor",
+  capabilities: { sessionModelSwitch: "in-session" },
   startSession: vi.fn(),
   sendTurn: vi.fn(),
   interruptTurn: vi.fn(),
@@ -68,8 +91,9 @@ const layer = it.layer(
       ProviderAdapterRegistryLive,
       Layer.mergeAll(
         Layer.succeed(CodexAdapter, fakeCodexAdapter),
-        Layer.succeed(ClaudeCodeAdapter, fakeClaudeCodeAdapter),
-        Layer.succeed(GeminiAdapter, fakeGeminiAdapter),
+        Layer.succeed(ClaudeAdapter, fakeClaudeAdapter),
+        Layer.succeed(OpenCodeAdapter, fakeOpenCodeAdapter),
+        Layer.succeed(CursorAdapter, fakeCursorAdapter),
       ),
     ),
     NodeServices.layer,
@@ -81,14 +105,16 @@ layer("ProviderAdapterRegistryLive", (it) => {
     Effect.gen(function* () {
       const registry = yield* ProviderAdapterRegistry;
       const codex = yield* registry.getByProvider("codex");
-      const claudeCode = yield* registry.getByProvider("claudeCode");
-      const gemini = yield* registry.getByProvider("gemini");
+      const claude = yield* registry.getByProvider("claudeAgent");
+      const openCode = yield* registry.getByProvider("opencode");
+      const cursor = yield* registry.getByProvider("cursor");
       assert.equal(codex, fakeCodexAdapter);
-      assert.equal(claudeCode, fakeClaudeCodeAdapter);
-      assert.equal(gemini, fakeGeminiAdapter);
+      assert.equal(claude, fakeClaudeAdapter);
+      assert.equal(openCode, fakeOpenCodeAdapter);
+      assert.equal(cursor, fakeCursorAdapter);
 
       const providers = yield* registry.listProviders();
-      assert.deepEqual(providers, ["codex", "claudeCode", "gemini"]);
+      assert.deepEqual(providers, ["codex", "claudeAgent", "opencode", "cursor"]);
     }),
   );
 

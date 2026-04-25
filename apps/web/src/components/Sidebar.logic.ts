@@ -79,6 +79,34 @@ export function resolveSidebarNewThreadEnvMode(input: {
   return input.requestedEnvMode ?? input.defaultEnvMode;
 }
 
+export function orderItemsByPreferredIds<TItem, TId>(input: {
+  items: readonly TItem[];
+  preferredIds: readonly TId[];
+  getId: (item: TItem) => TId;
+}): TItem[] {
+  const { getId, items, preferredIds } = input;
+  if (preferredIds.length === 0) {
+    return [...items];
+  }
+
+  const itemsById = new Map(items.map((item) => [getId(item), item] as const));
+  const preferredIdSet = new Set(preferredIds);
+  const emittedPreferredIds = new Set<TId>();
+  const ordered = preferredIds.flatMap((id) => {
+    if (emittedPreferredIds.has(id)) {
+      return [];
+    }
+    const item = itemsById.get(id);
+    if (!item) {
+      return [];
+    }
+    emittedPreferredIds.add(id);
+    return [item];
+  });
+  const remaining = items.filter((item) => !preferredIdSet.has(getId(item)));
+  return [...ordered, ...remaining];
+}
+
 export function resolveThreadRowClassName(input: {
   isActive: boolean;
   isSelected: boolean;
@@ -447,4 +475,35 @@ export function sortSidebarProjects<P extends Pick<Project, "id">>(
   });
 
   return sortedProjects.map(({ project }) => project);
+}
+
+export function getFallbackThreadIdAfterDelete<
+  T extends Pick<Thread, "id" | "projectId"> & Thread,
+>(input: {
+  threads: readonly T[];
+  deletedThreadId: T["id"];
+  sortOrder: SidebarThreadSort;
+  deletedThreadIds?: ReadonlySet<T["id"]>;
+}): T["id"] | null {
+  const { deletedThreadId, deletedThreadIds, sortOrder, threads } = input;
+  const deletedThread = threads.find((thread) => thread.id === deletedThreadId);
+  if (!deletedThread) {
+    return null;
+  }
+
+  return (
+    sortSidebarThreads(
+      threads.filter(
+        (thread) =>
+          thread.projectId === deletedThread.projectId &&
+          thread.id !== deletedThreadId &&
+          !deletedThreadIds?.has(thread.id),
+      ),
+      {
+        sortBy: sortOrder,
+        hasPendingApprovalsByThreadId: new Map(),
+        hasPendingUserInputByThreadId: new Map(),
+      },
+    )[0]?.id ?? null
+  );
 }

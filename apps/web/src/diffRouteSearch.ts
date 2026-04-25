@@ -6,6 +6,12 @@ export interface DiffRouteSearch {
   diffFilePath?: string;
 }
 
+const EMPTY_DIFF_ROUTE_SEARCH: DiffRouteSearch = Object.freeze({});
+const DIFF_ROUTE_SEARCH_CACHE_SEPARATOR = "\u0000";
+
+let lastDiffRouteSearchKey: string | null = null;
+let lastDiffRouteSearchValue: DiffRouteSearch = EMPTY_DIFF_ROUTE_SEARCH;
+
 function isDiffOpenValue(value: unknown): boolean {
   return value === "1" || value === 1 || value === true;
 }
@@ -54,12 +60,25 @@ export function clearDiffSearchParams<T extends Record<string, unknown>>(
 export function parseDiffRouteSearch(search: Record<string, unknown>): DiffRouteSearch {
   const diff = isDiffOpenValue(search.diff) ? "1" : undefined;
   const diffTurnIdRaw = diff ? normalizeSearchString(search.diffTurnId) : undefined;
-  const diffTurnId = diffTurnIdRaw ? TurnId.makeUnsafe(diffTurnIdRaw) : undefined;
+  const diffTurnId = diffTurnIdRaw ? TurnId.make(diffTurnIdRaw) : undefined;
   const diffFilePath = diff && diffTurnId ? normalizeSearchString(search.diffFilePath) : undefined;
+  const nextKey = [diff ?? "", diffTurnId ?? "", diffFilePath ?? ""].join(
+    DIFF_ROUTE_SEARCH_CACHE_SEPARATOR,
+  );
 
-  return {
-    ...(diff ? { diff } : {}),
-    ...(diffTurnId ? { diffTurnId } : {}),
-    ...(diffFilePath ? { diffFilePath } : {}),
-  };
+  if (lastDiffRouteSearchKey === nextKey) {
+    return lastDiffRouteSearchValue;
+  }
+
+  lastDiffRouteSearchKey = nextKey;
+  lastDiffRouteSearchValue =
+    diff || diffTurnId || diffFilePath
+      ? {
+          ...(diff ? { diff } : {}),
+          ...(diffTurnId ? { diffTurnId } : {}),
+          ...(diffFilePath ? { diffFilePath } : {}),
+        }
+      : EMPTY_DIFF_ROUTE_SEARCH;
+
+  return lastDiffRouteSearchValue;
 }

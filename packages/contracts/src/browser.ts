@@ -1,5 +1,5 @@
-import type { ThreadId } from "./baseSchemas";
-import type { KeybindingCommand, ResolvedKeybindingsConfig } from "./keybindings";
+import type { ThreadId } from "./baseSchemas.ts";
+import type { KeybindingCommand, ResolvedKeybindingsConfig } from "./keybindings.ts";
 
 export interface BrowserPaneBounds {
   left: number;

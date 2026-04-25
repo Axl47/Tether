@@ -1,5 +1,6 @@
 import {
   DEFAULT_MODEL_BY_PROVIDER,
+  EnvironmentId,
   ProjectId,
   ThreadId,
   TurnId,
@@ -10,12 +11,19 @@ import { describe, expect, it } from "vitest";
 import { markThreadUnread, reorderProjects, syncServerReadModel, type AppState } from "./store";
 import { DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE, type Thread } from "./types";
 
+const ENVIRONMENT_ID = EnvironmentId.make("environment-local");
+
 function makeThread(overrides: Partial<Thread> = {}): Thread {
   return {
     id: ThreadId.makeUnsafe("thread-1"),
+    environmentId: ENVIRONMENT_ID,
     codexThreadId: null,
     projectId: ProjectId.makeUnsafe("project-1"),
     title: "Thread",
+    modelSelection: {
+      provider: "codex",
+      model: "gpt-5-codex",
+    },
     model: "gpt-5-codex",
     runtimeMode: DEFAULT_RUNTIME_MODE,
     interactionMode: DEFAULT_INTERACTION_MODE,
@@ -26,6 +34,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     proposedPlans: [],
     error: null,
     createdAt: "2026-02-13T00:00:00.000Z",
+    archivedAt: null,
     updatedAt: "2026-02-13T00:00:00.000Z",
     latestTurn: null,
     branch: null,
@@ -37,11 +46,18 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
 
 function makeState(thread: Thread): AppState {
   return {
+    activeEnvironmentId: ENVIRONMENT_ID,
+    environmentStateById: {},
     projects: [
       {
         id: ProjectId.makeUnsafe("project-1"),
+        environmentId: ENVIRONMENT_ID,
         name: "Project",
         cwd: "/tmp/project",
+        defaultModelSelection: {
+          provider: "codex",
+          model: "gpt-5-codex",
+        },
         model: "gpt-5-codex",
         expanded: true,
         scripts: [],
@@ -57,7 +73,10 @@ function makeReadModelThread(overrides: Partial<OrchestrationReadModel["threads"
     id: ThreadId.makeUnsafe("thread-1"),
     projectId: ProjectId.makeUnsafe("project-1"),
     title: "Thread",
-    model: "gpt-5.3-codex",
+    modelSelection: {
+      provider: "codex",
+      model: "gpt-5.3-codex",
+    },
     runtimeMode: DEFAULT_RUNTIME_MODE,
     interactionMode: DEFAULT_INTERACTION_MODE,
     branch: null,
@@ -66,6 +85,7 @@ function makeReadModelThread(overrides: Partial<OrchestrationReadModel["threads"
     lastAutoRenameUserMessageId: null,
     createdAt: "2026-02-27T00:00:00.000Z",
     updatedAt: "2026-02-27T00:00:00.000Z",
+    archivedAt: null,
     deletedAt: null,
     messages: [],
     activities: [],
@@ -86,7 +106,10 @@ function makeReadModel(thread: OrchestrationReadModel["threads"][number]): Orche
         id: ProjectId.makeUnsafe("project-1"),
         title: "Project",
         workspaceRoot: "/tmp/project",
-        defaultModel: "gpt-5.3-codex",
+        defaultModelSelection: {
+          provider: "codex",
+          model: "gpt-5.3-codex",
+        },
         createdAt: "2026-02-27T00:00:00.000Z",
         updatedAt: "2026-02-27T00:00:00.000Z",
         deletedAt: null,
@@ -104,7 +127,10 @@ function makeReadModelProject(
     id: ProjectId.makeUnsafe("project-1"),
     title: "Project",
     workspaceRoot: "/tmp/project",
-    defaultModel: "gpt-5.3-codex",
+    defaultModelSelection: {
+      provider: "codex",
+      model: "gpt-5.3-codex",
+    },
     createdAt: "2026-02-27T00:00:00.000Z",
     updatedAt: "2026-02-27T00:00:00.000Z",
     deletedAt: null,
@@ -158,27 +184,44 @@ describe("store pure functions", () => {
     const project2 = ProjectId.makeUnsafe("project-2");
     const project3 = ProjectId.makeUnsafe("project-3");
     const state: AppState = {
+      activeEnvironmentId: ENVIRONMENT_ID,
+      environmentStateById: {},
       projects: [
         {
           id: project1,
+          environmentId: ENVIRONMENT_ID,
           name: "Project 1",
           cwd: "/tmp/project-1",
+          defaultModelSelection: {
+            provider: "codex",
+            model: DEFAULT_MODEL_BY_PROVIDER.codex,
+          },
           model: DEFAULT_MODEL_BY_PROVIDER.codex,
           expanded: true,
           scripts: [],
         },
         {
           id: project2,
+          environmentId: ENVIRONMENT_ID,
           name: "Project 2",
           cwd: "/tmp/project-2",
+          defaultModelSelection: {
+            provider: "codex",
+            model: DEFAULT_MODEL_BY_PROVIDER.codex,
+          },
           model: DEFAULT_MODEL_BY_PROVIDER.codex,
           expanded: true,
           scripts: [],
         },
         {
           id: project3,
+          environmentId: ENVIRONMENT_ID,
           name: "Project 3",
           cwd: "/tmp/project-3",
+          defaultModelSelection: {
+            provider: "codex",
+            model: DEFAULT_MODEL_BY_PROVIDER.codex,
+          },
           model: DEFAULT_MODEL_BY_PROVIDER.codex,
           expanded: true,
           scripts: [],
@@ -199,7 +242,10 @@ describe("store read model sync", () => {
     const initialState = makeState(makeThread());
     const readModel = makeReadModel(
       makeReadModelThread({
-        model: "claude-opus-4-6",
+        modelSelection: {
+          provider: "claudeAgent",
+          model: "claude-opus-4-6",
+        },
       }),
     );
 
@@ -239,7 +285,10 @@ describe("store read model sync", () => {
     const initialState = makeState(makeThread());
     const readModel = makeReadModel(
       makeReadModelThread({
-        model: "gemini-3-flash-preview",
+        modelSelection: {
+          provider: "gemini",
+          model: "gemini-3-flash-preview",
+        },
         session: {
           threadId: ThreadId.makeUnsafe("thread-1"),
           status: "ready",
@@ -263,19 +312,31 @@ describe("store read model sync", () => {
     const project2 = ProjectId.makeUnsafe("project-2");
     const project3 = ProjectId.makeUnsafe("project-3");
     const initialState: AppState = {
+      activeEnvironmentId: ENVIRONMENT_ID,
+      environmentStateById: {},
       projects: [
         {
           id: project2,
+          environmentId: ENVIRONMENT_ID,
           name: "Project 2",
           cwd: "/tmp/project-2",
+          defaultModelSelection: {
+            provider: "codex",
+            model: DEFAULT_MODEL_BY_PROVIDER.codex,
+          },
           model: DEFAULT_MODEL_BY_PROVIDER.codex,
           expanded: true,
           scripts: [],
         },
         {
           id: project1,
+          environmentId: ENVIRONMENT_ID,
           name: "Project 1",
           cwd: "/tmp/project-1",
+          defaultModelSelection: {
+            provider: "codex",
+            model: DEFAULT_MODEL_BY_PROVIDER.codex,
+          },
           model: DEFAULT_MODEL_BY_PROVIDER.codex,
           expanded: true,
           scripts: [],

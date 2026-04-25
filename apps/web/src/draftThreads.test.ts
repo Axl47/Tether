@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ProjectId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 
 import {
   buildLocalDraftThread,
@@ -73,10 +73,14 @@ describe("deriveDraftThreadTitle", () => {
 
 describe("buildLocalDraftThread", () => {
   it("projects a draft thread into a local thread row", () => {
+    const environmentId = EnvironmentId.make("environment-local");
     const thread = buildLocalDraftThread({
       threadId: ThreadId.makeUnsafe("thread-draft"),
       draftThread: {
+        threadId: ThreadId.makeUnsafe("thread-draft"),
+        environmentId,
         projectId: ProjectId.makeUnsafe("project-a"),
+        logicalProjectKey: "environment-local::project-a",
         createdAt: "2026-03-07T12:00:00.000Z",
         runtimeMode: "full-access",
         interactionMode: "default",
@@ -95,6 +99,7 @@ describe("buildLocalDraftThread", () => {
 
     expect(thread).toMatchObject({
       id: ThreadId.makeUnsafe("thread-draft"),
+      environmentId,
       projectId: ProjectId.makeUnsafe("project-a"),
       title: "Implement the sidebar draft fix",
       model: "gpt-5.4",

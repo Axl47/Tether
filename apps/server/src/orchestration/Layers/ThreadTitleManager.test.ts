@@ -65,7 +65,7 @@ describe("ThreadTitleManager", () => {
       Layer.provideMerge(NodeServices.layer),
     );
 
-    runtime = ManagedRuntime.make(layer);
+    runtime = ManagedRuntime.make(layer as any);
     return {
       engine: await runtime.runPromise(Effect.service(OrchestrationEngineService)),
       manager: await runtime.runPromise(Effect.service(ThreadTitleManager)),
@@ -86,7 +86,7 @@ describe("ThreadTitleManager", () => {
         projectId,
         title: "Project",
         workspaceRoot: "/tmp/project",
-        defaultModel: "gpt-5-codex",
+        defaultModelSelection: { provider: "codex", model: "gpt-5-codex" },
         createdAt,
       }),
     );
@@ -97,7 +97,7 @@ describe("ThreadTitleManager", () => {
         threadId,
         projectId,
         title: "New thread",
-        model: "gpt-5-codex",
+        modelSelection: { provider: "codex", model: "gpt-5-codex" },
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "full-access",
         branch: null,

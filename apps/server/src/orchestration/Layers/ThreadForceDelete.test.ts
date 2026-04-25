@@ -84,7 +84,7 @@ const runWithThreadForceDeleteLayer = <A, E>(
           stateDir,
           providerService,
           checkpointStore,
-        }),
+        }) as any,
       ),
     ),
     (runtime) => Effect.promise(() => runtime.runPromise(effect)),

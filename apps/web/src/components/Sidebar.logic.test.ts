@@ -1,3 +1,4 @@
+import { EnvironmentId } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
 import type { Thread } from "../types";
@@ -17,13 +18,19 @@ const baseThread = {
   lastVisitedAt: undefined,
   proposedPlans: [],
 } as const;
+const ENVIRONMENT_ID = EnvironmentId.make("environment-local");
 
 function makeThread(overrides: Partial<Thread> = {}): Thread {
   return {
     id: "thread-1" as Thread["id"],
+    environmentId: ENVIRONMENT_ID,
     codexThreadId: null,
     projectId: "project-1" as Thread["projectId"],
     title: "Thread",
+    modelSelection: {
+      provider: "codex",
+      model: "gpt-5.4",
+    },
     model: "gpt-5.4",
     runtimeMode: "full-access",
     interactionMode: "default",
@@ -32,6 +39,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     proposedPlans: [],
     error: null,
     createdAt: "2026-03-07T10:00:00.000Z",
+    archivedAt: null,
     updatedAt: "2026-03-07T10:00:00.000Z",
     latestTurn: null,
     lastVisitedAt: undefined,

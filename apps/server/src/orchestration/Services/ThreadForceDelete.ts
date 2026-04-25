@@ -2,7 +2,7 @@ import type {
   OrchestrationForceDeleteThreadInput,
   OrchestrationReadModel,
 } from "@t3tools/contracts";
-import { Schema, ServiceMap } from "effect";
+import { Context, Schema } from "effect";
 import type { Effect } from "effect";
 
 export class ThreadForceDeleteError extends Schema.TaggedErrorClass<ThreadForceDeleteError>()(
@@ -18,7 +18,6 @@ export interface ThreadForceDeleteShape {
   ) => Effect.Effect<OrchestrationReadModel, ThreadForceDeleteError>;
 }
 
-export class ThreadForceDelete extends ServiceMap.Service<
-  ThreadForceDelete,
-  ThreadForceDeleteShape
->()("t3/orchestration/Services/ThreadForceDelete") {}
+export class ThreadForceDelete extends Context.Service<ThreadForceDelete, ThreadForceDeleteShape>()(
+  "t3/orchestration/Services/ThreadForceDelete",
+) {}

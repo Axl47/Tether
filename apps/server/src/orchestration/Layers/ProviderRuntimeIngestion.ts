@@ -26,7 +26,7 @@ import {
   normalizeCodexContextWindow,
 } from "../../provider/codexContextWindow.ts";
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
-import { isGitRepository } from "../../git/isRepo.ts";
+import { isGitRepository } from "../../git/Utils.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import {
   ProviderRuntimeIngestionService,
@@ -1426,7 +1426,7 @@ const make = Effect.gen(function* () {
         }
       }
 
-      if (event.type === "turn.completed" && event.provider === "claudeCode") {
+      if (event.type === "turn.completed" && event.provider === "claudeAgent") {
         const contextWindow = normalizeClaudeContextWindow(
           {
             usage: event.payload.usage,
@@ -1589,21 +1589,22 @@ const make = Effect.gen(function* () {
 
   const worker = yield* makeDrainableWorker(processInputSafely);
 
-  const start: ProviderRuntimeIngestionShape["start"] = Effect.gen(function* () {
-    yield* Effect.forkScoped(
-      Stream.runForEach(providerService.streamEvents, (event) =>
-        worker.enqueue({ source: "runtime", event }),
-      ),
-    );
-    yield* Effect.forkScoped(
-      Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
-        if (event.type !== "thread.turn-start-requested") {
-          return Effect.void;
-        }
-        return worker.enqueue({ source: "domain", event });
-      }),
-    );
-  });
+  const start: ProviderRuntimeIngestionShape["start"] = () =>
+    Effect.gen(function* () {
+      yield* Effect.forkScoped(
+        Stream.runForEach(providerService.streamEvents, (event) =>
+          worker.enqueue({ source: "runtime", event }),
+        ),
+      );
+      yield* Effect.forkScoped(
+        Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
+          if (event.type !== "thread.turn-start-requested") {
+            return Effect.void;
+          }
+          return worker.enqueue({ source: "domain", event });
+        }),
+      );
+    });
 
   return {
     start,

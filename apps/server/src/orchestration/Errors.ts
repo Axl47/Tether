@@ -90,9 +90,26 @@ export type OrchestrationEngineError =
   | OrchestrationCommandJsonParseError
   | OrchestrationCommandDecodeError;
 
+function formatSchemaIssue(error: unknown): string {
+  if (error && typeof error === "object" && "issue" in error) {
+    const issue = (error as { issue?: unknown }).issue;
+    if (SchemaIssue.isIssue(issue)) {
+      try {
+        return SchemaIssue.makeFormatterDefault()(issue);
+      } catch {
+        // Fall through to generic formatting below.
+      }
+    }
+  }
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+  return String(error);
+}
+
 export function toOrchestrationCommandDecodeError(error: Schema.SchemaError) {
   return new OrchestrationCommandDecodeError({
-    issue: SchemaIssue.makeFormatterDefault()(error.issue),
+    issue: formatSchemaIssue(error),
     cause: error,
   });
 }
@@ -101,7 +118,7 @@ export function toProjectorDecodeError(eventType: string) {
   return (error: Schema.SchemaError): OrchestrationProjectorDecodeError =>
     new OrchestrationProjectorDecodeError({
       eventType,
-      issue: SchemaIssue.makeFormatterDefault()(error.issue),
+      issue: formatSchemaIssue(error),
       cause: error,
     });
 }

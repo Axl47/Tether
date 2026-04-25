@@ -1,5 +1,5 @@
 import type { DraftThreadState, PersistedComposerImageAttachment } from "./composerDraftStore";
-import type { ThreadId } from "@t3tools/contracts";
+import type { ModelSelection, ThreadId } from "@t3tools/contracts";
 import type { Thread } from "./types";
 import { truncateTitle } from "./truncateTitle";
 
@@ -50,11 +50,17 @@ export function buildLocalDraftThread(input: {
   error: string | null;
 }): Thread {
   const { threadId, draftThread, fallbackModel, composerDraft, error } = input;
+  const fallbackModelSelection: ModelSelection = {
+    provider: "codex",
+    model: fallbackModel,
+  };
   return {
     id: threadId,
+    environmentId: draftThread.environmentId,
     codexThreadId: null,
     projectId: draftThread.projectId,
     title: deriveDraftThreadTitle(composerDraft),
+    modelSelection: fallbackModelSelection,
     model: fallbackModel,
     runtimeMode: draftThread.runtimeMode,
     interactionMode: draftThread.interactionMode,
@@ -62,6 +68,7 @@ export function buildLocalDraftThread(input: {
     messages: [],
     error,
     createdAt: draftThread.createdAt,
+    archivedAt: null,
     updatedAt: draftThread.createdAt,
     latestTurn: null,
     lastVisitedAt: draftThread.createdAt,
@@ -71,5 +78,6 @@ export function buildLocalDraftThread(input: {
     activities: [],
     proposedPlans: [],
     contextWindow: null,
+    lastAutoRenameUserMessageId: null,
   };
 }
