@@ -805,7 +805,7 @@ export default function GitActionsControl({
     setIsCommitDialogOpen(true);
   };
 
-  const runDialogAction = () => {
+  const runCommitDialogAction = (action: "commit" | "commit_push") => {
     if (!isCommitDialogOpen) return;
     const commitMessage = dialogCommitMessage.trim();
     setIsCommitDialogOpen(false);
@@ -813,7 +813,7 @@ export default function GitActionsControl({
     setExcludedFiles(new Set());
     setIsEditingFiles(false);
     void runGitActionWithToast({
-      action: "commit",
+      action,
       ...(commitMessage ? { commitMessage } : {}),
       ...(!allSelected ? { filePaths: selectedFiles.map((f) => f.path) } : {}),
     });
@@ -1133,9 +1133,39 @@ export default function GitActionsControl({
             >
               Commit on new branch
             </Button>
-            <Button size="sm" disabled={noneSelected} onClick={runDialogAction}>
-              Commit
-            </Button>
+            <Group className="w-full sm:w-auto">
+              <Button
+                className="flex-1 sm:flex-none"
+                size="sm"
+                disabled={noneSelected}
+                onClick={() => runCommitDialogAction("commit")}
+              >
+                Commit
+              </Button>
+              <Menu>
+                <MenuTrigger
+                  render={
+                    <Button
+                      aria-label="More commit actions"
+                      className="px-2"
+                      size="icon-sm"
+                      disabled={noneSelected}
+                    />
+                  }
+                >
+                  <ChevronDownIcon aria-hidden="true" className="size-3.5" />
+                </MenuTrigger>
+                <MenuPopup align="end" side="top" className="min-w-40">
+                  <MenuItem
+                    disabled={noneSelected}
+                    onClick={() => runCommitDialogAction("commit_push")}
+                  >
+                    <CloudUploadIcon className="size-4" />
+                    Commit and Push
+                  </MenuItem>
+                </MenuPopup>
+              </Menu>
+            </Group>
           </DialogFooter>
         </DialogPopup>
       </Dialog>

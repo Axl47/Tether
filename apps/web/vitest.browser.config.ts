@@ -22,6 +22,7 @@ export default mergeConfig(
     test: {
       include: [
         "src/components/ChatView.browser.tsx",
+        "src/components/GitActionsControl.browser.tsx",
         "src/components/KeybindingsToast.browser.tsx",
       ],
       browser: {
