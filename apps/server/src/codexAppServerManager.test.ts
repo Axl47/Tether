@@ -247,6 +247,11 @@ describe("process stderr events", () => {
 });
 
 describe("normalizeCodexModelSlug", () => {
+  it("maps gpt-5 aliases to gpt-5.5", () => {
+    expect(normalizeCodexModelSlug("gpt-5-codex")).toBe("gpt-5.5");
+    expect(normalizeCodexModelSlug("5.5")).toBe("gpt-5.5");
+  });
+
   it("maps 5.3 aliases to gpt-5.3-codex", () => {
     expect(normalizeCodexModelSlug("5.3")).toBe("gpt-5.3-codex");
     expect(normalizeCodexModelSlug("gpt-5.3")).toBe("gpt-5.3-codex");
@@ -347,7 +352,7 @@ describe("resolveCodexModelForAccount", () => {
         planType: "plus",
         sparkEnabled: false,
       }),
-    ).toBe("gpt-5.3-codex");
+    ).toBe("gpt-5.5");
   });
 
   it("keeps spark for supported plans", () => {
@@ -367,7 +372,7 @@ describe("resolveCodexModelForAccount", () => {
         planType: null,
         sparkEnabled: false,
       }),
-    ).toBe("gpt-5.3-codex");
+    ).toBe("gpt-5.5");
   });
 });
 
@@ -719,7 +724,7 @@ describe("sendTurn", () => {
       collaborationMode: {
         mode: "plan",
         settings: {
-          model: "gpt-5.3-codex",
+          model: "gpt-5.5",
           reasoning_effort: "medium",
           developer_instructions: CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
         },
@@ -749,7 +754,7 @@ describe("sendTurn", () => {
       collaborationMode: {
         mode: "default",
         settings: {
-          model: "gpt-5.3-codex",
+          model: "gpt-5.5",
           reasoning_effort: "medium",
           developer_instructions: CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
         },

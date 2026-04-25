@@ -3999,7 +3999,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       useComposerDraftStore.getState().setModelSelection(draftId, {
         provider: "codex",
-        model: "gpt-5.4",
+        model: "gpt-5.5",
         options: {
           reasoningEffort: "low",
           fastMode: true,
@@ -4017,7 +4017,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
         modelSelectionByProvider: {
           codex: {
             provider: "codex",
-            model: "gpt-5.4",
+            model: "gpt-5.5",
             options: {
               reasoningEffort: "low",
               fastMode: true,

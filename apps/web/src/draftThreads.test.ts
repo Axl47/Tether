@@ -88,7 +88,7 @@ describe("buildLocalDraftThread", () => {
         worktreePath: "/tmp/worktree-draft",
         envMode: "worktree",
       },
-      fallbackModel: "gpt-5.4",
+      fallbackModel: "gpt-5.5",
       composerDraft: {
         prompt: "Implement the sidebar draft fix",
         images: [],
@@ -102,7 +102,7 @@ describe("buildLocalDraftThread", () => {
       environmentId,
       projectId: ProjectId.makeUnsafe("project-a"),
       title: "Implement the sidebar draft fix",
-      model: "gpt-5.4",
+      model: "gpt-5.5",
       branch: "feature/draft",
       worktreePath: "/tmp/worktree-draft",
     });

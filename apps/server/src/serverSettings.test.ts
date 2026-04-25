@@ -125,7 +125,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       const next = yield* serverSettings.updateSettings({
         textGenerationModelSelection: {
           provider: "codex",
-          model: "gpt-5.4",
+          model: "gpt-5.5",
           options: {
             reasoningEffort: "high",
           },
@@ -134,7 +134,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
 
       assert.deepEqual(next.textGenerationModelSelection, {
         provider: "codex",
-        model: "gpt-5.4",
+        model: "gpt-5.5",
         options: {
           reasoningEffort: "high",
         },

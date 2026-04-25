@@ -28,8 +28,8 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
     skills: [],
     models: [
       {
-        slug: "gpt-5-codex",
-        name: "GPT-5 Codex",
+        slug: "gpt-5.5",
+        name: "GPT-5.5",
         isCustom: false,
         capabilities: {
           reasoningEffortLevels: [effort("low"), effort("medium", true), effort("high")],
@@ -207,7 +207,7 @@ describe("ProviderModelPicker", () => {
       await providerTrigger.hover();
 
       await vi.waitFor(() => {
-        expect(document.body.textContent ?? "").toContain("GPT-5 Codex");
+        expect(document.body.textContent ?? "").toContain("GPT-5.5");
       });
 
       const providerTriggerElement = Array.from(
@@ -220,7 +220,7 @@ describe("ProviderModelPicker", () => {
       const providerTriggerRect = providerTriggerElement.getBoundingClientRect();
       const modelElement = Array.from(
         document.querySelectorAll<HTMLElement>('[role="menuitemradio"]'),
-      ).find((element) => element.textContent?.includes("GPT-5 Codex"));
+      ).find((element) => element.textContent?.includes("GPT-5.5"));
       if (!modelElement) {
         throw new Error("Expected the submenu model option to be mounted.");
       }
@@ -382,7 +382,7 @@ describe("ProviderModelPicker", () => {
     }
     const mounted = await mountPicker({
       provider: "codex",
-      model: "gpt-5-codex",
+      model: "gpt-5.5",
       lockedProvider: null,
       providers: disabledProviders,
     });
@@ -404,7 +404,7 @@ describe("ProviderModelPicker", () => {
   it("accepts outline trigger styling", async () => {
     const mounted = await mountPicker({
       provider: "codex",
-      model: "gpt-5-codex",
+      model: "gpt-5.5",
       lockedProvider: null,
       triggerVariant: "outline",
     });

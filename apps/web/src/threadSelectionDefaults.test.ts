@@ -18,9 +18,9 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     title: "Thread",
     modelSelection: {
       provider: "codex",
-      model: "gpt-5.4",
+      model: "gpt-5.5",
     },
-    model: "gpt-5.4",
+    model: "gpt-5.5",
     runtimeMode: DEFAULT_RUNTIME_MODE,
     interactionMode: DEFAULT_INTERACTION_MODE,
     session: null,
@@ -44,7 +44,7 @@ describe("inferProviderForThreadModel", () => {
   it("prefers the active session provider when one exists", () => {
     expect(
       inferProviderForThreadModel({
-        model: "gpt-5.4",
+        model: "gpt-5.5",
         sessionProviderName: "gemini",
       }),
     ).toBe("gemini");

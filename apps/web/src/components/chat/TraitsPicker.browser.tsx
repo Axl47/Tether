@@ -50,8 +50,8 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
     skills: [],
     models: [
       {
-        slug: "gpt-5.4",
-        name: "GPT-5.4",
+        slug: "gpt-5.5",
+        name: "GPT-5.5",
         isCustom: false,
         capabilities: {
           reasoningEffortLevels: [
