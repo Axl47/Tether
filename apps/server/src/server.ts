@@ -15,6 +15,7 @@ import { websocketRpcRouteLayer } from "./ws.ts";
 import { OpenLive } from "./open.ts";
 import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite.ts";
 import { ServerLifecycleEventsLive } from "./serverLifecycleEvents.ts";
+import { publishLocalTetherDiscovery } from "./localTetherDiscovery.ts";
 import { AnalyticsServiceLayerLive } from "./telemetry/Layers/AnalyticsService.ts";
 import { makeEventNdjsonLogger } from "./provider/Layers/EventNdjsonLogger.ts";
 import { ProviderSessionDirectoryLive } from "./provider/Layers/ProviderSessionDirectory.ts";
@@ -249,6 +250,19 @@ const RuntimeServicesLive = ServerRuntimeStartupLive.pipe(
   Layer.provideMerge(RuntimeDependenciesLive),
 );
 
+const LocalTetherDiscoveryLive = Layer.effectDiscard(
+  publishLocalTetherDiscovery().pipe(
+    Effect.tap((handle) =>
+      Effect.logDebug("published local Tether discovery descriptor", {
+        recordPath: handle.recordPath,
+      }),
+    ),
+    Effect.catchCause((cause) =>
+      Effect.logWarning("failed to publish local Tether discovery descriptor", { cause }),
+    ),
+  ),
+);
+
 export const makeRoutesLayer = Layer.mergeAll(
   authBearerBootstrapRouteLayer,
   authBootstrapRouteLayer,
@@ -309,6 +323,7 @@ export const makeServerLayer = Layer.unwrap(
       HttpRouter.serve(makeRoutesLayer, {
         disableLogger: !config.logWebSocketEvents,
       }),
+      LocalTetherDiscoveryLive,
       httpListeningLayer,
       runtimeStateLayer,
     );
