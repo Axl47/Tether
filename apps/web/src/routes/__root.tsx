@@ -8,6 +8,7 @@ import {
   useNavigate,
 } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { QueryClient, useQueryClient } from "@tanstack/react-query";
 
 import { APP_DISPLAY_NAME } from "../branding";
@@ -23,6 +24,7 @@ import { Button } from "../components/ui/button";
 import { AnchoredToastProvider, ToastProvider, toastManager } from "../components/ui/toast";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { readLocalApi } from "../localApi";
+import { deriveDesktopContextFromRoute } from "../desktopContext";
 import { useProjectGroupingSettings } from "../hooks/useSettings";
 import {
   deriveLogicalProjectKeyFromSettings,
@@ -36,7 +38,7 @@ import {
   useServerConfigUpdatedSubscription,
   useServerWelcomeSubscription,
 } from "../rpc/serverState";
-import { useStore } from "../store";
+import { selectProjectsForEnvironment, selectThreadsForEnvironment, useStore } from "../store";
 import { useUiStateStore } from "../uiStateStore";
 import { syncBrowserChromeTheme } from "../hooks/useTheme";
 import {
@@ -96,6 +98,7 @@ function RootRouteView() {
         <AuthenticatedTracingBootstrap />
         <ServerStateBootstrap />
         <EnvironmentConnectionManagerBootstrap />
+        <DesktopContextRouteSync />
         <EventRouter />
         <QueuedTurnDispatcher />
         <WebSocketConnectionCoordinator />
@@ -203,6 +206,39 @@ function EnvironmentConnectionManagerBootstrap() {
   useEffect(() => {
     return startEnvironmentConnectionService(queryClient);
   }, [queryClient]);
+
+  return null;
+}
+
+function DesktopContextRouteSync() {
+  const pathname = useLocation({ select: (loc) => loc.pathname });
+  const activeEnvironmentId = useStore((store) => store.activeEnvironmentId);
+  const projects = useStore(
+    useShallow((store) => selectProjectsForEnvironment(store, activeEnvironmentId)),
+  );
+  const threads = useStore(
+    useShallow((store) => selectThreadsForEnvironment(store, activeEnvironmentId)),
+  );
+  const lastContextRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const context = deriveDesktopContextFromRoute(pathname, projects, threads);
+    const serialized = JSON.stringify(context);
+    if (serialized === lastContextRef.current) {
+      return;
+    }
+    const api = readLocalApi();
+    if (!api) {
+      return;
+    }
+
+    void api.server
+      .setDesktopContext(context)
+      .then(() => {
+        lastContextRef.current = serialized;
+      })
+      .catch(() => undefined);
+  }, [pathname, projects, threads]);
 
   return null;
 }

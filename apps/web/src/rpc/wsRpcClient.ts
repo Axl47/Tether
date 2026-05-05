@@ -6,6 +6,7 @@ import {
   type GitStatusStreamEvent,
   type LocalApi,
   ORCHESTRATION_WS_METHODS,
+  type ServerSetDesktopContextInput,
   type ServerSettingsPatch,
   WS_METHODS,
 } from "@t3tools/contracts";
@@ -108,6 +109,10 @@ export interface WsRpcClient {
     readonly updateSettings: (
       patch: ServerSettingsPatch,
     ) => ReturnType<RpcUnaryMethod<typeof WS_METHODS.serverUpdateSettings>>;
+    readonly getDesktopContext: RpcUnaryNoArgMethod<typeof WS_METHODS.serverGetDesktopContext>;
+    readonly setDesktopContext: (
+      input: ServerSetDesktopContextInput,
+    ) => ReturnType<RpcUnaryMethod<typeof WS_METHODS.serverSetDesktopContext>>;
     readonly subscribeConfig: RpcStreamMethod<typeof WS_METHODS.subscribeServerConfig>;
     readonly subscribeLifecycle: RpcStreamMethod<typeof WS_METHODS.subscribeServerLifecycle>;
     readonly subscribeAuthAccess: RpcStreamMethod<typeof WS_METHODS.subscribeAuthAccess>;
@@ -213,6 +218,10 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       getSettings: () => transport.request((client) => client[WS_METHODS.serverGetSettings]({})),
       updateSettings: (patch) =>
         transport.request((client) => client[WS_METHODS.serverUpdateSettings]({ patch })),
+      getDesktopContext: () =>
+        transport.request((client) => client[WS_METHODS.serverGetDesktopContext]({})),
+      setDesktopContext: (input) =>
+        transport.request((client) => client[WS_METHODS.serverSetDesktopContext](input)),
       subscribeConfig: (listener, options) =>
         transport.subscribe(
           (client) => client[WS_METHODS.subscribeServerConfig]({}),

@@ -1,4 +1,4 @@
-import type { ContextMenuItem, LocalApi, ServerDesktopContext } from "@t3tools/contracts";
+import type { ContextMenuItem, LocalApi } from "@t3tools/contracts";
 
 import { resetGitStatusStateForTests } from "./lib/gitStatusState";
 import { resetRequestLatencyStateForTests } from "./rpc/requestLatencyState";
@@ -25,19 +25,6 @@ import {
 } from "./clientPersistenceStorage";
 
 let cachedApi: LocalApi | undefined;
-let cachedDesktopContext: ServerDesktopContext | null = null;
-
-function emptyDesktopContext(): ServerDesktopContext {
-  return {
-    projectId: null,
-    projectTitle: null,
-    workspaceRoot: null,
-    threadId: null,
-    threadTitle: null,
-    updatedAt: new Date().toISOString(),
-  };
-}
-
 export function createLocalApi(rpcClient: WsRpcClient): LocalApi {
   const unsupportedProjectOperation = (name: string) =>
     new Error(`Local projects.${name} is unavailable in this runtime.`);
@@ -263,14 +250,8 @@ export function createLocalApi(rpcClient: WsRpcClient): LocalApi {
     },
     server: {
       getConfig: rpcClient.server.getConfig,
-      getDesktopContext: async () => cachedDesktopContext ?? emptyDesktopContext(),
-      setDesktopContext: async (input) => {
-        cachedDesktopContext = {
-          ...input,
-          updatedAt: new Date().toISOString(),
-        };
-        return cachedDesktopContext;
-      },
+      getDesktopContext: rpcClient.server.getDesktopContext,
+      setDesktopContext: rpcClient.server.setDesktopContext,
       refreshProviders: rpcClient.server.refreshProviders,
       upsertKeybinding: rpcClient.server.upsertKeybinding,
       getSettings: rpcClient.server.getSettings,
@@ -302,7 +283,6 @@ export function ensureLocalApi(): LocalApi {
 
 export async function __resetLocalApiForTests() {
   cachedApi = undefined;
-  cachedDesktopContext = null;
   const { __resetClientSettingsPersistenceForTests } = await import("./hooks/useSettings");
   __resetClientSettingsPersistenceForTests();
   await resetEnvironmentServiceForTests();

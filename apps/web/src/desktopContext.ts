@@ -28,10 +28,26 @@ export function deriveDesktopContextFromRoute(
 }
 
 function routeThreadIdFromPathname(pathname: string): string | null {
-  if (pathname === "/" || pathname === "/settings") {
+  const segments = pathname
+    .split("/")
+    .filter((segment) => segment.length > 0)
+    .map((segment) => decodeURIComponent(segment));
+
+  if (
+    segments.length === 0 ||
+    segments[0] === "settings" ||
+    segments[0] === "pair" ||
+    segments[0] === "draft"
+  ) {
     return null;
   }
-  return pathname.startsWith("/") ? pathname.slice(1) : pathname;
+
+  if (segments.length >= 2) {
+    return segments[1] ?? null;
+  }
+
+  // Backward-compatible with the pre-environment route shape used by older tests/dev builds.
+  return segments[0] ?? null;
 }
 
 function emptyDesktopContext(): ServerSetDesktopContextInput {

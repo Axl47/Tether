@@ -59,7 +59,19 @@ describe("deriveDesktopContextFromRoute", () => {
     const projects: Project[] = [makeProject()];
     const threads: Thread[] = [makeThread()];
 
-    expect(deriveDesktopContextFromRoute("/thread-1", projects, threads)).toEqual({
+    expect(deriveDesktopContextFromRoute("/environment-local/thread-1", projects, threads)).toEqual(
+      {
+        projectId: "project-1",
+        projectTitle: "Nexus",
+        workspaceRoot: "/tmp/nexus",
+        threadId: "thread-1",
+        threadTitle: "Focused thread",
+      },
+    );
+  });
+
+  it("supports the legacy single-segment thread route", () => {
+    expect(deriveDesktopContextFromRoute("/thread-1", [makeProject()], [makeThread()])).toEqual({
       projectId: "project-1",
       projectTitle: "Nexus",
       workspaceRoot: "/tmp/nexus",
@@ -78,6 +90,16 @@ describe("deriveDesktopContextFromRoute", () => {
     });
 
     expect(deriveDesktopContextFromRoute("/settings", [makeProject()], [makeThread()])).toEqual({
+      projectId: null,
+      projectTitle: null,
+      workspaceRoot: null,
+      threadId: null,
+      threadTitle: null,
+    });
+
+    expect(
+      deriveDesktopContextFromRoute("/draft/draft-1", [makeProject()], [makeThread()]),
+    ).toEqual({
       projectId: null,
       projectTitle: null,
       workspaceRoot: null,

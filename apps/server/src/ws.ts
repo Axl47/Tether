@@ -54,6 +54,7 @@ import { ProjectSetupScriptRunner } from "./project/Services/ProjectSetupScriptR
 import { RepositoryIdentityResolver } from "./project/Services/RepositoryIdentityResolver.ts";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
+import { DesktopContextStore } from "./desktopContextStore.ts";
 import {
   BootstrapCredentialService,
   type BootstrapCredentialChange,
@@ -151,6 +152,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const repositoryIdentityResolver = yield* RepositoryIdentityResolver;
       const serverEnvironment = yield* ServerEnvironment;
       const serverAuth = yield* ServerAuth;
+      const desktopContext = yield* DesktopContextStore;
       const bootstrapCredentials = yield* BootstrapCredentialService;
       const sessions = yield* SessionCredentialService;
       const serverCommandId = (tag: string) =>
@@ -770,6 +772,14 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           }),
         [WS_METHODS.serverUpdateSettings]: ({ patch }) =>
           observeRpcEffect(WS_METHODS.serverUpdateSettings, serverSettings.updateSettings(patch), {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.serverGetDesktopContext]: (_input) =>
+          observeRpcEffect(WS_METHODS.serverGetDesktopContext, desktopContext.get, {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.serverSetDesktopContext]: (input) =>
+          observeRpcEffect(WS_METHODS.serverSetDesktopContext, desktopContext.set(input), {
             "rpc.aggregate": "server",
           }),
         [WS_METHODS.projectsSearchEntries]: (input) =>
