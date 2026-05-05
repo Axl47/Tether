@@ -492,11 +492,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.turn.interrupt": {
-      yield* requireThread({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
+      const turnId = command.turnId ?? thread.session?.activeTurnId ?? undefined;
       return {
         ...withEventBase({
           aggregateKind: "thread",
@@ -507,7 +508,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         type: "thread.turn-interrupt-requested",
         payload: {
           threadId: command.threadId,
-          ...(command.turnId !== undefined ? { turnId: command.turnId } : {}),
+          ...(turnId !== undefined && turnId !== null ? { turnId } : {}),
           createdAt: command.createdAt,
         },
       };

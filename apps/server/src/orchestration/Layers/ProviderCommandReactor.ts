@@ -11,7 +11,7 @@ import {
   type RuntimeMode,
   type TurnId,
 } from "@t3tools/contracts";
-import { Cache, Cause, Duration, Effect, Equal, Layer, Option, Schema, Stream } from "effect";
+import { Cache, Cause, Duration, Effect, Equal, Exit, Layer, Option, Schema, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
@@ -685,7 +685,34 @@ const make = Effect.gen(function* () {
     }
 
     // Orchestration turn ids are not provider turn ids, so interrupt by session.
-    yield* providerService.interruptTurn({ threadId: event.payload.threadId });
+    const interruptExit = yield* Effect.exit(
+      providerService.interruptTurn({ threadId: event.payload.threadId }),
+    );
+    if (Exit.isFailure(interruptExit)) {
+      yield* appendProviderFailureActivity({
+        threadId: event.payload.threadId,
+        kind: "provider.turn.interrupt.failed",
+        summary: "Provider turn interrupt failed",
+        detail: formatFailureDetail(interruptExit.cause),
+        turnId: event.payload.turnId ?? null,
+        createdAt: event.payload.createdAt,
+      });
+    }
+
+    const latestThread = (yield* resolveThread(event.payload.threadId)) ?? thread;
+    const session = latestThread.session ?? thread.session;
+    if (session && session.status !== "stopped") {
+      yield* setThreadSession({
+        threadId: event.payload.threadId,
+        session: {
+          ...session,
+          status: "interrupted",
+          activeTurnId: null,
+          updatedAt: event.payload.createdAt,
+        },
+        createdAt: event.payload.createdAt,
+      });
+    }
   });
 
   const processApprovalResponseRequested = Effect.fn("processApprovalResponseRequested")(function* (

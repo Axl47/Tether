@@ -69,9 +69,11 @@ import {
 } from "./terminal.ts";
 import {
   ServerConfigStreamEvent,
+  ServerDesktopContext,
   ServerConfig,
   ServerLifecycleStreamEvent,
   ServerProviderUpdatedPayload,
+  ServerSetDesktopContextInput,
   ServerUpsertKeybindingInput,
   ServerUpsertKeybindingResult,
 } from "./server.ts";
@@ -118,6 +120,8 @@ export const WS_METHODS = {
   serverUpsertKeybinding: "server.upsertKeybinding",
   serverGetSettings: "server.getSettings",
   serverUpdateSettings: "server.updateSettings",
+  serverGetDesktopContext: "server.getDesktopContext",
+  serverSetDesktopContext: "server.setDesktopContext",
 
   // Streaming subscriptions
   subscribeGitStatus: "subscribeGitStatus",
@@ -154,6 +158,16 @@ export const WsServerUpdateSettingsRpc = Rpc.make(WS_METHODS.serverUpdateSetting
   payload: Schema.Struct({ patch: ServerSettingsPatch }),
   success: ServerSettings,
   error: ServerSettingsError,
+});
+
+export const WsServerGetDesktopContextRpc = Rpc.make(WS_METHODS.serverGetDesktopContext, {
+  payload: Schema.Struct({}),
+  success: ServerDesktopContext,
+});
+
+export const WsServerSetDesktopContextRpc = Rpc.make(WS_METHODS.serverSetDesktopContext, {
+  payload: ServerSetDesktopContextInput,
+  success: ServerDesktopContext,
 });
 
 export const WsProjectsSearchEntriesRpc = Rpc.make(WS_METHODS.projectsSearchEntries, {

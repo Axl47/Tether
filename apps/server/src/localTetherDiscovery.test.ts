@@ -4,7 +4,9 @@ import { join } from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
-import { Effect, FileSystem, Layer } from "effect";
+import { AuthSessionId } from "@t3tools/contracts";
+import { DateTime, Effect, FileSystem, Layer, Stream } from "effect";
+import { SessionCredentialService } from "./auth/Services/SessionCredentialService.ts";
 import { ServerConfig, type ServerConfigShape } from "./config.ts";
 import {
   LOCAL_TETHER_DISCOVERY_TTL_MS,
@@ -72,7 +74,65 @@ const readDescriptor = (recordPath: string) =>
     return JSON.parse(raw) as LocalTetherDiscoveryDescriptor;
   });
 
-it.layer(NodeServices.layer)("localTetherDiscovery", (it) => {
+const sessionId = AuthSessionId.makeUnsafe("session-local-discovery");
+const sessionExpiresAt = DateTime.makeUnsafe("2026-03-28T21:00:00.000Z");
+
+const sessionCredentialLayer = Layer.succeed(SessionCredentialService, {
+  cookieName: "tether.sid",
+  issue: () =>
+    Effect.succeed({
+      sessionId,
+      token: "session-token",
+      method: "bearer-session-token",
+      role: "client",
+      client: {
+        label: "Pragma local discovery",
+        deviceType: "desktop",
+      },
+      expiresAt: sessionExpiresAt,
+    }),
+  verify: () =>
+    Effect.succeed({
+      sessionId,
+      token: "session-token",
+      method: "bearer-session-token",
+      role: "client",
+      subject: "pragma-local-discovery",
+      client: {
+        label: "Pragma local discovery",
+        deviceType: "desktop",
+      },
+      expiresAt: sessionExpiresAt,
+    }),
+  issueWebSocketToken: () =>
+    Effect.succeed({
+      token: "ws-token",
+      expiresAt: sessionExpiresAt,
+    }),
+  verifyWebSocketToken: () =>
+    Effect.succeed({
+      sessionId,
+      token: "ws-token",
+      method: "bearer-session-token",
+      role: "client",
+      subject: "pragma-local-discovery",
+      client: {
+        label: "Pragma local discovery",
+        deviceType: "desktop",
+      },
+      expiresAt: sessionExpiresAt,
+    }),
+  listActive: () => Effect.succeed([]),
+  streamChanges: Stream.empty,
+  revoke: () => Effect.succeed(true),
+  revokeAllExcept: () => Effect.succeed(0),
+  markConnected: () => Effect.void,
+  markDisconnected: () => Effect.void,
+});
+
+const localTetherDiscoveryTestLayer = Layer.mergeAll(NodeServices.layer, sessionCredentialLayer);
+
+it.layer(localTetherDiscoveryTestLayer)("localTetherDiscovery", (it) => {
   it.effect("publishes an unauthenticated websocket url for web mode", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -96,7 +156,7 @@ it.layer(NodeServices.layer)("localTetherDiscovery", (it) => {
       assert.equal(descriptor.host, "127.0.0.1");
       assert.equal(descriptor.port, 3773);
       assert.equal(descriptor.pid, 4101);
-      assert.equal(descriptor.wsUrl, "ws://127.0.0.1:3773/");
+      assert.equal(descriptor.wsUrl, "ws://127.0.0.1:3773/pragma?wsToken=ws-token");
       assert.equal(descriptor.version, 1);
       assert.deepEqual(names.toSorted(), ["instance-web.json"]);
     }).pipe(Effect.scoped),
@@ -126,7 +186,7 @@ it.layer(NodeServices.layer)("localTetherDiscovery", (it) => {
 
       assert.equal(descriptor.mode, "desktop");
       assert.equal(descriptor.host, "127.0.0.1");
-      assert.equal(descriptor.wsUrl, "ws://127.0.0.1:56875/");
+      assert.equal(descriptor.wsUrl, "ws://127.0.0.1:56875/pragma?wsToken=ws-token");
     }).pipe(Effect.scoped),
   );
 

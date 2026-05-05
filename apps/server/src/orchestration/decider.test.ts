@@ -4,6 +4,7 @@ import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   ProjectId,
   ThreadId,
+  TurnId,
   type OrchestrationReadModel,
 } from "@t3tools/contracts";
 import { Effect } from "effect";
@@ -110,6 +111,49 @@ describe("decideOrchestrationCommand", () => {
       aggregateId: "thread-1",
       payload: {
         threadId: "thread-1",
+      },
+    });
+  });
+
+  it("uses the active session turn id for turn interrupt commands without an explicit turn id", async () => {
+    const baseThread = readModel.threads[0];
+    if (!baseThread) {
+      throw new Error("Expected read model fixture to include a thread.");
+    }
+    const event = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: {
+          type: "thread.turn.interrupt",
+          commandId: CommandId.makeUnsafe("cmd-turn-interrupt"),
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          createdAt: NOW,
+        },
+        readModel: {
+          ...readModel,
+          threads: [
+            {
+              ...baseThread,
+              session: {
+                threadId: baseThread.id,
+                status: "running",
+                providerName: "codex",
+                runtimeMode: "full-access",
+                activeTurnId: TurnId.makeUnsafe("turn-active"),
+                lastError: null,
+                updatedAt: NOW,
+              },
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(Array.isArray(event)).toBe(false);
+    expect(event).toMatchObject({
+      type: "thread.turn-interrupt-requested",
+      payload: {
+        threadId: "thread-1",
+        turnId: "turn-active",
       },
     });
   });

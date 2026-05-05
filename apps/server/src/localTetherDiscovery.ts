@@ -2,6 +2,8 @@ import crypto from "node:crypto";
 import os from "node:os";
 import { Effect, FileSystem, Path } from "effect";
 import { ServerConfig, type RuntimeMode, type ServerConfigShape } from "./config.ts";
+import { SessionCredentialService } from "./auth/Services/SessionCredentialService.ts";
+import { PRAGMA_INTEGRATION_WS_PATH } from "./pragmaIntegration.ts";
 
 export interface LocalTetherDiscoveryDescriptor {
   readonly version: 1;
@@ -54,19 +56,26 @@ function formatHostForUrl(host: string): string {
 export function buildLocalTetherWsUrl(input: {
   readonly host: string | undefined;
   readonly port: number;
+  readonly path?: string;
+  readonly wsToken?: string;
 }): string {
   const host = resolveLocalTetherDiscoveryHost(input.host);
-  return new URL(`ws://${formatHostForUrl(host)}:${input.port}/`).toString();
+  const url = new URL(`ws://${formatHostForUrl(host)}:${input.port}${input.path ?? "/"}`);
+  if (input.wsToken) {
+    url.searchParams.set("wsToken", input.wsToken);
+  }
+  return url.toString();
 }
 
-function buildLocalTetherDiscoveryDescriptor(input: {
+const buildLocalTetherDiscoveryDescriptor = (input: {
   readonly config: ServerConfigShape;
   readonly instanceId: string;
   readonly pid: number;
   readonly startedAt: string;
   readonly now: Date;
   readonly ttlMs: number;
-}): LocalTetherDiscoveryDescriptor {
+  readonly wsToken: string;
+}): LocalTetherDiscoveryDescriptor => {
   const host = resolveLocalTetherDiscoveryHost(input.config.host);
   const updatedAt = input.now.toISOString();
   const expiresAt = new Date(input.now.getTime() + input.ttlMs).toISOString();
@@ -82,12 +91,14 @@ function buildLocalTetherDiscoveryDescriptor(input: {
     wsUrl: buildLocalTetherWsUrl({
       host,
       port: input.config.port,
+      path: PRAGMA_INTEGRATION_WS_PATH,
+      wsToken: input.wsToken,
     }),
     startedAt: input.startedAt,
     updatedAt,
     expiresAt,
   };
-}
+};
 
 const writeDiscoveryDescriptorAtomically = (input: {
   readonly descriptor: LocalTetherDiscoveryDescriptor;
@@ -144,6 +155,7 @@ export const publishLocalTetherDiscovery = (options: PublishLocalTetherDiscovery
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const config = yield* ServerConfig;
+    const sessions = yield* SessionCredentialService;
     const now = options.now ?? (() => new Date());
     const heartbeatMs = options.heartbeatMs ?? LOCAL_TETHER_DISCOVERY_HEARTBEAT_MS;
     const ttlMs = options.ttlMs ?? LOCAL_TETHER_DISCOVERY_TTL_MS;
@@ -153,6 +165,15 @@ export const publishLocalTetherDiscovery = (options: PublishLocalTetherDiscovery
     const recordPath = path.join(discoveryDirectory, `${instanceId}.json`);
     const startedAt = now().toISOString();
     const pid = options.pid ?? process.pid;
+    const session = yield* sessions.issue({
+      method: "bearer-session-token",
+      role: "client",
+      subject: "pragma-local-discovery",
+      client: {
+        label: "Pragma local discovery",
+        deviceType: "desktop",
+      },
+    });
 
     yield* fs.makeDirectory(discoveryDirectory, { recursive: true });
     if (process.platform !== "win32") {
@@ -165,16 +186,20 @@ export const publishLocalTetherDiscovery = (options: PublishLocalTetherDiscovery
     }).pipe(Effect.orElseSucceed(() => undefined));
 
     const writeCurrentDescriptor = () =>
-      writeDiscoveryDescriptorAtomically({
-        descriptor: buildLocalTetherDiscoveryDescriptor({
-          config,
-          instanceId,
-          pid,
-          startedAt,
-          now: now(),
-          ttlMs,
-        }),
-        destinationPath: recordPath,
+      Effect.gen(function* () {
+        const websocketToken = yield* sessions.issueWebSocketToken(session.sessionId);
+        yield* writeDiscoveryDescriptorAtomically({
+          descriptor: buildLocalTetherDiscoveryDescriptor({
+            config,
+            instanceId,
+            pid,
+            startedAt,
+            now: now(),
+            ttlMs,
+            wsToken: websocketToken.token,
+          }),
+          destinationPath: recordPath,
+        });
       });
 
     yield* writeCurrentDescriptor();
@@ -188,7 +213,13 @@ export const publishLocalTetherDiscovery = (options: PublishLocalTetherDiscovery
     );
 
     yield* Effect.addFinalizer(() =>
-      fs.remove(recordPath).pipe(Effect.orElseSucceed(() => undefined)),
+      Effect.all(
+        [
+          fs.remove(recordPath).pipe(Effect.orElseSucceed(() => undefined)),
+          sessions.revoke(session.sessionId).pipe(Effect.orElseSucceed(() => false)),
+        ],
+        { discard: true },
+      ),
     );
 
     return {
