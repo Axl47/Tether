@@ -1,17 +1,14 @@
-# T3 Code
+# Tether
 
-T3 Code is a minimal web GUI for coding agents (currently Codex, Claude, Cursor, and OpenCode, more coming soon).
+Tether is a minimal web GUI for coding agents. It is Codex-first in this fork while staying close enough to upstream T3 Code to continue replaying useful reliability, provider, and desktop improvements.
 
 ## Installation
 
 > [!WARNING]
-> T3 Code currently supports Codex, Claude, Cursor, and OpenCode.
+> Tether currently supports Codex through the upstream provider runtime, with other provider paths available as the upstream base evolves.
 > Install and authenticate at least one provider before use:
 >
 > - Codex: install [Codex CLI](https://developers.openai.com/codex/cli) and run `codex login`
-> - Claude: install [Claude Code](https://claude.com/product/claude-code) and run `claude auth login`
-> - Cursor: install [Cursor CLI](https://cursor.com/cli) and run `cursor-agent login`
-> - OpenCode: install [OpenCode](https://opencode.ai) and run `opencode auth login`
 
 ### Run without installing
 
@@ -63,7 +60,7 @@ There's no public docs site yet, checkout the miscellaneous markdown files in [d
 
 ### Install `vp`
 
-T3 Code uses Vite+ so you'll need to install the global `vp` command-line tool.
+Tether currently uses upstream's Vite+ workflow, so you'll need to install the global `vp` command-line tool.
 
 #### macOS / Linux
 

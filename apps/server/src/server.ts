@@ -86,6 +86,7 @@ import { orchestrationHttpApiLayer } from "./orchestration/http.ts";
 import * as NetService from "@t3tools/shared/Net";
 import * as RelayClient from "@t3tools/shared/relayClient";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
+import { publishLocalTetherDiscovery } from "./localTetherDiscovery.ts";
 
 const PtyAdapterLive = Layer.unwrap(
   Effect.gen(function* () {
@@ -318,6 +319,27 @@ const RuntimeServicesLive = ServerRuntimeStartupLive.pipe(
   Layer.provideMerge(RuntimeDependenciesLive),
 );
 
+const LocalTetherDiscoveryLive = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const config = yield* ServerConfig;
+    if (config.mode !== "desktop") return;
+
+    yield* publishLocalTetherDiscovery().pipe(
+      Effect.tap((handle) =>
+        Effect.logInfo("Published local Tether discovery record", {
+          instanceId: handle.instanceId,
+          recordPath: handle.recordPath,
+        }),
+      ),
+      Effect.catch((cause) =>
+        Effect.logWarning("Failed to publish local Tether discovery record", {
+          cause,
+        }),
+      ),
+    );
+  }),
+);
+
 export const makeRoutesLayer = Layer.mergeAll(
   HttpApiBuilder.layer(EnvironmentHttpApi).pipe(
     Layer.provide(authHttpApiLayer),
@@ -448,6 +470,7 @@ export const makeServerLayer = Layer.unwrap(
       runtimeStateLayer,
       tailscaleServeLayer,
       cloudDesiredLinkReconcileLayer,
+      LocalTetherDiscoveryLive,
     );
 
     return serverApplicationLayer.pipe(
