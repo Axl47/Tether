@@ -113,6 +113,8 @@ describe("DesktopBackendConfiguration", () => {
         assert.isUndefined(first.env.T3CODE_PORT);
         assert.isUndefined(first.env.T3CODE_MODE);
         assert.isUndefined(first.env.T3CODE_DESKTOP_LAN_HOST);
+        assert.equal(first.env.ZDOTDIR, environment.path.join(environment.stateDir, "shell-env"));
+        assert.equal(first.env.POWERLEVEL9K_DISABLE_GITSTATUS, "true");
 
         assert.equal(first.bootstrap.mode, "desktop");
         assert.equal(first.bootstrap.noBrowser, true);

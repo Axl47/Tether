@@ -49,8 +49,13 @@ const DESKTOP_BACKEND_ENV_NAMES = [
   "T3CODE_TAILSCALE_SERVE_PORT",
 ] as const;
 
-const backendChildEnvPatch = (): Record<string, string | undefined> =>
-  Object.fromEntries(DESKTOP_BACKEND_ENV_NAMES.map((name) => [name, undefined]));
+const backendChildEnvPatch = (shellConfigDir: string): Record<string, string | undefined> => ({
+  ...Object.fromEntries(DESKTOP_BACKEND_ENV_NAMES.map((name) => [name, undefined])),
+  // Backend probes may spawn the user's shell. Keep non-interactive children from
+  // sourcing prompt startup files that assume an interactive zle/job-control TTY.
+  ZDOTDIR: shellConfigDir,
+  POWERLEVEL9K_DISABLE_GITSTATUS: "true",
+});
 
 const { logWarning: logBackendConfigurationWarning } = DesktopObservability.makeComponentLogger(
   "desktop-backend-configuration",
@@ -103,7 +108,7 @@ const resolveBackendStartConfig = Effect.fn("desktop.backendConfiguration.resolv
       entryPath: environment.backendEntryPath,
       cwd: environment.backendCwd,
       env: {
-        ...backendChildEnvPatch(),
+        ...backendChildEnvPatch(environment.path.join(environment.stateDir, "shell-env")),
         ELECTRON_RUN_AS_NODE: "1",
       },
       bootstrap: {

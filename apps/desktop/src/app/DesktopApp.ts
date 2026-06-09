@@ -200,6 +200,18 @@ const startup = Effect.gen(function* () {
   yield* shellEnvironment.installIntoProcess;
   const userDataPath = yield* appIdentity.resolveUserDataPath;
   yield* electronApp.setPath("userData", userDataPath);
+  if (environment.isDevelopment) {
+    yield* electronApp.setPath(
+      "sessionData",
+      environment.path.join(environment.stateDir, "electron-session"),
+    );
+    yield* electronApp.appendCommandLineSwitch("disable-http-cache");
+    yield* electronApp.appendCommandLineSwitch(
+      "disable-features",
+      "CompressionDictionaryTransport,CompressionDictionaryTransportBackend",
+    );
+    yield* electronApp.appendCommandLineSwitch("log-level", "3");
+  }
   yield* logStartupInfo("runtime logging configured", { logDir: environment.logDir });
   yield* desktopSettings.load;
 

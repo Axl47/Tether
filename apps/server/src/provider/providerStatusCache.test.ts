@@ -9,6 +9,7 @@ import { createModelCapabilities } from "@t3tools/shared/model";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Schema from "effect/Schema";
 
 import {
   hydrateCachedProvider,
@@ -22,6 +23,7 @@ const emptyCapabilities = createModelCapabilities({ optionDescriptors: [] });
 const CODEX_DRIVER = ProviderDriverKind.make("codex");
 const CLAUDE_AGENT_DRIVER = ProviderDriverKind.make("claudeAgent");
 const OPENCODE_DRIVER = ProviderDriverKind.make("opencode");
+const encodeUnknownJsonString = Schema.encodeUnknownEffect(Schema.UnknownFromJsonString);
 
 const makeProvider = (
   provider: ProviderDriverKind,
@@ -148,6 +150,40 @@ it.layer(NodeServices.layer)("providerStatusCache", (it) => {
     );
   });
 
+  it.effect("reads legacy provider-keyed cache snapshots as default instances", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-provider-cache-" });
+      const filePath = yield* resolveProviderStatusCachePath({
+        cacheDir: tempDir,
+        instanceId: defaultInstanceIdForDriver(CODEX_DRIVER),
+      });
+      const legacySnapshot = {
+        provider: "codex",
+        enabled: true,
+        installed: true,
+        version: "1.0.0",
+        status: "ready",
+        auth: { status: "authenticated" },
+        checkedAt: "2026-04-10T12:00:00.000Z",
+        models: [],
+        slashCommands: [],
+        skills: [],
+      } as const;
+
+      const legacySnapshotJson = yield* encodeUnknownJsonString(legacySnapshot);
+      yield* fs.writeFileString(filePath, `${legacySnapshotJson}\n`);
+
+      const { provider: _provider, ...expectedSnapshot } = legacySnapshot;
+      const expectedProvider: ServerProvider = {
+        ...expectedSnapshot,
+        instanceId: defaultInstanceIdForDriver(CODEX_DRIVER),
+        driver: CODEX_DRIVER,
+      };
+      assert.deepStrictEqual(yield* readProviderStatusCache(filePath), expectedProvider);
+    }),
+  );
+
   it("ignores stale cached enabled state when the provider is now disabled", () => {
     const cachedCodex = makeProvider(CODEX_DRIVER, {
       checkedAt: "2026-04-10T12:00:00.000Z",
@@ -171,7 +207,7 @@ it.layer(NodeServices.layer)("providerStatusCache", (it) => {
     );
   });
 
-  it("rejects cached snapshots that are not correlated to the fallback instance", () => {
+  it("rejects cached snapshots for a different instance", () => {
     const fallbackCodex = makeProvider(CODEX_DRIVER, {
       models: [
         {
@@ -182,43 +218,10 @@ it.layer(NodeServices.layer)("providerStatusCache", (it) => {
         },
       ],
     });
-    const legacyCachedCodex = {
-      provider: ProviderDriverKind.make("codex"),
-      enabled: true,
-      installed: true,
-      version: "1.0.0",
-      status: "ready",
-      auth: { status: "authenticated" },
-      checkedAt: "2026-04-10T12:00:00.000Z",
-      models: [
-        {
-          slug: "cached-legacy-model",
-          name: "Cached Legacy Model",
-          isCustom: false,
-          capabilities: emptyCapabilities,
-        },
-      ],
-      slashCommands: [],
-      skills: [],
-    } as unknown as ServerProvider;
     const mismatchedCachedCodex = makeProvider(CODEX_DRIVER, {
       instanceId: ProviderInstanceId.make("codex_personal"),
     });
 
-    assert.strictEqual(
-      isCachedProviderCorrelated({
-        cachedProvider: legacyCachedCodex,
-        fallbackProvider: fallbackCodex,
-      }),
-      false,
-    );
-    assert.deepStrictEqual(
-      hydrateCachedProvider({
-        cachedProvider: legacyCachedCodex,
-        fallbackProvider: fallbackCodex,
-      }),
-      fallbackCodex,
-    );
     assert.strictEqual(
       isCachedProviderCorrelated({
         cachedProvider: mismatchedCachedCodex,

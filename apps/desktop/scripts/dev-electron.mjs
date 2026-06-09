@@ -29,6 +29,11 @@ const forcedShutdownTimeoutMs = 1_500;
 const restartDebounceMs = 120;
 const childTreeGracePeriodMs = 1_200;
 const remoteDebuggingPort = process.env.T3CODE_DESKTOP_REMOTE_DEBUGGING_PORT?.trim();
+const defaultElectronArgs = [
+  "--disable-http-cache",
+  "--disable-features=CompressionDictionaryTransport,CompressionDictionaryTransportBackend",
+  "--log-level=3",
+];
 
 await waitForResources({
   baseDir: desktopDir,
@@ -74,8 +79,8 @@ function startApp() {
   }
 
   const electronArgs = remoteDebuggingPort
-    ? [`--remote-debugging-port=${remoteDebuggingPort}`]
-    : [];
+    ? [...defaultElectronArgs, `--remote-debugging-port=${remoteDebuggingPort}`]
+    : defaultElectronArgs;
   const launchArgs = devProtocolClient
     ? electronArgs
     : [...electronArgs, `--t3code-dev-root=${desktopDir}`, "dist-electron/main.cjs"];

@@ -1,5 +1,7 @@
 import {
+  defaultInstanceIdForDriver,
   type ProviderDriverKind,
+  ProviderDriverKind as ProviderDriverKindSchema,
   type ProviderInstanceId,
   type ServerProvider,
   ServerProvider as ServerProviderSchema,
@@ -15,6 +17,36 @@ import { writeFileStringAtomically } from "../atomicWrite.ts";
 const decodeProviderStatusCache = Schema.decodeUnknownEffect(
   Schema.fromJsonString(ServerProviderSchema),
 );
+const decodeUnknownJsonString = Schema.decodeUnknownEffect(Schema.UnknownFromJsonString);
+const decodeProviderStatusCacheValue = Schema.decodeUnknownEffect(ServerProviderSchema);
+
+const upgradeLegacyProviderStatusCacheValue = (parsed: unknown): unknown => {
+  if (typeof parsed !== "object" || parsed === null) {
+    return parsed;
+  }
+
+  const record = parsed as Record<string, unknown>;
+  if (
+    record.instanceId !== undefined ||
+    record.driver !== undefined ||
+    typeof record.provider !== "string"
+  ) {
+    return parsed;
+  }
+
+  const driver = ProviderDriverKindSchema.make(record.provider);
+  return {
+    ...record,
+    driver,
+    instanceId: defaultInstanceIdForDriver(driver),
+  };
+};
+
+const decodeLegacyProviderStatusCache = (raw: string) =>
+  decodeUnknownJsonString(raw).pipe(
+    Effect.map(upgradeLegacyProviderStatusCacheValue),
+    Effect.flatMap(decodeProviderStatusCacheValue),
+  );
 
 const mergeProviderModels = (
   fallbackModels: ReadonlyArray<ServerProvider["models"][number]>,
@@ -130,6 +162,7 @@ export const readProviderStatusCache = (filePath: string) =>
     }
 
     return yield* decodeProviderStatusCache(trimmed).pipe(
+      Effect.catch(() => decodeLegacyProviderStatusCache(trimmed)),
       Effect.matchCauseEffect({
         onFailure: (cause) =>
           Effect.logWarning("failed to parse provider status cache, ignoring", {
