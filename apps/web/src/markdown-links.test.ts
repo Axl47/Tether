@@ -1,9 +1,38 @@
-import React from "react";
-import { renderToStaticMarkup } from "react-dom/server";
-import ReactMarkdown from "react-markdown";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
-import { normalizeMarkdownFileLinks, resolveMarkdownFileLinkTarget } from "./markdown-links";
+import {
+  resolveMarkdownFileLinkMeta,
+  resolveMarkdownFileLinkTarget,
+  rewriteMarkdownFileUriHref,
+} from "./markdown-links";
+
+describe("rewriteMarkdownFileUriHref", () => {
+  it("rewrites file uri hrefs into direct path hrefs", () => {
+    expect(rewriteMarkdownFileUriHref("file:///Users/julius/project/src/main.ts#L42")).toBe(
+      "/Users/julius/project/src/main.ts#L42",
+    );
+  });
+
+  it("preserves encoded octets so file paths are decoded only once later", () => {
+    expect(rewriteMarkdownFileUriHref("file:///Users/julius/project/file%2520name.md")).toBe(
+      "/Users/julius/project/file%2520name.md",
+    );
+  });
+
+  it("normalizes file uri hrefs for windows drive paths", () => {
+    expect(
+      rewriteMarkdownFileUriHref(
+        "file:///D:/Programme/t3code/apps/web/src/components/chat/OpenInPicker.tsx#L69",
+      ),
+    ).toBe("D:/Programme/t3code/apps/web/src/components/chat/OpenInPicker.tsx#L69");
+  });
+
+  it("unwraps angle-bracketed file uri hrefs", () => {
+    expect(
+      rewriteMarkdownFileUriHref(" <file:///D:/Programme/t3code/apps/web/src/markdown-links.ts> "),
+    ).toBe("D:/Programme/t3code/apps/web/src/markdown-links.ts");
+  });
+});
 
 describe("resolveMarkdownFileLinkTarget", () => {
   it("resolves absolute posix file paths", () => {
@@ -36,12 +65,6 @@ describe("resolveMarkdownFileLinkTarget", () => {
     );
   });
 
-  it("normalizes browser-style windows drive paths", () => {
-    expect(resolveMarkdownFileLinkTarget("/C:/Users/julius/project/src/main.ts#L42C7")).toBe(
-      "C:/Users/julius/project/src/main.ts:42:7",
-    );
-  });
-
   it("ignores external urls", () => {
     expect(resolveMarkdownFileLinkTarget("https://example.com/docs")).toBeNull();
   });
@@ -52,53 +75,46 @@ describe("resolveMarkdownFileLinkTarget", () => {
     );
   });
 
+  it("formats tooltip display paths relative to the cwd when possible", () => {
+    expect(
+      resolveMarkdownFileLinkMeta(
+        "file:///C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts#L501",
+        "C:/Users/mike/dev-stuff/t3code",
+      ),
+    ).toMatchObject({
+      displayPath: "t3code/apps/web/src/session-logic.ts:501",
+    });
+  });
+
+  it("formats tooltip display paths relative to the cwd for slash-prefixed windows paths", () => {
+    expect(
+      resolveMarkdownFileLinkMeta(
+        "/C:/Users/mike/dev-stuff/t3code/apps/web/src/components/chat/MessagesTimeline.virtualization.browser.tsx",
+        "C:/Users/mike/dev-stuff/t3code",
+      ),
+    ).toMatchObject({
+      displayPath:
+        "t3code/apps/web/src/components/chat/MessagesTimeline.virtualization.browser.tsx",
+    });
+  });
+
+  it("normalizes slash-prefixed windows drive paths before resolving", () => {
+    expect(
+      resolveMarkdownFileLinkTarget(
+        "/D:/Programme/t3code/apps/web/src/components/chat/OpenInPicker.tsx#L69",
+      ),
+    ).toBe("D:/Programme/t3code/apps/web/src/components/chat/OpenInPicker.tsx:69");
+  });
+
+  it("resolves angle-bracketed windows drive paths", () => {
+    expect(
+      resolveMarkdownFileLinkTarget(
+        "</D:/Programme/t3code/apps/web/src/components/ChatMarkdown.tsx:1>",
+      ),
+    ).toBe("D:/Programme/t3code/apps/web/src/components/ChatMarkdown.tsx:1");
+  });
+
   it("does not treat app routes as file links", () => {
     expect(resolveMarkdownFileLinkTarget("/chat/settings")).toBeNull();
-  });
-});
-
-describe("normalizeMarkdownFileLinks", () => {
-  it("repairs markdown file links whose windows paths include spaces", () => {
-    const input =
-      "[site/assets/site.css#L302](/C:/Users/Adam/Workspaces/My Roblox/site/assets/site.css#L302)";
-
-    expect(normalizeMarkdownFileLinks(input)).toBe(
-      "[site/assets/site.css#L302](</C:/Users/Adam/Workspaces/My Roblox/site/assets/site.css#L302>)",
-    );
-  });
-
-  it("leaves external links with titles unchanged", () => {
-    const input = '[docs](https://example.com "Example")';
-
-    expect(normalizeMarkdownFileLinks(input)).toBe(input);
-  });
-
-  it("produces parseable markdown for repaired file links", () => {
-    const input =
-      "[site/assets/site.css#L302](/C:/Users/Adam/Workspaces/My Roblox/site/assets/site.css#L302)";
-    const html = renderToStaticMarkup(
-      React.createElement(ReactMarkdown, null, normalizeMarkdownFileLinks(input)),
-    );
-
-    expect(html).toContain(
-      '<a href="/C:/Users/Adam/Workspaces/My%20Roblox/site/assets/site.css#L302">',
-    );
-  });
-
-  it("does not rewrite inline code spans", () => {
-    const input =
-      "`[site/assets/site.css#L302](/C:/Users/Adam/Workspaces/My Roblox/site/assets/site.css#L302)`";
-
-    expect(normalizeMarkdownFileLinks(input)).toBe(input);
-  });
-
-  it("does not rewrite fenced code blocks", () => {
-    const input = [
-      "```md",
-      "[site/assets/site.css#L302](/C:/Users/Adam/Workspaces/My Roblox/site/assets/site.css#L302)",
-      "```",
-    ].join("\n");
-
-    expect(normalizeMarkdownFileLinks(input)).toBe(input);
   });
 });

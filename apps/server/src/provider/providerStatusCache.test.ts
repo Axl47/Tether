@@ -1,20 +1,36 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import type { ServerProvider } from "@t3tools/contracts";
+import {
+  defaultInstanceIdForDriver,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type ServerProvider,
+} from "@t3tools/contracts";
+import { createModelCapabilities } from "@t3tools/shared/model";
 import { assert, it } from "@effect/vitest";
-import { Effect, FileSystem } from "effect";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Schema from "effect/Schema";
 
 import {
   hydrateCachedProvider,
+  isCachedProviderCorrelated,
   readProviderStatusCache,
   resolveProviderStatusCachePath,
   writeProviderStatusCache,
 } from "./providerStatusCache.ts";
 
+const emptyCapabilities = createModelCapabilities({ optionDescriptors: [] });
+const CODEX_DRIVER = ProviderDriverKind.make("codex");
+const CLAUDE_AGENT_DRIVER = ProviderDriverKind.make("claudeAgent");
+const OPENCODE_DRIVER = ProviderDriverKind.make("opencode");
+const encodeUnknownJsonString = Schema.encodeUnknownEffect(Schema.UnknownFromJsonString);
+
 const makeProvider = (
-  provider: ServerProvider["provider"],
+  provider: ProviderDriverKind,
   overrides?: Partial<ServerProvider>,
 ): ServerProvider => ({
-  provider,
+  instanceId: defaultInstanceIdForDriver(provider),
+  driver: provider,
   enabled: true,
   installed: true,
   version: "1.0.0",
@@ -32,26 +48,26 @@ it.layer(NodeServices.layer)("providerStatusCache", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-provider-cache-" });
-      const codexProvider = makeProvider("codex");
-      const claudeProvider = makeProvider("claudeAgent", {
+      const codexProvider = makeProvider(CODEX_DRIVER);
+      const claudeProvider = makeProvider(CLAUDE_AGENT_DRIVER, {
         status: "warning",
         auth: { status: "unknown" },
       });
-      const openCodeProvider = makeProvider("opencode", {
+      const openCodeProvider = makeProvider(OPENCODE_DRIVER, {
         status: "warning",
         auth: { status: "unknown", type: "opencode" },
       });
-      const codexPath = resolveProviderStatusCachePath({
+      const codexPath = yield* resolveProviderStatusCachePath({
         cacheDir: tempDir,
-        provider: "codex",
+        instanceId: defaultInstanceIdForDriver(ProviderDriverKind.make("codex")),
       });
-      const claudePath = resolveProviderStatusCachePath({
+      const claudePath = yield* resolveProviderStatusCachePath({
         cacheDir: tempDir,
-        provider: "claudeAgent",
+        instanceId: defaultInstanceIdForDriver(ProviderDriverKind.make("claudeAgent")),
       });
-      const openCodePath = resolveProviderStatusCachePath({
+      const openCodePath = yield* resolveProviderStatusCachePath({
         cacheDir: tempDir,
-        provider: "opencode",
+        instanceId: defaultInstanceIdForDriver(ProviderDriverKind.make("opencode")),
       });
 
       yield* writeProviderStatusCache({
@@ -74,20 +90,14 @@ it.layer(NodeServices.layer)("providerStatusCache", (it) => {
   );
 
   it("hydrates cached provider status while preserving current settings-derived models", () => {
-    const cachedCodex = makeProvider("codex", {
+    const cachedCodex = makeProvider(CODEX_DRIVER, {
       checkedAt: "2026-04-10T12:00:00.000Z",
       models: [
         {
           slug: "gpt-5-mini",
           name: "GPT-5 Mini",
           isCustom: false,
-          capabilities: {
-            reasoningEffortLevels: [],
-            supportsFastMode: false,
-            supportsThinkingToggle: false,
-            contextWindowOptions: [],
-            promptInjectedEffortLevels: [],
-          },
+          capabilities: emptyCapabilities,
         },
       ],
       message: "Cached message",
@@ -100,19 +110,13 @@ it.layer(NodeServices.layer)("providerStatusCache", (it) => {
         },
       ],
     });
-    const fallbackCodex = makeProvider("codex", {
+    const fallbackCodex = makeProvider(CODEX_DRIVER, {
       models: [
         {
-          slug: "gpt-5.5",
-          name: "GPT-5.5",
+          slug: "gpt-5.4",
+          name: "GPT-5.4",
           isCustom: false,
-          capabilities: {
-            reasoningEffortLevels: [],
-            supportsFastMode: false,
-            supportsThinkingToggle: false,
-            contextWindowOptions: [],
-            promptInjectedEffortLevels: [],
-          },
+          capabilities: emptyCapabilities,
         },
       ],
       message: "Pending refresh",
@@ -131,13 +135,7 @@ it.layer(NodeServices.layer)("providerStatusCache", (it) => {
             slug: "gpt-5-mini",
             name: "GPT-5 Mini",
             isCustom: false,
-            capabilities: {
-              reasoningEffortLevels: [],
-              supportsFastMode: false,
-              supportsThinkingToggle: false,
-              contextWindowOptions: [],
-              promptInjectedEffortLevels: [],
-            },
+            capabilities: emptyCapabilities,
           },
         ],
         installed: cachedCodex.installed,
@@ -152,12 +150,46 @@ it.layer(NodeServices.layer)("providerStatusCache", (it) => {
     );
   });
 
+  it.effect("reads legacy provider-keyed cache snapshots as default instances", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-provider-cache-" });
+      const filePath = yield* resolveProviderStatusCachePath({
+        cacheDir: tempDir,
+        instanceId: defaultInstanceIdForDriver(CODEX_DRIVER),
+      });
+      const legacySnapshot = {
+        provider: "codex",
+        enabled: true,
+        installed: true,
+        version: "1.0.0",
+        status: "ready",
+        auth: { status: "authenticated" },
+        checkedAt: "2026-04-10T12:00:00.000Z",
+        models: [],
+        slashCommands: [],
+        skills: [],
+      } as const;
+
+      const legacySnapshotJson = yield* encodeUnknownJsonString(legacySnapshot);
+      yield* fs.writeFileString(filePath, `${legacySnapshotJson}\n`);
+
+      const { provider: _provider, ...expectedSnapshot } = legacySnapshot;
+      const expectedProvider: ServerProvider = {
+        ...expectedSnapshot,
+        instanceId: defaultInstanceIdForDriver(CODEX_DRIVER),
+        driver: CODEX_DRIVER,
+      };
+      assert.deepStrictEqual(yield* readProviderStatusCache(filePath), expectedProvider);
+    }),
+  );
+
   it("ignores stale cached enabled state when the provider is now disabled", () => {
-    const cachedCodex = makeProvider("codex", {
+    const cachedCodex = makeProvider(CODEX_DRIVER, {
       checkedAt: "2026-04-10T12:00:00.000Z",
       message: "Cached ready status",
     });
-    const disabledFallback = makeProvider("codex", {
+    const disabledFallback = makeProvider(CODEX_DRIVER, {
       enabled: false,
       installed: false,
       version: null,
@@ -172,6 +204,37 @@ it.layer(NodeServices.layer)("providerStatusCache", (it) => {
         fallbackProvider: disabledFallback,
       }),
       disabledFallback,
+    );
+  });
+
+  it("rejects cached snapshots for a different instance", () => {
+    const fallbackCodex = makeProvider(CODEX_DRIVER, {
+      models: [
+        {
+          slug: "gpt-5.4",
+          name: "GPT-5.4",
+          isCustom: false,
+          capabilities: emptyCapabilities,
+        },
+      ],
+    });
+    const mismatchedCachedCodex = makeProvider(CODEX_DRIVER, {
+      instanceId: ProviderInstanceId.make("codex_personal"),
+    });
+
+    assert.strictEqual(
+      isCachedProviderCorrelated({
+        cachedProvider: mismatchedCachedCodex,
+        fallbackProvider: fallbackCodex,
+      }),
+      false,
+    );
+    assert.deepStrictEqual(
+      hydrateCachedProvider({
+        cachedProvider: mismatchedCachedCodex,
+        fallbackProvider: fallbackCodex,
+      }),
+      fallbackCodex,
     );
   });
 });

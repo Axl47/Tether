@@ -6,8 +6,9 @@
  *
  * @module WorkspaceEntries
  */
-import { Schema, Context } from "effect";
-import type { Effect } from "effect";
+import * as Schema from "effect/Schema";
+import * as Context from "effect/Context";
+import type * as Effect from "effect/Effect";
 
 import type {
   FilesystemBrowseInput,
@@ -22,7 +23,7 @@ export class WorkspaceEntriesError extends Schema.TaggedErrorClass<WorkspaceEntr
     cwd: Schema.String,
     operation: Schema.String,
     detail: Schema.String,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {}
 
@@ -33,7 +34,7 @@ export class WorkspaceEntriesBrowseError extends Schema.TaggedErrorClass<Workspa
     partialPath: Schema.String,
     operation: Schema.String,
     detail: Schema.String,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {}
 

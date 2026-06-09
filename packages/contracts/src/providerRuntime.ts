@@ -1,4 +1,5 @@
-import { Effect, Schema } from "effect";
+import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import {
   EventId,
   IsoDateTime,
@@ -12,7 +13,7 @@ import {
   TrimmedNonEmptyString,
   TurnId,
 } from "./baseSchemas.ts";
-import { ChatAttachment, ProviderKind } from "./orchestration.ts";
+import { ProviderInstanceId, ProviderDriverKind } from "./providerInstance.ts";
 
 const TrimmedNonEmptyStringSchema = TrimmedNonEmptyString;
 const UnknownRecordSchema = Schema.Record(Schema.String, Schema.Unknown);
@@ -79,7 +80,6 @@ export type RuntimeItemStatus = typeof RuntimeItemStatus.Type;
 
 const RuntimeContentStreamKind = Schema.Literals([
   "assistant_text",
-  "assistant_image",
   "reasoning_text",
   "reasoning_summary_text",
   "plan_text",
@@ -241,12 +241,17 @@ const ModelReroutedType = Schema.Literal("model.rerouted");
 const ConfigWarningType = Schema.Literal("config.warning");
 const DeprecationNoticeType = Schema.Literal("deprecation.notice");
 const FilesPersistedType = Schema.Literal("files.persisted");
+const ToolDeniedType = Schema.Literal("tool.denied");
 const RuntimeWarningType = Schema.Literal("runtime.warning");
 const RuntimeErrorType = Schema.Literal("runtime.error");
 
 const ProviderRuntimeEventBase = Schema.Struct({
   eventId: EventId,
-  provider: ProviderKind,
+  provider: ProviderDriverKind,
+  // Optional during the driver/instance migration. See providerInstance.ts
+  // for the routing-key-vs-driver-id distinction. Once every emitter
+  // populates it (post-slice-4), routing flips to instance-id-only.
+  providerInstanceId: Schema.optional(ProviderInstanceId),
   threadId: ThreadId,
   createdAt: IsoDateTime,
   turnId: Schema.optional(TurnId),
@@ -408,7 +413,6 @@ export type ItemLifecyclePayload = typeof ItemLifecyclePayload.Type;
 const ContentDeltaPayload = Schema.Struct({
   streamKind: RuntimeContentStreamKind,
   delta: Schema.String,
-  attachments: Schema.optional(Schema.Array(ChatAttachment)),
   contentIndex: Schema.optional(Schema.Int),
   summaryIndex: Schema.optional(Schema.Int),
 });
@@ -465,6 +469,7 @@ export type TaskStartedPayload = typeof TaskStartedPayload.Type;
 const TaskProgressPayload = Schema.Struct({
   taskId: RuntimeTaskId,
   description: TrimmedNonEmptyStringSchema,
+  summary: Schema.optional(TrimmedNonEmptyStringSchema),
   usage: Schema.optional(Schema.Unknown),
   lastToolName: Schema.optional(TrimmedNonEmptyStringSchema),
 });
@@ -584,6 +589,14 @@ const FilesPersistedPayload = Schema.Struct({
   ),
 });
 export type FilesPersistedPayload = typeof FilesPersistedPayload.Type;
+
+const ToolDeniedPayload = Schema.Struct({
+  toolName: TrimmedNonEmptyStringSchema,
+  toolUseId: Schema.optional(TrimmedNonEmptyStringSchema),
+  reason: Schema.optional(TrimmedNonEmptyStringSchema),
+  agentId: Schema.optional(TrimmedNonEmptyStringSchema),
+});
+export type ToolDeniedPayload = typeof ToolDeniedPayload.Type;
 
 const RuntimeWarningPayload = Schema.Struct({
   message: TrimmedNonEmptyStringSchema,
@@ -930,6 +943,13 @@ const ProviderRuntimeFilesPersistedEvent = Schema.Struct({
 });
 export type ProviderRuntimeFilesPersistedEvent = typeof ProviderRuntimeFilesPersistedEvent.Type;
 
+const ProviderRuntimeToolDeniedEvent = Schema.Struct({
+  ...ProviderRuntimeEventBase.fields,
+  type: ToolDeniedType,
+  payload: ToolDeniedPayload,
+});
+export type ProviderRuntimeToolDeniedEvent = typeof ProviderRuntimeToolDeniedEvent.Type;
+
 const ProviderRuntimeWarningEvent = Schema.Struct({
   ...ProviderRuntimeEventBase.fields,
   type: RuntimeWarningType,
@@ -990,6 +1010,7 @@ export const ProviderRuntimeEventV2 = Schema.Union([
   ProviderRuntimeConfigWarningEvent,
   ProviderRuntimeDeprecationNoticeEvent,
   ProviderRuntimeFilesPersistedEvent,
+  ProviderRuntimeToolDeniedEvent,
   ProviderRuntimeWarningEvent,
   ProviderRuntimeErrorEvent,
 ]);

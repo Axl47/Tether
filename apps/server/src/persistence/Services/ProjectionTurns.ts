@@ -17,8 +17,10 @@ import {
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
-import { Option, Schema, Context } from "effect";
-import type { Effect } from "effect";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+import * as Context from "effect/Context";
+import type * as Effect from "effect/Effect";
 
 import type { ProjectionRepositoryError } from "../Errors.ts";
 
@@ -35,6 +37,8 @@ export const ProjectionTurn = Schema.Struct({
   threadId: ThreadId,
   turnId: Schema.NullOr(TurnId),
   pendingMessageId: Schema.NullOr(MessageId),
+  sourceProposedPlanThreadId: Schema.NullOr(ThreadId),
+  sourceProposedPlanId: Schema.NullOr(OrchestrationProposedPlanId),
   assistantMessageId: Schema.NullOr(MessageId),
   state: ProjectionTurnState,
   requestedAt: IsoDateTime,
@@ -51,6 +55,8 @@ export const ProjectionTurnById = Schema.Struct({
   threadId: ThreadId,
   turnId: TurnId,
   pendingMessageId: Schema.NullOr(MessageId),
+  sourceProposedPlanThreadId: Schema.NullOr(ThreadId),
+  sourceProposedPlanId: Schema.NullOr(OrchestrationProposedPlanId),
   assistantMessageId: Schema.NullOr(MessageId),
   state: ProjectionTurnState,
   requestedAt: IsoDateTime,

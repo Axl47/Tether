@@ -2,7 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { watch } from "node:fs";
 import { join } from "node:path";
 
-import { desktopDir, resolveElectronPath } from "./electron-launcher.mjs";
+import { desktopDir, resolveDevProtocolClient, resolveElectronPath } from "./electron-launcher.mjs";
 import { waitForResources } from "./wait-for-resources.mjs";
 
 const devServerUrl = process.env.VITE_DEV_SERVER_URL?.trim();
@@ -28,6 +28,12 @@ const watchedDirectories = [
 const forcedShutdownTimeoutMs = 1_500;
 const restartDebounceMs = 120;
 const childTreeGracePeriodMs = 1_200;
+const remoteDebuggingPort = process.env.T3CODE_DESKTOP_REMOTE_DEBUGGING_PORT?.trim();
+const defaultElectronArgs = [
+  "--disable-http-cache",
+  "--disable-features=CompressionDictionaryTransport,CompressionDictionaryTransportBackend",
+  "--log-level=3",
+];
 
 await waitForResources({
   baseDir: desktopDir,
@@ -38,6 +44,11 @@ await waitForResources({
 
 const childEnv = { ...process.env };
 delete childEnv.ELECTRON_RUN_AS_NODE;
+const devProtocolClient = resolveDevProtocolClient();
+if (devProtocolClient) {
+  childEnv.T3CODE_DESKTOP_APP_USER_MODEL_ID = devProtocolClient.appBundleId;
+  childEnv.T3CODE_DESKTOP_PROTOCOL_REGISTRATION_MANAGED = "1";
+}
 
 let shuttingDown = false;
 let restartTimer = null;
@@ -59,9 +70,7 @@ function cleanupStaleDevApps() {
     return;
   }
 
-  spawnSync("pkill", ["-f", "--", `--tether-dev-root=${desktopDir}`], {
-    stdio: "ignore",
-  });
+  spawnSync("pkill", ["-f", "--", `--t3code-dev-root=${desktopDir}`], { stdio: "ignore" });
 }
 
 function startApp() {
@@ -69,15 +78,17 @@ function startApp() {
     return;
   }
 
-  const app = spawn(
-    resolveElectronPath(),
-    [`--tether-dev-root=${desktopDir}`, "dist-electron/main.cjs"],
-    {
-      cwd: desktopDir,
-      env: childEnv,
-      stdio: "inherit",
-    },
-  );
+  const electronArgs = remoteDebuggingPort
+    ? [...defaultElectronArgs, `--remote-debugging-port=${remoteDebuggingPort}`]
+    : defaultElectronArgs;
+  const launchArgs = devProtocolClient
+    ? electronArgs
+    : [...electronArgs, `--t3code-dev-root=${desktopDir}`, "dist-electron/main.cjs"];
+  const app = spawn(resolveElectronPath(), launchArgs, {
+    cwd: desktopDir,
+    env: childEnv,
+    stdio: "inherit",
+  });
 
   currentApp = app;
 
@@ -127,6 +138,7 @@ async function stopApp() {
     app.once("exit", finish);
     app.kill("SIGTERM");
     killChildTreeByPid(app.pid, "TERM");
+    cleanupStaleDevApps();
 
     setTimeout(() => {
       if (settled) {
@@ -135,6 +147,7 @@ async function stopApp() {
 
       app.kill("SIGKILL");
       killChildTreeByPid(app.pid, "KILL");
+      cleanupStaleDevApps();
       finish();
     }, forcedShutdownTimeoutMs).unref();
   });
@@ -186,9 +199,7 @@ function killChildTree(signal) {
   }
 
   // Kill direct children as a final fallback in case normal shutdown leaves stragglers.
-  spawnSync("pkill", [`-${signal}`, "-P", String(process.pid)], {
-    stdio: "ignore",
-  });
+  spawnSync("pkill", [`-${signal}`, "-P", String(process.pid)], { stdio: "ignore" });
 }
 
 async function shutdown(exitCode) {

@@ -1,98 +1,85 @@
----
-created_at: 2026-03-20T18:01
-updated_at: 2026-04-19T19:21Z
----
-
 # Tether
 
-Tether is a minimal GUI for coding agents that has grown into a more capable, reliability-first multi-provider workbench. It remains Codex-first, while this fork also carries broader provider work, stronger thread and session UX, better remote-browser ergonomics, and several Tether-specific product refinements.
-
-> [!WARNING]
-> You need [Codex CLI](https://github.com/openai/codex) installed and authorized for Tether to work. Other provider paths such as Claude Code, Gemini, Cursor ACP, or OpenCode may also require their own local installs and authentication depending on which paths you use.
-
-## Why This Fork
-
-The original project already had a strong backend and orchestration foundation. This fork pushes further on product and frontend behavior so the app holds up under heavier daily use:
-
-- Better thread awareness for long-running, paused, resumed, and high-volume work
-- Project-wide thread auto-rename and stronger sidebar management
-- Queued follow-ups, thread-context navigation, and improved timeline UX
-- Better mobile and remote-browser behavior across the same network
-- Reliability-first behavior around persistence, orchestration, and recovery
-- Multi-provider support without hard-coding one-off orchestration paths
+Tether is a minimal web GUI for coding agents. It is Codex-first in this fork while staying close enough to upstream T3 Code to continue replaying useful reliability, provider, and desktop improvements.
 
 ## Installation
 
-Install dependencies:
+> [!WARNING]
+> Tether currently supports Codex through the upstream provider runtime, with other provider paths available as the upstream base evolves.
+> Install and authenticate at least one provider before use:
+>
+> - Codex: install [Codex CLI](https://developers.openai.com/codex/cli) and run `codex login`
+
+### Run without installing
 
 ```bash
-bun install
+npx t3@latest
 ```
 
-Run the full development stack:
+Tip: Use `npx t3@latest --help` for the full CLI reference.
 
-```bash
-bun run dev
-```
+### Desktop app
 
-Useful variants:
+Install the latest version of the desktop app from [GitHub Releases](https://github.com/pingdotgg/t3code/releases), or from your favorite package registry:
 
-```bash
-bun run dev:server
-bun run dev:web
-bun run dev:desktop
-```
-
-## Desktop App
-
-Install the latest desktop build from GitHub Releases or your preferred package manager. Upstream T3 Code package examples still broadly apply:
+#### Windows (`winget`)
 
 ```bash
 winget install T3Tools.T3Code
+```
+
+#### macOS (Homebrew)
+
+```bash
 brew install --cask t3-code
+```
+
+#### Arch Linux (AUR)
+
+```bash
 yay -S t3code-bin
 ```
 
-## Quality Gates
+## Some notes
 
-Before treating work as complete in this repo, all of these should pass:
+We are very very early in this project. Expect bugs.
+
+We are not accepting contributions yet.
+
+There's no public docs site yet, checkout the miscellaneous markdown files in [docs](./docs).
+
+## Documentation
+
+- [Getting started](./docs/getting-started/quick-start.md)
+- [Architecture overview](./docs/architecture/overview.md)
+- [Provider guides](./docs/providers/codex.md)
+- [Operations](./docs/operations/ci.md)
+- [Reference](./docs/reference/encyclopedia.md)
+
+## If you REALLY want to contribute still.... read this first
+
+### Install `vp`
+
+Tether currently uses upstream's Vite+ workflow, so you'll need to install the global `vp` command-line tool.
+
+#### macOS / Linux
 
 ```bash
-bun fmt
-bun lint
-bun typecheck
+curl -fsSL https://vite.plus | bash
 ```
 
-For tests, use:
+#### Windows
 
 ```bash
-bun run test
+irm https://vite.plus/ps1 | iex
 ```
 
-Do not use `bun test` in this repository.
+Checkout their getting started guide for more information: https://viteplus.dev/guide/
 
-## Repository Shape
-
-- `apps/server`: WebSocket server and provider/session orchestration
-- `apps/web`: React UI for threads, events, approvals, and session state
-- `apps/desktop`: Desktop shell
-- `packages/contracts`: shared schemas and TypeScript contracts
-- `packages/shared`: shared runtime utilities
-
-## Status
-
-This fork is willing to make larger architectural changes when they improve correctness, recoverability, and long-term maintainability.
-
-Observability guide: [docs/observability.md](./docs/observability.md)
-
-## Contributing
-
-Before local development, prepare the environment and install dependencies:
+### Install dependencies
 
 ```bash
-# Optional: only needed if you use mise for dev tool management.
-mise install
-bun install .
+vp i
 ```
 
 Read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening an issue or PR.

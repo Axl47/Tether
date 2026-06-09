@@ -1,6 +1,6 @@
-import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import { scopeProjectRef } from "@t3tools/client-runtime";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import {
   selectProjectsAcrossEnvironments,
@@ -15,7 +15,6 @@ import {
   deriveLogicalProjectKeyFromSettings,
   derivePhysicalProjectKey,
   resolveProjectGroupingMode,
-  selectProjectGroupingSettings,
 } from "./logicalProject";
 import type { Project, SidebarThreadSummary } from "./types";
 import { DEFAULT_INTERACTION_MODE } from "./types";
@@ -42,13 +41,6 @@ const DEFAULT_GROUPING_SETTINGS = {
   sidebarProjectGroupingOverrides: {},
 };
 
-it("reuses project grouping selector snapshots for the same logical settings", () => {
-  const first = selectProjectGroupingSettings(DEFAULT_GROUPING_SETTINGS);
-  const second = selectProjectGroupingSettings(DEFAULT_GROUPING_SETTINGS);
-
-  expect(second).toBe(first);
-});
-
 // ── Factory Helpers ──────────────────────────────────────────────────
 
 function makeProject(
@@ -56,7 +48,7 @@ function makeProject(
 ): Project {
   return {
     cwd: `/tmp/${overrides.name}`,
-    defaultModelSelection: { provider: "codex" as const, model: "gpt-5-codex" },
+    defaultModelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" },
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     scripts: [],
@@ -220,9 +212,6 @@ function makeFixtureState(): AppState {
   };
 
   return {
-    projects: [],
-    threads: [],
-    threadsHydrated: true,
     activeEnvironmentId: primaryEnvId,
     environmentStateById: {
       [primaryEnvId]: primaryEnvState,

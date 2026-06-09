@@ -1,6 +1,6 @@
-import { Schema } from "effect";
 import { assert, it } from "@effect/vitest";
-import { Effect } from "effect";
+import * as Schema from "effect/Schema";
+import * as Effect from "effect/Effect";
 
 import {
   KeybindingsConfig,
@@ -52,17 +52,18 @@ it.effect("parses keybinding rules", () =>
       command: "chat.newLocal",
     });
     assert.strictEqual(parsedLocal.command, "chat.newLocal");
-    const parsedSplitRight = yield* decode(KeybindingRule, {
-      key: "cmd+d",
-      command: "chat.splitRight",
-    });
-    assert.strictEqual(parsedSplitRight.command, "chat.splitRight");
 
-    const parsedReplaceFocusedPane = yield* decode(KeybindingRule, {
-      key: "cmd+alt+d",
-      command: "chat.replaceFocusedPane",
+    const parsedModelPickerToggle = yield* decode(KeybindingRule, {
+      key: "mod+shift+m",
+      command: "modelPicker.toggle",
     });
-    assert.strictEqual(parsedReplaceFocusedPane.command, "chat.replaceFocusedPane");
+    assert.strictEqual(parsedModelPickerToggle.command, "modelPicker.toggle");
+
+    const parsedModelPickerJump = yield* decode(KeybindingRule, {
+      key: "mod+1",
+      command: "modelPicker.jump.1",
+    });
+    assert.strictEqual(parsedModelPickerJump.command, "modelPicker.jump.1");
 
     const parsedThreadPrevious = yield* decode(KeybindingRule, {
       key: "mod+shift+[",

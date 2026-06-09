@@ -1,16 +1,33 @@
-import { describe, expect, it } from "vitest";
-import { Schema } from "effect";
+import { describe, expect, it } from "vite-plus/test";
+import * as Schema from "effect/Schema";
 
 import { ProviderRuntimeEvent } from "./providerRuntime.ts";
 
 const decodeRuntimeEvent = Schema.decodeUnknownSync(ProviderRuntimeEvent);
 
 describe("ProviderRuntimeEvent", () => {
+  it("accepts fork-provided driver kinds as branded slugs", () => {
+    const parsed = decodeRuntimeEvent({
+      type: "session.started",
+      eventId: "event-ollama-session",
+      provider: "ollama",
+      providerInstanceId: "ollama_local",
+      createdAt: "2026-02-28T00:00:00.000Z",
+      threadId: "thread-1",
+      payload: {
+        message: "started",
+      },
+    });
+
+    expect(parsed.provider).toBe("ollama");
+    expect(parsed.providerInstanceId).toBe("ollama_local");
+  });
+
   it("decodes turn.plan.updated for plan rendering", () => {
     const parsed = decodeRuntimeEvent({
       type: "turn.plan.updated",
       eventId: "event-1",
-      provider: "codex",
+      provider: "claudeAgent",
       sessionId: "runtime-session-1",
       createdAt: "2026-02-28T00:00:00.000Z",
       threadId: "thread-1",
@@ -56,7 +73,7 @@ describe("ProviderRuntimeEvent", () => {
     const parsed = decodeRuntimeEvent({
       type: "user-input.requested",
       eventId: "event-2",
-      provider: "codex",
+      provider: "claudeAgent",
       sessionId: "runtime-session-2",
       createdAt: "2026-02-28T00:00:01.000Z",
       threadId: "thread-2",
@@ -94,7 +111,7 @@ describe("ProviderRuntimeEvent", () => {
     const parsed = decodeRuntimeEvent({
       type: "user-input.resolved",
       eventId: "event-3",
-      provider: "codex",
+      provider: "claudeAgent",
       sessionId: "runtime-session-2",
       createdAt: "2026-02-28T00:00:02.000Z",
       threadId: "thread-2",
@@ -138,36 +155,6 @@ describe("ProviderRuntimeEvent", () => {
         payload: { message: "boom" },
       }),
     ).toThrow();
-  });
-
-  it("decodes assistant image content deltas with attachments", () => {
-    const parsed = decodeRuntimeEvent({
-      type: "content.delta",
-      eventId: "event-image-1",
-      provider: "gemini",
-      createdAt: "2026-02-28T00:00:04.000Z",
-      threadId: "thread-3",
-      payload: {
-        streamKind: "assistant_image",
-        delta: "",
-        attachments: [
-          {
-            type: "image",
-            id: "thread-3-123e4567-e89b-12d3-a456-426614174000",
-            name: "generated.png",
-            mimeType: "image/png",
-            sizeBytes: 512,
-          },
-        ],
-      },
-    });
-
-    expect(parsed.type).toBe("content.delta");
-    if (parsed.type !== "content.delta") {
-      throw new Error("expected content.delta");
-    }
-    expect(parsed.payload.streamKind).toBe("assistant_image");
-    expect(parsed.payload.attachments?.[0]?.mimeType).toBe("image/png");
   });
 
   it("decodes normalized thread token usage snapshots", () => {

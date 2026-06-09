@@ -1,7 +1,6 @@
 import type {
   EnvironmentId,
   MessageId,
-  ModelSelection,
   OrchestrationCheckpointSummary,
   OrchestrationEvent,
   OrchestrationLatestTurn,
@@ -19,10 +18,10 @@ import type {
   ScopedProjectRef,
   ScopedThreadRef,
 } from "@t3tools/contracts";
-import { DEFAULT_MODEL_BY_PROVIDER, ProviderKind } from "@t3tools/contracts";
+import { isProviderDriverKind, ProviderDriverKind } from "@t3tools/contracts";
 import type { ThreadId, TurnId } from "@t3tools/contracts";
-import { Schema } from "effect";
-import { createModelSelection, resolveModelSlugForProvider } from "@t3tools/shared/model";
+import * as Schema from "effect/Schema";
+import { resolveModelSlugForProvider } from "@t3tools/shared/model";
 import { create } from "zustand";
 import {
   type ChatMessage,
@@ -38,12 +37,18 @@ import {
 import { resolveEnvironmentHttpUrl } from "./environments/runtime";
 import { sanitizeThreadErrorMessage } from "./rpc/transportError";
 import { getThreadFromEnvironmentState } from "./threadDerivation";
-import { inferProviderForThreadModel } from "./threadSelectionDefaults";
+const isProviderDriverKindValue = Schema.is(ProviderDriverKind);
 
 export interface EnvironmentState {
   projectIds: ProjectId[];
   projectById: Record<ProjectId, Project>;
 
+  // TODO(CLIENT-RUNTIME MIGRATION - DO NOT EXPAND THIS WEB-ONLY COPY):
+  // Web still stores shell snapshots and thread details in this denormalized
+  // Zustand shape. Mobile uses createShellSnapshotManager and
+  // createThreadDetailManager from @t3tools/client-runtime. New shared behavior
+  // belongs in those managers/reducers, with a web adapter layered on top.
+  //
   // ---------------------------------------------------------------------------
   // Thread bookkeeping — written by BOTH shell stream and detail stream.
   // Both streams ensure the thread is registered here; the bookkeeping is
@@ -94,9 +99,6 @@ export interface EnvironmentState {
 export interface AppState {
   activeEnvironmentId: EnvironmentId | null;
   environmentStateById: Record<string, EnvironmentState>;
-  projects: Project[];
-  threads: Thread[];
-  threadsHydrated: boolean;
 }
 
 const initialEnvironmentState: EnvironmentState = {
@@ -122,9 +124,6 @@ const initialEnvironmentState: EnvironmentState = {
 const initialState: AppState = {
   activeEnvironmentId: null,
   environmentStateById: {},
-  projects: [],
-  threads: [],
-  threadsHydrated: false,
 };
 
 const MAX_THREAD_MESSAGES = 2_000;
@@ -137,52 +136,17 @@ function arraysEqual<T>(left: readonly T[], right: readonly T[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
-function normalizeModelSelection<T extends { provider: ProviderKind; model: string }>(
-  selection: T,
-): T {
+// Accepts the open `instanceId` string carried on `ModelSelection`; malformed
+// values pass through unchanged, while valid slugs use any registered alias
+// table for model normalization.
+function normalizeModelSelection<T extends { instanceId: string; model: string }>(selection: T): T {
+  if (!isProviderDriverKind(selection.instanceId)) {
+    return selection;
+  }
   return {
     ...selection,
-    model: resolveModelSlugForProvider(selection.provider, selection.model),
+    model: resolveModelSlugForProvider(selection.instanceId, selection.model),
   };
-}
-
-function resolveProjectDefaultModelSelection(input: {
-  defaultModelSelection?: ModelSelection | null;
-  defaultModel?: string | null | undefined;
-}): ModelSelection | null {
-  if (input.defaultModelSelection) {
-    return normalizeModelSelection(input.defaultModelSelection);
-  }
-  const rawModel = input.defaultModel;
-  if (typeof rawModel !== "string" || rawModel.length === 0) {
-    return null;
-  }
-  const provider = inferProviderForThreadModel({
-    model: rawModel,
-    sessionProviderName: null,
-  });
-  return createModelSelection(provider, resolveModelSlugForProvider(provider, rawModel));
-}
-
-function resolveThreadModelSelection(input: {
-  modelSelection?: ModelSelection;
-  model?: string | null | undefined;
-  sessionProviderName?: string | null | undefined;
-}): ModelSelection {
-  if (input.modelSelection) {
-    return normalizeModelSelection(input.modelSelection);
-  }
-  const provider = inferProviderForThreadModel({
-    model: input.model,
-    sessionProviderName: input.sessionProviderName,
-  });
-  return createModelSelection(
-    provider,
-    resolveModelSlugForProvider(
-      provider,
-      input.model ?? DEFAULT_MODEL_BY_PROVIDER[provider] ?? DEFAULT_MODEL_BY_PROVIDER.codex,
-    ),
-  );
 }
 
 function mapProjectScripts(scripts: ReadonlyArray<Project["scripts"][number]>): Project["scripts"] {
@@ -192,6 +156,7 @@ function mapProjectScripts(scripts: ReadonlyArray<Project["scripts"][number]>): 
 function mapSession(session: OrchestrationSession): ThreadSession {
   return {
     provider: toLegacyProvider(session.providerName),
+    providerInstanceId: session.providerInstanceId ?? undefined,
     status: toLegacySessionStatus(session.status),
     orchestrationStatus: session.status,
     activeTurnId: session.activeTurnId ?? undefined,
@@ -256,17 +221,15 @@ function mapProject(
     | OrchestrationShellSnapshot["projects"][number],
   environmentId: EnvironmentId,
 ): Project {
-  const defaultModelSelection = resolveProjectDefaultModelSelection(project);
   return {
     id: project.id,
     environmentId,
     name: project.title,
     cwd: project.workspaceRoot,
     repositoryIdentity: project.repositoryIdentity ?? null,
-    defaultModelSelection,
-    model: defaultModelSelection?.model ?? DEFAULT_MODEL_BY_PROVIDER.codex,
-    defaultModel: defaultModelSelection?.model ?? DEFAULT_MODEL_BY_PROVIDER.codex,
-    expanded: true,
+    defaultModelSelection: project.defaultModelSelection
+      ? normalizeModelSelection(project.defaultModelSelection)
+      : null,
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,
     scripts: mapProjectScripts(project.scripts),
@@ -274,18 +237,13 @@ function mapProject(
 }
 
 function mapThread(thread: OrchestrationThread, environmentId: EnvironmentId): Thread {
-  const modelSelection = resolveThreadModelSelection({
-    modelSelection: thread.modelSelection,
-    sessionProviderName: thread.session?.providerName ?? null,
-  });
   return {
     id: thread.id,
     environmentId,
     codexThreadId: null,
     projectId: thread.projectId,
     title: thread.title,
-    modelSelection,
-    model: modelSelection.model,
+    modelSelection: normalizeModelSelection(thread.modelSelection),
     runtimeMode: thread.runtimeMode,
     interactionMode: thread.interactionMode,
     session: thread.session ? mapSession(thread.session) : null,
@@ -297,11 +255,8 @@ function mapThread(thread: OrchestrationThread, environmentId: EnvironmentId): T
     updatedAt: thread.updatedAt,
     latestTurn: thread.latestTurn,
     pendingSourceProposedPlan: thread.latestTurn?.sourceProposedPlan,
-    lastVisitedAt: undefined,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
-    contextWindow: thread.contextWindow ?? null,
-    lastAutoRenameUserMessageId: thread.lastAutoRenameUserMessageId ?? null,
     turnDiffSummaries: thread.checkpoints.map(mapTurnDiffSummary),
     activities: thread.activities.map((activity) => ({ ...activity })),
   };
@@ -316,17 +271,13 @@ function mapThreadShell(
   turnState: ThreadTurnState;
   summary: SidebarThreadSummary;
 } {
-  const modelSelection = resolveThreadModelSelection({
-    modelSelection: thread.modelSelection,
-    sessionProviderName: thread.session?.providerName ?? null,
-  });
   const shell: ThreadShell = {
     id: thread.id,
     environmentId,
     codexThreadId: null,
     projectId: thread.projectId,
     title: thread.title,
-    modelSelection,
+    modelSelection: normalizeModelSelection(thread.modelSelection),
     runtimeMode: thread.runtimeMode,
     interactionMode: thread.interactionMode,
     error: sanitizeThreadErrorMessage(thread.session?.lastError),
@@ -368,19 +319,13 @@ function mapThreadShell(
 }
 
 function toThreadShell(thread: Thread): ThreadShell {
-  const modelSelection =
-    thread.modelSelection ??
-    resolveThreadModelSelection({
-      model: thread.model,
-      sessionProviderName: thread.session?.provider ?? null,
-    });
   return {
     id: thread.id,
     environmentId: thread.environmentId,
     codexThreadId: thread.codexThreadId,
     projectId: thread.projectId,
     title: thread.title,
-    modelSelection,
+    modelSelection: thread.modelSelection,
     runtimeMode: thread.runtimeMode,
     interactionMode: thread.interactionMode,
     error: thread.error,
@@ -1067,11 +1012,11 @@ function toLegacySessionStatus(
   }
 }
 
-function toLegacyProvider(providerName: string | null): ProviderKind {
-  if (Schema.is(ProviderKind)(providerName)) {
+function toLegacyProvider(providerName: string | null): ProviderDriverKind {
+  if (isProviderDriverKindValue(providerName)) {
     return providerName;
   }
-  return "codex";
+  return ProviderDriverKind.make("codex");
 }
 
 function attachmentPreviewRoutePath(attachmentId: string): string {
@@ -1105,176 +1050,11 @@ function buildProjectState(
   };
 }
 
-function getEnvironmentStateRecord(
-  state: Pick<AppState, "environmentStateById">,
-): Record<string, EnvironmentState> {
-  return state.environmentStateById ?? {};
-}
-
-function resolveCompatibilityEnvironmentId(state: AppState): EnvironmentId | null {
-  if (state.activeEnvironmentId) {
-    return state.activeEnvironmentId;
-  }
-  const firstEnvironmentId = Object.keys(getEnvironmentStateRecord(state))[0];
-  return (firstEnvironmentId as EnvironmentId | undefined) ?? null;
-}
-
-function withLegacyProjection(state: AppState): AppState {
-  const environmentStateById = getEnvironmentStateRecord(state);
-  const environmentId = resolveCompatibilityEnvironmentId({
-    ...state,
-    environmentStateById,
-  });
-  if (!environmentId) {
-    return {
-      ...state,
-      activeEnvironmentId: state.activeEnvironmentId ?? null,
-      environmentStateById,
-      projects: state.projects ?? [],
-      threads: state.threads ?? [],
-      threadsHydrated: state.threadsHydrated ?? false,
-    };
-  }
-  const environmentState = environmentStateById[environmentId] ?? initialEnvironmentState;
-  return {
-    ...state,
-    activeEnvironmentId: state.activeEnvironmentId ?? environmentId,
-    environmentStateById,
-    projects: getProjects(environmentState),
-    threads: getThreads(environmentState),
-    threadsHydrated: environmentState.bootstrapComplete,
-  };
-}
-
-function updateLegacyThread(
-  threads: ReadonlyArray<Thread>,
-  threadId: ThreadId,
-  updater: (thread: Thread) => Thread,
-): Thread[] {
-  let changed = false;
-  const nextThreads = threads.map((thread) => {
-    if (thread.id !== threadId) {
-      return thread;
-    }
-    const nextThread = updater(thread);
-    if (nextThread !== thread) {
-      changed = true;
-    }
-    return nextThread;
-  });
-  return changed ? nextThreads : [...threads];
-}
-
-function mapLegacyProjectsFromReadModel(
-  incoming: ReadonlyArray<
-    OrchestrationReadModel["projects"][number] & {
-      defaultModel?: string | null;
-    }
-  >,
-  previous: ReadonlyArray<Project>,
-): Project[] {
-  const previousById = new Map(previous.map((project) => [project.id, project] as const));
-  const previousByCwd = new Map(previous.map((project) => [project.cwd, project] as const));
-  const previousOrderById = new Map(previous.map((project, index) => [project.id, index] as const));
-  const previousOrderByCwd = new Map(
-    previous.map((project, index) => [project.cwd, index] as const),
-  );
-
-  const mappedProjects = incoming.map((project) => {
-    const existing = previousById.get(project.id) ?? previousByCwd.get(project.workspaceRoot);
-    const defaultModelSelection = resolveProjectDefaultModelSelection(project);
-    return {
-      id: project.id,
-      environmentId: existing?.environmentId ?? ("" as EnvironmentId),
-      name: project.title,
-      cwd: project.workspaceRoot,
-      repositoryIdentity: project.repositoryIdentity ?? existing?.repositoryIdentity ?? null,
-      defaultModelSelection,
-      model: existing?.model ?? defaultModelSelection?.model ?? DEFAULT_MODEL_BY_PROVIDER.codex,
-      defaultModel:
-        defaultModelSelection?.model ??
-        existing?.defaultModel ??
-        existing?.model ??
-        DEFAULT_MODEL_BY_PROVIDER.codex,
-      expanded: existing?.expanded ?? true,
-      createdAt: project.createdAt,
-      updatedAt: project.updatedAt,
-      scripts: mapProjectScripts(project.scripts),
-    } satisfies Project;
-  });
-
-  return mappedProjects
-    .map((project, incomingIndex) => ({
-      project,
-      incomingIndex,
-      orderIndex:
-        previousOrderById.get(project.id) ??
-        previousOrderByCwd.get(project.cwd) ??
-        previous.length + incomingIndex,
-    }))
-    .toSorted((left, right) => {
-      const byOrder = left.orderIndex - right.orderIndex;
-      if (byOrder !== 0) {
-        return byOrder;
-      }
-      return left.incomingIndex - right.incomingIndex;
-    })
-    .map((entry) => entry.project);
-}
-
-function mapLegacyThreadsFromReadModel(
-  incoming: ReadonlyArray<
-    OrchestrationReadModel["threads"][number] & {
-      model?: string | null;
-    }
-  >,
-  previous: ReadonlyArray<Thread>,
-): Thread[] {
-  const previousById = new Map(previous.map((thread) => [thread.id, thread] as const));
-  return incoming.map((thread) => {
-    const existing = previousById.get(thread.id);
-    const modelSelection = resolveThreadModelSelection({
-      modelSelection: thread.modelSelection,
-      model: thread.model,
-      sessionProviderName: thread.session?.providerName ?? null,
-    });
-    return {
-      id: thread.id,
-      environmentId: existing?.environmentId ?? ("" as EnvironmentId),
-      codexThreadId: null,
-      projectId: thread.projectId,
-      title: thread.title,
-      modelSelection,
-      model: modelSelection.model,
-      runtimeMode: thread.runtimeMode,
-      interactionMode: thread.interactionMode,
-      session: thread.session ? mapSession(thread.session) : null,
-      messages: thread.messages.map((message) =>
-        mapMessage(existing?.environmentId ?? ("" as EnvironmentId), message),
-      ),
-      proposedPlans: thread.proposedPlans.map(mapProposedPlan),
-      error: sanitizeThreadErrorMessage(thread.session?.lastError),
-      createdAt: thread.createdAt,
-      archivedAt: thread.archivedAt ?? null,
-      updatedAt: thread.updatedAt,
-      latestTurn: thread.latestTurn,
-      pendingSourceProposedPlan: thread.latestTurn?.sourceProposedPlan,
-      lastVisitedAt: existing?.lastVisitedAt,
-      branch: thread.branch,
-      worktreePath: thread.worktreePath,
-      contextWindow: thread.contextWindow ?? null,
-      lastAutoRenameUserMessageId: thread.lastAutoRenameUserMessageId ?? null,
-      turnDiffSummaries: thread.checkpoints.map(mapTurnDiffSummary),
-      activities: thread.activities.map((activity) => ({ ...activity })),
-    } satisfies Thread;
-  });
-}
-
 function getStoredEnvironmentState(
   state: AppState,
   environmentId: EnvironmentId,
 ): EnvironmentState {
-  return getEnvironmentStateRecord(state)[environmentId] ?? initialEnvironmentState;
+  return state.environmentStateById[environmentId] ?? initialEnvironmentState;
 }
 
 function commitEnvironmentState(
@@ -1282,108 +1062,22 @@ function commitEnvironmentState(
   environmentId: EnvironmentId,
   nextEnvironmentState: EnvironmentState,
 ): AppState {
-  const currentEnvironmentState = getEnvironmentStateRecord(state)[environmentId];
+  const currentEnvironmentState = state.environmentStateById[environmentId];
   const environmentStateById =
     currentEnvironmentState === nextEnvironmentState
-      ? getEnvironmentStateRecord(state)
+      ? state.environmentStateById
       : {
-          ...getEnvironmentStateRecord(state),
+          ...state.environmentStateById,
           [environmentId]: nextEnvironmentState,
         };
 
-  if (environmentStateById === getEnvironmentStateRecord(state)) {
+  if (environmentStateById === state.environmentStateById) {
     return state;
   }
 
-  return withLegacyProjection({
+  return {
     ...state,
     environmentStateById,
-  });
-}
-
-export function markThreadVisited(
-  state: AppState,
-  threadId: ThreadId,
-  visitedAt?: string,
-): AppState {
-  const nextVisitedAt = visitedAt ?? new Date().toISOString();
-  const nextThreads = updateLegacyThread(state.threads ?? [], threadId, (thread) => {
-    const currentVisitedAt = thread.lastVisitedAt ? Date.parse(thread.lastVisitedAt) : Number.NaN;
-    const requestedVisitedAt = Date.parse(nextVisitedAt);
-    if (
-      Number.isFinite(currentVisitedAt) &&
-      Number.isFinite(requestedVisitedAt) &&
-      currentVisitedAt >= requestedVisitedAt
-    ) {
-      return thread;
-    }
-    return {
-      ...thread,
-      lastVisitedAt: nextVisitedAt,
-    };
-  });
-  return nextThreads === state.threads ? state : { ...state, threads: nextThreads };
-}
-
-export function markThreadUnread(
-  state: AppState,
-  threadId: ThreadId,
-  latestTurnCompletedAt?: string | null,
-): AppState {
-  const thread = (state.threads ?? []).find((entry) => entry.id === threadId);
-  const completedAt = latestTurnCompletedAt ?? thread?.latestTurn?.completedAt ?? null;
-  if (!completedAt) {
-    return state;
-  }
-  const completedAtMs = Date.parse(completedAt);
-  if (Number.isNaN(completedAtMs)) {
-    return state;
-  }
-  const unreadVisitedAt = new Date(completedAtMs - 1).toISOString();
-  return markThreadVisited(state, threadId, unreadVisitedAt);
-}
-
-export function toggleProject(state: AppState, projectId: ProjectId): AppState {
-  const nextProjects = (state.projects ?? []).map((project) =>
-    project.id === projectId
-      ? {
-          ...project,
-          expanded: !(project.expanded ?? true),
-        }
-      : project,
-  );
-  return nextProjects === state.projects ? state : { ...state, projects: nextProjects };
-}
-
-export function reorderProjects(
-  state: AppState,
-  draggedProjectId: ProjectId,
-  targetProjectId: ProjectId,
-): AppState {
-  const projects = [...(state.projects ?? [])];
-  const draggedIndex = projects.findIndex((project) => project.id === draggedProjectId);
-  const targetIndex = projects.findIndex((project) => project.id === targetProjectId);
-  if (draggedIndex < 0 || targetIndex < 0 || draggedIndex === targetIndex) {
-    return state;
-  }
-  const [draggedProject] = projects.splice(draggedIndex, 1);
-  if (!draggedProject) {
-    return state;
-  }
-  const adjustedTargetIndex = projects.findIndex((project) => project.id === targetProjectId);
-  projects.splice(adjustedTargetIndex + (draggedIndex < targetIndex ? 1 : 0), 0, draggedProject);
-  return {
-    ...state,
-    projects,
-  };
-}
-
-export function syncServerReadModel(state: AppState, readModel: OrchestrationReadModel): AppState {
-  return {
-    ...state,
-    projects: mapLegacyProjectsFromReadModel(readModel.projects, state.projects ?? []),
-    threads: mapLegacyThreadsFromReadModel(readModel.threads, state.threads ?? []),
-    threadsHydrated: true,
   };
 }
 
@@ -1432,6 +1126,9 @@ export function syncServerShellSnapshot(
   snapshot: OrchestrationShellSnapshot,
   environmentId: EnvironmentId,
 ): AppState {
+  // TODO(CLIENT-RUNTIME MIGRATION - DO NOT EXPAND THIS WEB-ONLY COPY):
+  // Keep web-specific projection here only until the store can consume
+  // createShellSnapshotManager or a shared adapter over its reducer.
   return commitEnvironmentState(
     state,
     environmentId,
@@ -1448,6 +1145,9 @@ export function syncServerThreadDetail(
   thread: OrchestrationThread,
   environmentId: EnvironmentId,
 ): AppState {
+  // TODO(CLIENT-RUNTIME MIGRATION - DO NOT EXPAND THIS WEB-ONLY COPY):
+  // Keep web-specific projection here only until the store can consume
+  // createThreadDetailManager or a shared adapter over its reducer.
   const environmentState = getStoredEnvironmentState(state, environmentId);
   const previousThread = getThreadFromEnvironmentState(environmentState, thread.id);
   return commitEnvironmentState(
@@ -1577,9 +1277,7 @@ function applyEnvironmentOrchestrationEvent(
           archivedAt: null,
           deletedAt: null,
           messages: [],
-          lastAutoRenameUserMessageId: null,
           proposedPlans: [],
-          contextWindow: null,
           activities: [],
           checkpoints: [],
           session: null,
@@ -2210,43 +1908,39 @@ export function applyShellEvent(
 }
 
 export function setActiveEnvironmentId(state: AppState, environmentId: EnvironmentId): AppState {
-  if ((state.activeEnvironmentId ?? null) === environmentId) {
+  if (state.activeEnvironmentId === environmentId) {
     return state;
   }
 
-  return withLegacyProjection({
+  return {
     ...state,
     activeEnvironmentId: environmentId,
-  });
+  };
+}
+
+export function removeEnvironmentState(state: AppState, environmentId: EnvironmentId): AppState {
+  if (!state.environmentStateById[environmentId] && state.activeEnvironmentId !== environmentId) {
+    return state;
+  }
+
+  const { [environmentId]: _removed, ...environmentStateById } = state.environmentStateById;
+  return {
+    ...state,
+    activeEnvironmentId:
+      state.activeEnvironmentId === environmentId ? null : state.activeEnvironmentId,
+    environmentStateById,
+  };
 }
 
 export function setThreadBranch(
   state: AppState,
-  threadRef: ScopedThreadRef | ThreadId,
+  threadRef: ScopedThreadRef,
   branch: string | null,
   worktreePath: string | null,
 ): AppState {
-  const resolvedThreadRef =
-    typeof threadRef === "string"
-      ? getEnvironmentEntries(withLegacyProjection(state)).find(([, environmentState]) =>
-          environmentState.threadIds.includes(threadRef),
-        )?.[0]
-      : threadRef.environmentId;
-  const nextThreadRef =
-    typeof threadRef === "string"
-      ? resolvedThreadRef
-        ? ({
-            environmentId: resolvedThreadRef,
-            threadId: threadRef,
-          } satisfies ScopedThreadRef)
-        : null
-      : threadRef;
-  if (!nextThreadRef) {
-    return state;
-  }
   const nextEnvironmentState = updateThreadState(
-    getStoredEnvironmentState(state, nextThreadRef.environmentId),
-    nextThreadRef.threadId,
+    getStoredEnvironmentState(state, threadRef.environmentId),
+    threadRef.threadId,
     (thread) => {
       if (thread.branch === branch && thread.worktreePath === worktreePath) return thread;
       const cwdChanged = thread.worktreePath !== worktreePath;
@@ -2258,16 +1952,12 @@ export function setThreadBranch(
       };
     },
   );
-  return commitEnvironmentState(state, nextThreadRef.environmentId, nextEnvironmentState);
+  return commitEnvironmentState(state, threadRef.environmentId, nextEnvironmentState);
 }
 
 interface AppStore extends AppState {
   setActiveEnvironmentId: (environmentId: EnvironmentId) => void;
-  markThreadVisited: (threadId: ThreadId, visitedAt?: string) => void;
-  markThreadUnread: (threadId: ThreadId, latestTurnCompletedAt?: string | null) => void;
-  syncServerReadModel: (readModel: OrchestrationReadModel) => void;
-  toggleProject: (projectId: ProjectId) => void;
-  reorderProjects: (draggedProjectId: ProjectId, targetProjectId: ProjectId) => void;
+  removeEnvironmentState: (environmentId: EnvironmentId) => void;
   syncServerShellSnapshot: (
     snapshot: OrchestrationShellSnapshot,
     environmentId: EnvironmentId,
@@ -2281,7 +1971,7 @@ interface AppStore extends AppState {
   applyShellEvent: (event: OrchestrationShellStreamEvent, environmentId: EnvironmentId) => void;
   setError: (threadId: ThreadId, error: string | null) => void;
   setThreadBranch: (
-    threadRef: ScopedThreadRef | ThreadId,
+    threadRef: ScopedThreadRef,
     branch: string | null,
     worktreePath: string | null,
   ) => void;
@@ -2291,14 +1981,8 @@ export const useStore = create<AppStore>((set) => ({
   ...initialState,
   setActiveEnvironmentId: (environmentId) =>
     set((state) => setActiveEnvironmentId(state, environmentId)),
-  markThreadVisited: (threadId, visitedAt) =>
-    set((state) => markThreadVisited(state, threadId, visitedAt)),
-  markThreadUnread: (threadId, latestTurnCompletedAt) =>
-    set((state) => markThreadUnread(state, threadId, latestTurnCompletedAt)),
-  syncServerReadModel: (readModel) => set((state) => syncServerReadModel(state, readModel)),
-  toggleProject: (projectId) => set((state) => toggleProject(state, projectId)),
-  reorderProjects: (draggedProjectId, targetProjectId) =>
-    set((state) => reorderProjects(state, draggedProjectId, targetProjectId)),
+  removeEnvironmentState: (environmentId) =>
+    set((state) => removeEnvironmentState(state, environmentId)),
   syncServerShellSnapshot: (snapshot, environmentId) =>
     set((state) => syncServerShellSnapshot(state, snapshot, environmentId)),
   syncServerThreadDetail: (thread, environmentId) =>

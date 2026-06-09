@@ -1,8 +1,13 @@
-#!/usr/bin/env bun
-
+#!/usr/bin/env node
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { Data, Effect, FileSystem, Logger, Option, Path } from "effect";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Logger from "effect/Logger";
+import * as Option from "effect/Option";
+import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 import { Command, Flag } from "effect/unstable/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
@@ -11,7 +16,8 @@ import {
   PUBLISH_ICON_OVERRIDES,
 } from "../../../scripts/lib/brand-assets.ts";
 import { resolveCatalogDependencies } from "../../../scripts/lib/resolve-catalog.ts";
-import rootPackageJson from "../../../package.json" with { type: "json" };
+import { fromJsonStringPretty } from "@t3tools/shared/schemaJson";
+import { fromYaml } from "@t3tools/shared/schemaYaml";
 import serverPackageJson from "../package.json" with { type: "json" };
 
 interface PackageJson {
@@ -30,6 +36,16 @@ interface PackageJson {
   overrides: Record<string, string>;
 }
 
+const PackageJsonPrettyJson = fromJsonStringPretty(Schema.Unknown);
+const encodePackageJson = Schema.encodeEffect(PackageJsonPrettyJson);
+
+const WorkspaceConfig = Schema.Struct({
+  catalog: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  overrides: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+});
+type WorkspaceConfig = typeof WorkspaceConfig.Type;
+const decodeWorkspaceConfig = Schema.decodeEffect(fromYaml(WorkspaceConfig));
+
 class CliError extends Data.TaggedError("CliError")<{
   readonly message: string;
   readonly cause?: unknown;
@@ -38,6 +54,14 @@ class CliError extends Data.TaggedError("CliError")<{
 const RepoRoot = Effect.service(Path.Path).pipe(
   Effect.flatMap((path) => path.fromFileUrl(new URL("../../..", import.meta.url))),
 );
+
+const readWorkspaceConfig = Effect.fn("readWorkspaceConfig")(function* () {
+  const path = yield* Path.Path;
+  const fs = yield* FileSystem.FileSystem;
+  const repoRoot = yield* RepoRoot;
+  const workspaceYaml = yield* fs.readFileString(path.join(repoRoot, "pnpm-workspace.yaml"));
+  return yield* decodeWorkspaceConfig(workspaceYaml);
+});
 
 const runCommand = Effect.fn("runCommand")(function* (command: ChildProcess.Command) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -144,21 +168,14 @@ const buildCmd = Command.make(
       const fs = yield* FileSystem.FileSystem;
       const repoRoot = yield* RepoRoot;
       const serverDir = path.join(repoRoot, "apps/server");
-      const commandOutputOptions = {
-        cwd: serverDir,
-        stdout: config.verbose ? ("inherit" as const) : ("ignore" as const),
-        stderr: "inherit" as const,
-        // Windows needs shell mode to resolve `.cmd` shims on PATH.
-        shell: process.platform === "win32",
-      };
 
       yield* Effect.log("[cli] Running tsdown...");
       yield* runCommand(
-        process.versions.bun
-          ? ChildProcess.make(
-              commandOutputOptions,
-            )`${process.execPath} --bun ./node_modules/.bin/tsdown`
-          : ChildProcess.make(commandOutputOptions)`${process.execPath} --run build:bundle`,
+        ChildProcess.make(process.execPath, ["--run", "build:bundle"], {
+          cwd: serverDir,
+          stdout: config.verbose ? "inherit" : "ignore",
+          stderr: "inherit",
+        }),
       );
 
       const webDist = path.join(repoRoot, "apps/web/dist");
@@ -177,6 +194,31 @@ const buildCmd = Command.make(
 // ---------------------------------------------------------------------------
 // publish subcommand
 // ---------------------------------------------------------------------------
+
+interface PublishCommandConfig {
+  readonly access: string;
+  readonly tag: string;
+  readonly provenance: boolean;
+  readonly dryRun: boolean;
+}
+
+const createVpPmPublishArgs = (config: PublishCommandConfig): ReadonlyArray<string> => {
+  const args = [
+    "publish",
+    "--filter",
+    "t3",
+    "--access",
+    config.access,
+    "--tag",
+    config.tag,
+    "--no-git-checks",
+  ];
+
+  if (config.provenance) args.push("--provenance");
+  if (config.dryRun) args.push("--dry-run");
+
+  return args;
+};
 
 const publishCmd = Command.make(
   "publish",
@@ -211,6 +253,9 @@ const publishCmd = Command.make(
         // Acquire: backup package.json, resolve catalog dependencies, and strip devDependencies/scripts
         Effect.gen(function* () {
           const version = Option.getOrElse(config.appVersion, () => serverPackageJson.version);
+          const workspaceConfig = yield* readWorkspaceConfig();
+          const workspaceCatalog = workspaceConfig.catalog ?? {};
+          const workspaceOverrides = workspaceConfig.overrides ?? {};
           const pkg: PackageJson = {
             name: serverPackageJson.name,
             repository: serverPackageJson.repository,
@@ -221,35 +266,35 @@ const publishCmd = Command.make(
             files: serverPackageJson.files,
             dependencies: resolveCatalogDependencies(
               serverPackageJson.dependencies,
-              rootPackageJson.workspaces.catalog,
+              workspaceCatalog,
               "apps/server",
             ),
             overrides: resolveCatalogDependencies(
-              rootPackageJson.overrides,
-              rootPackageJson.workspaces.catalog,
+              workspaceOverrides,
+              workspaceCatalog,
               "apps/server",
             ),
           };
 
           const original = yield* fs.readFileString(packageJsonPath);
+          const packageJsonString = yield* encodePackageJson(pkg);
           yield* fs.writeFileString(backupPath, original);
-          yield* fs.writeFileString(packageJsonPath, `${JSON.stringify(pkg, null, 2)}\n`);
+          yield* fs.writeFileString(packageJsonPath, `${packageJsonString}\n`);
           yield* Effect.log("[cli] Prepared package.json for publish");
 
           const iconBackups = yield* applyPublishIconOverrides(repoRoot, serverDir);
           return { iconBackups };
         }),
-        // Use: npm publish
+        // Use: pnpm publish from the workspace root so pnpm-only workspace
+        // config, including override selectors, is interpreted correctly.
         () =>
           Effect.gen(function* () {
-            const args = ["publish", "--access", config.access, "--tag", config.tag];
-            if (config.provenance) args.push("--provenance");
-            if (config.dryRun) args.push("--dry-run");
+            const args = createVpPmPublishArgs(config);
 
-            yield* Effect.log(`[cli] Running: npm ${args.join(" ")}`);
+            yield* Effect.log(`[cli] Running: vp pm ${args.join(" ")}`);
             yield* runCommand(
-              ChildProcess.make("npm", [...args], {
-                cwd: serverDir,
+              ChildProcess.make("vp", ["pm", ...args], {
+                cwd: repoRoot,
                 stdout: config.verbose ? "inherit" : "ignore",
                 stderr: "inherit",
                 // Windows needs shell mode to resolve .cmd shims.
@@ -277,7 +322,7 @@ const publishCmd = Command.make(
 // ---------------------------------------------------------------------------
 
 const cli = Command.make("cli").pipe(
-  Command.withDescription("Tether server build & publish CLI."),
+  Command.withDescription("T3 server build & publish CLI."),
   Command.withSubcommands([buildCmd, publishCmd]),
 );
 

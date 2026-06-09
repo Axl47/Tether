@@ -1,5 +1,8 @@
 import * as OS from "node:os";
-import { Effect, FileSystem, Layer, Path } from "effect";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 
 import {
   WorkspacePaths,
@@ -34,7 +37,7 @@ export const makeWorkspacePaths = Effect.gen(function* () {
     const normalizedWorkspaceRoot = path.resolve(expandHomePath(workspaceRoot.trim(), path));
     let workspaceStat = yield* fileSystem
       .stat(normalizedWorkspaceRoot)
-      .pipe(Effect.catch(() => Effect.succeed(null)));
+      .pipe(Effect.orElseSucceed(() => null));
     if (!workspaceStat && options?.createIfMissing) {
       yield* fileSystem.makeDirectory(normalizedWorkspaceRoot, { recursive: true }).pipe(
         Effect.mapError(
@@ -47,7 +50,7 @@ export const makeWorkspacePaths = Effect.gen(function* () {
       );
       workspaceStat = yield* fileSystem
         .stat(normalizedWorkspaceRoot)
-        .pipe(Effect.catch(() => Effect.succeed(null)));
+        .pipe(Effect.orElseSucceed(() => null));
     }
     if (!workspaceStat) {
       return yield* new WorkspaceRootNotExistsError({

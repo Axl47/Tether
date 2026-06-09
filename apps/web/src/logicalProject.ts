@@ -1,5 +1,6 @@
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime";
 import type { ScopedProjectRef, SidebarProjectGroupingMode } from "@t3tools/contracts";
+import type { UnifiedSettings } from "@t3tools/contracts/settings";
 import { normalizeProjectPathForComparison } from "./lib/projectPaths";
 import type { Project } from "./types";
 
@@ -10,33 +11,11 @@ export interface ProjectGroupingSettings {
 
 export type ProjectGroupingMode = SidebarProjectGroupingMode;
 
-let lastProjectGroupingSettingsSelection: {
-  readonly mode: SidebarProjectGroupingMode;
-  readonly overrides: ProjectGroupingSettings["sidebarProjectGroupingOverrides"];
-  readonly value: ProjectGroupingSettings;
-} | null = null;
-
-export function selectProjectGroupingSettings(input: {
-  readonly sidebarProjectGroupingMode: SidebarProjectGroupingMode;
-  readonly sidebarProjectGroupingOverrides: Record<string, SidebarProjectGroupingMode>;
-}): ProjectGroupingSettings {
-  if (
-    lastProjectGroupingSettingsSelection?.mode === input.sidebarProjectGroupingMode &&
-    lastProjectGroupingSettingsSelection.overrides === input.sidebarProjectGroupingOverrides
-  ) {
-    return lastProjectGroupingSettingsSelection.value;
-  }
-
-  const value: ProjectGroupingSettings = {
-    sidebarProjectGroupingMode: input.sidebarProjectGroupingMode,
-    sidebarProjectGroupingOverrides: input.sidebarProjectGroupingOverrides,
+export function selectProjectGroupingSettings(settings: UnifiedSettings): ProjectGroupingSettings {
+  return {
+    sidebarProjectGroupingMode: settings.sidebarProjectGroupingMode,
+    sidebarProjectGroupingOverrides: settings.sidebarProjectGroupingOverrides,
   };
-  lastProjectGroupingSettingsSelection = {
-    mode: input.sidebarProjectGroupingMode,
-    overrides: input.sidebarProjectGroupingOverrides,
-    value,
-  };
-  return value;
 }
 
 function uniqueNonEmptyValues(values: ReadonlyArray<string | null | undefined>): string[] {
@@ -91,6 +70,13 @@ export function derivePhysicalProjectKey(project: Pick<Project, "environmentId" 
 export function deriveProjectGroupingOverrideKey(
   project: Pick<Project, "environmentId" | "cwd">,
 ): string {
+  return derivePhysicalProjectKey(project);
+}
+
+// Key under which a project's manual sort order (projectOrder) is stored.
+// Must stay aligned with the writer side in `uiStateStore.syncProjects` and
+// the drag handlers in `Sidebar` so readers and writers agree.
+export function getProjectOrderKey(project: Pick<Project, "environmentId" | "cwd">): string {
   return derivePhysicalProjectKey(project);
 }
 

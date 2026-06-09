@@ -6,8 +6,9 @@
  *
  * @module WorkspaceFileSystem
  */
-import { Schema, Context } from "effect";
-import type { Effect } from "effect";
+import * as Schema from "effect/Schema";
+import * as Context from "effect/Context";
+import type * as Effect from "effect/Effect";
 
 import type { ProjectWriteFileInput, ProjectWriteFileResult } from "@t3tools/contracts";
 import { WorkspacePathOutsideRootError } from "./WorkspacePaths.ts";
@@ -19,7 +20,7 @@ export class WorkspaceFileSystemError extends Schema.TaggedErrorClass<WorkspaceF
     relativePath: Schema.optional(Schema.String),
     operation: Schema.String,
     detail: Schema.String,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {}
 

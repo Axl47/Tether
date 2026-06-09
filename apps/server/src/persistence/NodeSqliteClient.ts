@@ -4,8 +4,7 @@
  *
  * @module SqliteClient
  */
-import { createRequire } from "node:module";
-import type { DatabaseSync, StatementSync } from "node:sqlite";
+import { DatabaseSync, type StatementSync } from "node:sqlite";
 
 import * as Cache from "effect/Cache";
 import * as Config from "effect/Config";
@@ -25,7 +24,6 @@ import { SqlError, classifySqliteError } from "effect/unstable/sql/SqlError";
 import * as Statement from "effect/unstable/sql/Statement";
 
 const ATTR_DB_SYSTEM_NAME = "db.system.name";
-const require = createRequire(import.meta.url);
 
 export const TypeId: TypeId = "~local/sqlite-node/SqliteClient";
 
@@ -73,9 +71,6 @@ const checkNodeSqliteCompat = () => {
   }
   return Effect.void;
 };
-
-const loadNodeSqlite = (): typeof import("node:sqlite") =>
-  require("node:sqlite") as typeof import("node:sqlite");
 
 const makeWithDatabase = Effect.fn("makeWithDatabase")(function* (
   options: SqliteClientConfig,
@@ -227,13 +222,14 @@ const makeWithDatabase = Effect.fn("makeWithDatabase")(function* (
 const make = (
   options: SqliteClientConfig,
 ): Effect.Effect<Client.SqlClient, never, Scope.Scope | Reactivity.Reactivity> =>
-  makeWithDatabase(options, () => {
-    const { DatabaseSync } = loadNodeSqlite();
-    return new DatabaseSync(options.filename, {
-      readOnly: options.readonly ?? false,
-      allowExtension: options.allowExtension ?? false,
-    });
-  });
+  makeWithDatabase(
+    options,
+    () =>
+      new DatabaseSync(options.filename, {
+        readOnly: options.readonly ?? false,
+        allowExtension: options.allowExtension ?? false,
+      }),
+  );
 
 const makeMemory = (
   config: SqliteMemoryClientConfig = {},
@@ -245,7 +241,6 @@ const makeMemory = (
       readonly: false,
     },
     () => {
-      const { DatabaseSync } = loadNodeSqlite();
       const database = new DatabaseSync(":memory:", {
         allowExtension: config.allowExtension ?? false,
       });
@@ -257,14 +252,12 @@ export const layerConfig = (
   config: Config.Wrap<SqliteClientConfig>,
 ): Layer.Layer<Client.SqlClient, Config.ConfigError> =>
   Layer.effectContext(
-    Config.unwrap(config)
-      .asEffect()
-      .pipe(
-        Effect.flatMap(make),
-        Effect.map((client) =>
-          Context.make(SqliteClient, client).pipe(Context.add(Client.SqlClient, client)),
-        ),
+    Config.unwrap(config).pipe(
+      Effect.flatMap(make),
+      Effect.map((client) =>
+        Context.make(SqliteClient, client).pipe(Context.add(Client.SqlClient, client)),
       ),
+    ),
   ).pipe(Layer.provide(Reactivity.layer));
 
 export const layer = (config: SqliteClientConfig): Layer.Layer<Client.SqlClient> =>

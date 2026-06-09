@@ -1,16 +1,15 @@
-import { Schema } from "effect";
-import { describe, expect, it } from "vitest";
+import * as Schema from "effect/Schema";
+import { describe, expect, it } from "vite-plus/test";
 
-import { ServerDesktopContext, ServerProvider, ServerSetDesktopContextInput } from "./server.ts";
+import { ServerProvider } from "./server.ts";
 
 const decodeServerProvider = Schema.decodeUnknownSync(ServerProvider);
-const decodeDesktopContext = Schema.decodeUnknownSync(ServerDesktopContext);
-const decodeDesktopContextInput = Schema.decodeUnknownSync(ServerSetDesktopContextInput);
 
 describe("ServerProvider", () => {
-  it("defaults capability arrays when decoding legacy snapshots", () => {
+  it("defaults capability arrays when decoding provider snapshots", () => {
     const parsed = decodeServerProvider({
-      provider: "codex",
+      instanceId: "codex",
+      driver: "codex",
       enabled: true,
       installed: true,
       version: "1.0.0",
@@ -24,34 +23,52 @@ describe("ServerProvider", () => {
 
     expect(parsed.slashCommands).toEqual([]);
     expect(parsed.skills).toEqual([]);
-  });
-});
-
-describe("ServerDesktopContext", () => {
-  it("accepts server desktop context payloads", () => {
-    const parsed = decodeDesktopContext({
-      projectId: "project-1",
-      projectTitle: "Nexus",
-      workspaceRoot: "/tmp/nexus",
-      threadId: "thread-1",
-      threadTitle: "Route thread",
-      updatedAt: "2026-03-21T00:00:00.000Z",
-    });
-
-    expect(parsed.projectId).toBe("project-1");
-    expect(parsed.threadId).toBe("thread-1");
+    expect(parsed.versionAdvisory).toBeUndefined();
+    expect(parsed.updateState).toBeUndefined();
   });
 
-  it("accepts empty desktop context updates", () => {
-    const parsed = decodeDesktopContextInput({
-      projectId: null,
-      projectTitle: null,
-      workspaceRoot: null,
-      threadId: null,
-      threadTitle: null,
+  it("defaults one-click update support when decoding older advisory snapshots", () => {
+    const parsed = decodeServerProvider({
+      instanceId: "codex",
+      driver: "codex",
+      enabled: true,
+      installed: true,
+      version: "1.0.0",
+      status: "ready",
+      auth: {
+        status: "authenticated",
+      },
+      checkedAt: "2026-04-10T00:00:00.000Z",
+      models: [],
+      versionAdvisory: {
+        status: "behind_latest",
+        currentVersion: "1.0.0",
+        latestVersion: "1.0.1",
+        updateCommand: "npm install -g @openai/codex@latest",
+        checkedAt: "2026-04-10T00:00:00.000Z",
+        message: "Update available.",
+      },
     });
 
-    expect(parsed.projectId).toBeNull();
-    expect(parsed.threadId).toBeNull();
+    expect(parsed.versionAdvisory?.canUpdate).toBe(false);
+  });
+
+  it("decodes continuation group metadata", () => {
+    const parsed = decodeServerProvider({
+      instanceId: "codex_personal",
+      driver: "codex",
+      continuation: { groupKey: "codex:home:/Users/julius/.codex" },
+      enabled: true,
+      installed: true,
+      version: "1.0.0",
+      status: "ready",
+      auth: {
+        status: "authenticated",
+      },
+      checkedAt: "2026-04-10T00:00:00.000Z",
+      models: [],
+    });
+
+    expect(parsed.continuation?.groupKey).toBe("codex:home:/Users/julius/.codex");
   });
 });

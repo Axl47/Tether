@@ -1,278 +1,283 @@
 import {
-  type KeybindingCommand,
+  type KeybindingRule,
   type KeybindingShortcut,
   type KeybindingWhenNode,
+  MAX_KEYBINDINGS_COUNT,
+  MAX_WHEN_EXPRESSION_DEPTH,
+  MODEL_PICKER_JUMP_KEYBINDING_COMMANDS,
+  type ResolvedKeybindingRule,
   type ResolvedKeybindingsConfig,
+  THREAD_JUMP_KEYBINDING_COMMANDS,
 } from "@t3tools/contracts";
 
-export interface ShortcutEventLike {
-  type?: string;
-  key: string;
-  metaKey: boolean;
-  ctrlKey: boolean;
-  shiftKey: boolean;
-  altKey: boolean;
+type WhenToken =
+  | { type: "identifier"; value: string }
+  | { type: "not" }
+  | { type: "and" }
+  | { type: "or" }
+  | { type: "lparen" }
+  | { type: "rparen" };
+
+export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
+  { key: "mod+j", command: "terminal.toggle" },
+  { key: "mod+d", command: "terminal.split", when: "terminalFocus" },
+  { key: "mod+n", command: "terminal.new", when: "terminalFocus" },
+  { key: "mod+w", command: "terminal.close", when: "terminalFocus" },
+  { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
+  { key: "mod+k", command: "commandPalette.toggle", when: "!terminalFocus" },
+  { key: "mod+n", command: "chat.new", when: "!terminalFocus" },
+  { key: "mod+shift+o", command: "chat.new", when: "!terminalFocus" },
+  { key: "mod+shift+n", command: "chat.newLocal", when: "!terminalFocus" },
+  { key: "mod+shift+m", command: "modelPicker.toggle", when: "!terminalFocus" },
+  { key: "mod+o", command: "editor.openFavorite" },
+  { key: "mod+shift+[", command: "thread.previous" },
+  { key: "mod+shift+]", command: "thread.next" },
+  ...THREAD_JUMP_KEYBINDING_COMMANDS.map((command, index) => ({
+    key: `mod+${index + 1}`,
+    command,
+  })),
+  ...MODEL_PICKER_JUMP_KEYBINDING_COMMANDS.map((command, index) => ({
+    key: `mod+${index + 1}`,
+    command,
+    when: "modelPickerOpen",
+  })),
+];
+
+function normalizeKeyToken(token: string): string {
+  if (token === "space") return " ";
+  if (token === "esc") return "escape";
+  return token;
 }
 
-export interface ShortcutMatchContext {
-  terminalFocus: boolean;
-  terminalOpen: boolean;
-  [key: string]: boolean;
-}
+export function parseKeybindingShortcut(value: string): KeybindingShortcut | null {
+  const rawTokens = value
+    .toLowerCase()
+    .split("+")
+    .map((token) => token.trim());
+  const tokens = [...rawTokens];
+  let trailingEmptyCount = 0;
+  while (tokens[tokens.length - 1] === "") {
+    trailingEmptyCount += 1;
+    tokens.pop();
+  }
+  if (trailingEmptyCount > 0) {
+    tokens.push("+");
+  }
+  if (tokens.some((token) => token.length === 0)) {
+    return null;
+  }
+  if (tokens.length === 0) return null;
 
-interface ShortcutMatchOptions {
-  platform?: string;
-  context?: Partial<ShortcutMatchContext>;
-}
+  let key: string | null = null;
+  let metaKey = false;
+  let ctrlKey = false;
+  let shiftKey = false;
+  let altKey = false;
+  let modKey = false;
 
-const TERMINAL_WORD_BACKWARD = "\u001bb";
-const TERMINAL_WORD_FORWARD = "\u001bf";
-const TERMINAL_LINE_START = "\u0001";
-const TERMINAL_LINE_END = "\u0005";
+  for (const token of tokens) {
+    switch (token) {
+      case "cmd":
+      case "meta":
+        metaKey = true;
+        break;
+      case "ctrl":
+      case "control":
+        ctrlKey = true;
+        break;
+      case "shift":
+        shiftKey = true;
+        break;
+      case "alt":
+      case "option":
+        altKey = true;
+        break;
+      case "mod":
+        modKey = true;
+        break;
+      default: {
+        if (key !== null) return null;
+        key = normalizeKeyToken(token);
+      }
+    }
+  }
 
-function isMacPlatform(platform: string): boolean {
-  return /mac|iphone|ipad|ipod/i.test(platform);
-}
-
-function normalizeEventKey(key: string): string {
-  const normalized = key.toLowerCase();
-  if (normalized === "esc") return "escape";
-  return normalized;
-}
-
-function matchesShortcut(
-  event: ShortcutEventLike,
-  shortcut: KeybindingShortcut,
-  platform = typeof navigator === "undefined" ? "" : navigator.platform,
-): boolean {
-  const key = normalizeEventKey(event.key);
-  if (key !== shortcut.key) return false;
-
-  const useMetaForMod = isMacPlatform(platform);
-  const expectedMeta = shortcut.metaKey || (shortcut.modKey && useMetaForMod);
-  const expectedCtrl = shortcut.ctrlKey || (shortcut.modKey && !useMetaForMod);
-  return (
-    event.metaKey === expectedMeta &&
-    event.ctrlKey === expectedCtrl &&
-    event.shiftKey === shortcut.shiftKey &&
-    event.altKey === shortcut.altKey
-  );
-}
-
-function resolvePlatform(options: ShortcutMatchOptions | undefined): string {
-  return options?.platform ?? (typeof navigator === "undefined" ? "" : navigator.platform);
-}
-
-function resolveContext(options: ShortcutMatchOptions | undefined): ShortcutMatchContext {
+  if (key === null) return null;
   return {
-    terminalFocus: false,
-    terminalOpen: false,
-    ...options?.context,
+    key,
+    metaKey,
+    ctrlKey,
+    shiftKey,
+    altKey,
+    modKey,
   };
 }
 
-function evaluateWhenNode(node: KeybindingWhenNode, context: ShortcutMatchContext): boolean {
-  switch (node.type) {
-    case "identifier":
-      if (node.name === "true") return true;
-      if (node.name === "false") return false;
-      return Boolean(context[node.name]);
-    case "not":
-      return !evaluateWhenNode(node.node, context);
-    case "and":
-      return evaluateWhenNode(node.left, context) && evaluateWhenNode(node.right, context);
-    case "or":
-      return evaluateWhenNode(node.left, context) || evaluateWhenNode(node.right, context);
-  }
-}
+function tokenizeWhenExpression(expression: string): WhenToken[] | null {
+  const tokens: WhenToken[] = [];
+  let index = 0;
 
-function matchesWhenClause(
-  whenAst: KeybindingWhenNode | undefined,
-  context: ShortcutMatchContext,
-): boolean {
-  if (!whenAst) return true;
-  return evaluateWhenNode(whenAst, context);
-}
+  while (index < expression.length) {
+    const current = expression[index];
+    if (!current) break;
 
-function matchesCommandShortcut(
-  event: ShortcutEventLike,
-  keybindings: ResolvedKeybindingsConfig,
-  command: KeybindingCommand,
-  options?: ShortcutMatchOptions,
-): boolean {
-  return resolveShortcutCommand(event, keybindings, options) === command;
-}
+    if (/\s/.test(current)) {
+      index += 1;
+      continue;
+    }
+    if (expression.startsWith("&&", index)) {
+      tokens.push({ type: "and" });
+      index += 2;
+      continue;
+    }
+    if (expression.startsWith("||", index)) {
+      tokens.push({ type: "or" });
+      index += 2;
+      continue;
+    }
+    if (current === "!") {
+      tokens.push({ type: "not" });
+      index += 1;
+      continue;
+    }
+    if (current === "(") {
+      tokens.push({ type: "lparen" });
+      index += 1;
+      continue;
+    }
+    if (current === ")") {
+      tokens.push({ type: "rparen" });
+      index += 1;
+      continue;
+    }
 
-export function resolveShortcutCommand(
-  event: ShortcutEventLike,
-  keybindings: ResolvedKeybindingsConfig,
-  options?: ShortcutMatchOptions,
-): string | null {
-  const platform = resolvePlatform(options);
-  const context = resolveContext(options);
-
-  for (let index = keybindings.length - 1; index >= 0; index -= 1) {
-    const binding = keybindings[index];
-    if (!binding) continue;
-    if (!matchesWhenClause(binding.whenAst, context)) continue;
-    if (!matchesShortcut(event, binding.shortcut, platform)) continue;
-    return binding.command;
-  }
-  return null;
-}
-
-function formatShortcutKeyLabel(key: string): string {
-  if (key === " ") return "Space";
-  if (key.length === 1) return key.toUpperCase();
-  if (key === "escape") return "Esc";
-  if (key === "arrowup") return "Up";
-  if (key === "arrowdown") return "Down";
-  if (key === "arrowleft") return "Left";
-  if (key === "arrowright") return "Right";
-  return key.slice(0, 1).toUpperCase() + key.slice(1);
-}
-
-export function formatShortcutLabel(
-  shortcut: KeybindingShortcut,
-  platform = typeof navigator === "undefined" ? "" : navigator.platform,
-): string {
-  const keyLabel = formatShortcutKeyLabel(shortcut.key);
-  const useMetaForMod = isMacPlatform(platform);
-  const showMeta = shortcut.metaKey || (shortcut.modKey && useMetaForMod);
-  const showCtrl = shortcut.ctrlKey || (shortcut.modKey && !useMetaForMod);
-  const showAlt = shortcut.altKey;
-  const showShift = shortcut.shiftKey;
-
-  if (useMetaForMod) {
-    return `${showCtrl ? "\u2303" : ""}${showAlt ? "\u2325" : ""}${showShift ? "\u21e7" : ""}${showMeta ? "\u2318" : ""}${keyLabel}`;
+    const identifier = /^[A-Za-z_][A-Za-z0-9_.-]*/.exec(expression.slice(index));
+    if (!identifier) {
+      return null;
+    }
+    tokens.push({ type: "identifier", value: identifier[0] });
+    index += identifier[0].length;
   }
 
-  const parts: string[] = [];
-  if (showCtrl) parts.push("Ctrl");
-  if (showAlt) parts.push("Alt");
-  if (showShift) parts.push("Shift");
-  if (showMeta) parts.push("Meta");
-  parts.push(keyLabel);
-  return parts.join("+");
+  return tokens;
 }
 
-export function shortcutLabelForCommand(
-  keybindings: ResolvedKeybindingsConfig,
-  command: KeybindingCommand,
-  platform = typeof navigator === "undefined" ? "" : navigator.platform,
-): string | null {
-  let bestShortcut: KeybindingShortcut | null = null;
-  let bestScore = Number.NEGATIVE_INFINITY;
+export function parseKeybindingWhenExpression(expression: string): KeybindingWhenNode | null {
+  const tokens = tokenizeWhenExpression(expression);
+  if (!tokens || tokens.length === 0) return null;
+  let index = 0;
 
-  for (let index = keybindings.length - 1; index >= 0; index -= 1) {
-    const binding = keybindings[index];
-    if (!binding || binding.command !== command) continue;
-    const isMac = isMacPlatform(platform);
-    let score = 0;
-    if (binding.shortcut.modKey) score += 4;
-    if (isMac) {
-      if (binding.shortcut.metaKey) score += 3;
-      if (binding.shortcut.ctrlKey && !binding.shortcut.metaKey && !binding.shortcut.modKey) {
-        score -= 3;
+  const parsePrimary = (depth: number): KeybindingWhenNode | null => {
+    if (depth > MAX_WHEN_EXPRESSION_DEPTH) {
+      return null;
+    }
+    const token = tokens[index];
+    if (!token) return null;
+
+    if (token.type === "identifier") {
+      index += 1;
+      return { type: "identifier", name: token.value };
+    }
+
+    if (token.type === "lparen") {
+      index += 1;
+      const expressionNode = parseOr(depth + 1);
+      const closeToken = tokens[index];
+      if (!expressionNode || !closeToken || closeToken.type !== "rparen") {
+        return null;
       }
-    } else {
-      if (binding.shortcut.ctrlKey) score += 3;
-      if (binding.shortcut.metaKey && !binding.shortcut.ctrlKey && !binding.shortcut.modKey) {
-        score -= 3;
+      index += 1;
+      return expressionNode;
+    }
+
+    return null;
+  };
+
+  const parseUnary = (depth: number): KeybindingWhenNode | null => {
+    let notCount = 0;
+    while (tokens[index]?.type === "not") {
+      index += 1;
+      notCount += 1;
+      if (notCount > MAX_WHEN_EXPRESSION_DEPTH) {
+        return null;
       }
     }
-    if (score <= bestScore) continue;
-    bestScore = score;
-    bestShortcut = binding.shortcut;
+
+    let node = parsePrimary(depth);
+    if (!node) return null;
+
+    while (notCount > 0) {
+      node = { type: "not", node };
+      notCount -= 1;
+    }
+
+    return node;
+  };
+
+  const parseAnd = (depth: number): KeybindingWhenNode | null => {
+    let left = parseUnary(depth);
+    if (!left) return null;
+
+    while (tokens[index]?.type === "and") {
+      index += 1;
+      const right = parseUnary(depth);
+      if (!right) return null;
+      left = { type: "and", left, right };
+    }
+
+    return left;
+  };
+
+  const parseOr = (depth: number): KeybindingWhenNode | null => {
+    let left = parseAnd(depth);
+    if (!left) return null;
+
+    while (tokens[index]?.type === "or") {
+      index += 1;
+      const right = parseAnd(depth);
+      if (!right) return null;
+      left = { type: "or", left, right };
+    }
+
+    return left;
+  };
+
+  const ast = parseOr(0);
+  if (!ast || index !== tokens.length) return null;
+  return ast;
+}
+
+export function compileResolvedKeybindingRule(rule: KeybindingRule): ResolvedKeybindingRule | null {
+  const shortcut = parseKeybindingShortcut(rule.key);
+  if (!shortcut) return null;
+
+  if (rule.when !== undefined) {
+    const whenAst = parseKeybindingWhenExpression(rule.when);
+    if (!whenAst) return null;
+    return {
+      command: rule.command,
+      shortcut,
+      whenAst,
+    };
   }
-  return bestShortcut ? formatShortcutLabel(bestShortcut, platform) : null;
+
+  return {
+    command: rule.command,
+    shortcut,
+  };
 }
 
-export const isTerminalToggleShortcut = (
-  event: ShortcutEventLike,
-  keybindings: ResolvedKeybindingsConfig,
-  options?: ShortcutMatchOptions,
-) => matchesCommandShortcut(event, keybindings, "terminal.toggle", options);
-export const isTerminalSplitShortcut = (
-  event: ShortcutEventLike,
-  keybindings: ResolvedKeybindingsConfig,
-  options?: ShortcutMatchOptions,
-) => matchesCommandShortcut(event, keybindings, "terminal.split", options);
-export const isTerminalNewShortcut = (
-  event: ShortcutEventLike,
-  keybindings: ResolvedKeybindingsConfig,
-  options?: ShortcutMatchOptions,
-) => matchesCommandShortcut(event, keybindings, "terminal.new", options);
-export const isTerminalCloseShortcut = (
-  event: ShortcutEventLike,
-  keybindings: ResolvedKeybindingsConfig,
-  options?: ShortcutMatchOptions,
-) => matchesCommandShortcut(event, keybindings, "terminal.close", options);
-export const isDiffToggleShortcut = (
-  event: ShortcutEventLike,
-  keybindings: ResolvedKeybindingsConfig,
-  options?: ShortcutMatchOptions,
-) => matchesCommandShortcut(event, keybindings, "diff.toggle", options);
-export const isCommandPaletteToggleShortcut = (
-  event: ShortcutEventLike,
-  keybindings: ResolvedKeybindingsConfig,
-  options?: ShortcutMatchOptions,
-) => matchesCommandShortcut(event, keybindings, "commandPalette.toggle", options);
-export const isChatNewShortcut = (
-  event: ShortcutEventLike,
-  keybindings: ResolvedKeybindingsConfig,
-  options?: ShortcutMatchOptions,
-) => matchesCommandShortcut(event, keybindings, "chat.new", options);
-export const isChatNewLocalShortcut = (
-  event: ShortcutEventLike,
-  keybindings: ResolvedKeybindingsConfig,
-  options?: ShortcutMatchOptions,
-) => matchesCommandShortcut(event, keybindings, "chat.newLocal", options);
-export const isChatReplaceFocusedPaneShortcut = (
-  event: ShortcutEventLike,
-  keybindings: ResolvedKeybindingsConfig,
-  options?: ShortcutMatchOptions,
-) => matchesCommandShortcut(event, keybindings, "chat.replaceFocusedPane", options);
-export const isOpenFavoriteEditorShortcut = (
-  event: ShortcutEventLike,
-  keybindings: ResolvedKeybindingsConfig,
-  options?: ShortcutMatchOptions,
-) => matchesCommandShortcut(event, keybindings, "editor.openFavorite", options);
-
-export function isTerminalClearShortcut(
-  event: ShortcutEventLike,
-  platform = typeof navigator === "undefined" ? "" : navigator.platform,
-): boolean {
-  if (event.type !== undefined && event.type !== "keydown") return false;
-  const key = event.key.toLowerCase();
-  if (key === "l" && event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey)
-    return true;
-  return (
-    isMacPlatform(platform) &&
-    key === "k" &&
-    event.metaKey &&
-    !event.ctrlKey &&
-    !event.altKey &&
-    !event.shiftKey
-  );
-}
-
-export function terminalNavigationShortcutData(
-  event: ShortcutEventLike,
-  platform = typeof navigator === "undefined" ? "" : navigator.platform,
-): string | null {
-  if (event.type !== undefined && event.type !== "keydown") return null;
-  if (event.shiftKey) return null;
-  const key = normalizeEventKey(event.key);
-  if (key !== "arrowleft" && key !== "arrowright") return null;
-  const moveWord = key === "arrowleft" ? TERMINAL_WORD_BACKWARD : TERMINAL_WORD_FORWARD;
-  const moveLine = key === "arrowleft" ? TERMINAL_LINE_START : TERMINAL_LINE_END;
-  if (isMacPlatform(platform)) {
-    if (event.altKey && !event.metaKey && !event.ctrlKey) return moveWord;
-    if (event.metaKey && !event.altKey && !event.ctrlKey) return moveLine;
-    return null;
+export function compileResolvedKeybindingsConfig(
+  config: ReadonlyArray<KeybindingRule>,
+): ResolvedKeybindingsConfig {
+  const compiled: ResolvedKeybindingRule[] = [];
+  for (const rule of config) {
+    const result = compileResolvedKeybindingRule(rule);
+    if (result) {
+      compiled.push(result);
+    }
   }
-  if (event.ctrlKey && !event.metaKey && !event.altKey) return moveWord;
-  if (event.altKey && !event.metaKey && !event.ctrlKey) return moveWord;
-  return null;
+  return compiled.slice(-MAX_KEYBINDINGS_COUNT);
 }
+
+export const DEFAULT_RESOLVED_KEYBINDINGS = compileResolvedKeybindingsConfig(DEFAULT_KEYBINDINGS);

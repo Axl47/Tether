@@ -1,6 +1,13 @@
 import { scopeThreadRef } from "@t3tools/client-runtime";
-import { EnvironmentId, ProjectId, ThreadId, TurnId } from "@t3tools/contracts";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  EnvironmentId,
+  ProjectId,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  ThreadId,
+  TurnId,
+} from "@t3tools/contracts";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { type EnvironmentState, useStore } from "../store";
 import { type Thread } from "../types";
 
@@ -9,6 +16,7 @@ import {
   buildExpiredTerminalContextToastCopy,
   createLocalDispatchSnapshot,
   deriveComposerSendState,
+  getStartedThreadModelChangeBlockReason,
   hasServerAcknowledgedLocalDispatch,
   reconcileMountedTerminalThreadIds,
   resolveSendEnvMode,
@@ -79,6 +87,73 @@ describe("buildExpiredTerminalContextToastCopy", () => {
     expect(buildExpiredTerminalContextToastCopy(2, "omitted")).toEqual({
       title: "Expired terminal contexts omitted from message",
       description: "Re-add it if you want that terminal output included.",
+    });
+  });
+});
+
+describe("getStartedThreadModelChangeBlockReason", () => {
+  const providers = [
+    {
+      instanceId: ProviderInstanceId.make("codex"),
+    },
+    {
+      instanceId: ProviderInstanceId.make("grok"),
+      requiresNewThreadForModelChange: true,
+    },
+  ];
+
+  it("allows model changes before a provider session has started", () => {
+    expect(
+      getStartedThreadModelChangeBlockReason({
+        providers,
+        hasStartedSession: false,
+        currentModelSelection: {
+          instanceId: ProviderInstanceId.make("grok"),
+          model: "grok-build",
+        },
+        nextModelSelection: {
+          instanceId: ProviderInstanceId.make("grok"),
+          model: "grok-other",
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it("allows unchanged model selections for restricted providers", () => {
+    expect(
+      getStartedThreadModelChangeBlockReason({
+        providers,
+        hasStartedSession: true,
+        currentModelSelection: {
+          instanceId: ProviderInstanceId.make("grok"),
+          model: "grok-build",
+        },
+        nextModelSelection: {
+          instanceId: ProviderInstanceId.make("grok"),
+          model: "grok-build",
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it("blocks started-session model changes when either provider requires a new thread", () => {
+    expect(
+      getStartedThreadModelChangeBlockReason({
+        providers,
+        hasStartedSession: true,
+        currentModelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5.4",
+        },
+        nextModelSelection: {
+          instanceId: ProviderInstanceId.make("grok"),
+          model: "grok-build",
+        },
+      }),
+    ).toEqual({
+      title: "Start a new chat to change models",
+      description:
+        "This provider does not allow switching models after a conversation has started.",
     });
   });
 });
@@ -220,7 +295,7 @@ const makeThread = (input?: {
   codexThreadId: null,
   projectId: ProjectId.make("project-1"),
   title: "Thread",
-  modelSelection: { provider: "codex" as const, model: "gpt-5.5" },
+  modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
   runtimeMode: "full-access" as const,
   interactionMode: "default" as const,
   session: null,
@@ -253,8 +328,8 @@ function setStoreThreads(threads: ReadonlyArray<ReturnType<typeof makeThread>>) 
         name: "Project",
         cwd: "/tmp/project",
         defaultModelSelection: {
-          provider: "codex",
-          model: "gpt-5.5",
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5.4",
         },
         createdAt: "2026-03-29T00:00:00.000Z",
         updatedAt: "2026-03-29T00:00:00.000Z",
@@ -452,7 +527,7 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
   };
 
   const previousSession = {
-    provider: "codex" as const,
+    provider: ProviderDriverKind.make("codex"),
     status: "ready" as const,
     createdAt: "2026-03-29T00:00:00.000Z",
     updatedAt: "2026-03-29T00:00:10.000Z",
@@ -466,7 +541,7 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       codexThreadId: null,
       projectId,
       title: "Thread",
-      modelSelection: { provider: "codex", model: "gpt-5.5" },
+      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
       runtimeMode: "full-access",
       interactionMode: "default",
       session: previousSession,
@@ -503,7 +578,7 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       codexThreadId: null,
       projectId,
       title: "Thread",
-      modelSelection: { provider: "codex", model: "gpt-5.5" },
+      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
       runtimeMode: "full-access",
       interactionMode: "default",
       session: previousSession,
@@ -549,7 +624,7 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       codexThreadId: null,
       projectId,
       title: "Thread",
-      modelSelection: { provider: "codex", model: "gpt-5.5" },
+      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
       runtimeMode: "full-access",
       interactionMode: "default",
       session: previousSession,
@@ -592,7 +667,7 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       codexThreadId: null,
       projectId,
       title: "Thread",
-      modelSelection: { provider: "codex", model: "gpt-5.5" },
+      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
       runtimeMode: "full-access",
       interactionMode: "default",
       session: previousSession,
@@ -635,7 +710,7 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       codexThreadId: null,
       projectId,
       title: "Thread",
-      modelSelection: { provider: "codex", model: "gpt-5.5" },
+      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
       runtimeMode: "full-access",
       interactionMode: "default",
       session: previousSession,
@@ -685,7 +760,7 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       codexThreadId: null,
       projectId,
       title: "Thread",
-      modelSelection: { provider: "codex", model: "gpt-5.5" },
+      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
       runtimeMode: "full-access",
       interactionMode: "default",
       session: previousSession,

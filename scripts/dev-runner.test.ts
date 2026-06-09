@@ -1,37 +1,59 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeOS from "node:os";
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, Path } from "effect";
+import * as Effect from "effect/Effect";
+import * as Path from "effect/Path";
 
 import {
   checkPortAvailabilityOnHosts,
   createDevRunnerEnv,
   findFirstAvailableOffset,
+  getDevRunnerModeArgs,
   resolveModePortOffsets,
   resolveOffset,
 } from "./dev-runner.ts";
 
 it.layer(NodeServices.layer)("dev-runner", (it) => {
-  describe("resolveOffset", () => {
-    it.effect("uses explicit TETHER_PORT_OFFSET when provided", () =>
+  describe("getDevRunnerModeArgs", () => {
+    it.effect("lets Vite+ honor the desktop dev task graph", () =>
       Effect.sync(() => {
-        const result = resolveOffset({
-          portOffset: 12,
-          devInstance: undefined,
-        });
+        assert.deepStrictEqual(getDevRunnerModeArgs("dev:desktop"), [
+          "run",
+          "--filter=@t3tools/desktop",
+          "--filter=@t3tools/web",
+          "dev",
+        ]);
+      }),
+    );
+
+    it.effect("places Vite+ run flags before the task name", () =>
+      Effect.sync(() => {
+        assert.deepStrictEqual(getDevRunnerModeArgs("dev"), [
+          "run",
+          "--filter=@t3tools/contracts",
+          "--filter=@t3tools/web",
+          "--filter=t3",
+          "--parallel",
+          "dev",
+        ]);
+      }),
+    );
+  });
+
+  describe("resolveOffset", () => {
+    it.effect("uses explicit T3CODE_PORT_OFFSET when provided", () =>
+      Effect.sync(() => {
+        const result = resolveOffset({ portOffset: 12, devInstance: undefined });
         assert.deepStrictEqual(result, {
           offset: 12,
-          source: "TETHER_PORT_OFFSET=12",
+          source: "T3CODE_PORT_OFFSET=12",
         });
       }),
     );
 
     it.effect("hashes non-numeric instance values", () =>
       Effect.sync(() => {
-        const result = resolveOffset({
-          portOffset: undefined,
-          devInstance: "feature-branch",
-        });
+        const result = resolveOffset({ portOffset: undefined, devInstance: "feature-branch" });
         assert.ok(result.offset >= 1);
         assert.ok(result.offset <= 3000);
       }),
@@ -46,13 +68,13 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           }),
         );
 
-        assert.ok(error.includes("Invalid TETHER_PORT_OFFSET"));
+        assert.ok(error.includes("Invalid T3CODE_PORT_OFFSET"));
       }),
     );
   });
 
   describe("createDevRunnerEnv", () => {
-    it.effect("defaults T3CODE_HOME to ~/.t3 and keeps the legacy Tether dev state dir", () =>
+    it.effect("defaults T3CODE_HOME to ~/.t3 when not provided", () =>
       Effect.gen(function* () {
         const path = yield* Path.Path;
         const env = yield* createDevRunnerEnv({
@@ -60,24 +82,20 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           baseEnv: {},
           serverOffset: 0,
           webOffset: 0,
-          stateDir: undefined,
-          authToken: undefined,
           t3Home: undefined,
           noBrowser: undefined,
           autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: undefined,
           host: undefined,
-          publicHost: undefined,
           port: undefined,
           devUrl: undefined,
         });
 
         assert.equal(env.T3CODE_HOME, path.resolve(NodeOS.homedir(), ".t3"));
-        assert.equal(env.TETHER_STATE_DIR, path.resolve(NodeOS.homedir(), ".t3", "dev"));
       }),
     );
 
-    it.effect("supports explicit typed overrides and mirrors compatibility envs", () =>
+    it.effect("supports explicit typed overrides", () =>
       Effect.gen(function* () {
         const path = yield* Path.Path;
         const env = yield* createDevRunnerEnv({
@@ -85,34 +103,23 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           baseEnv: {},
           serverOffset: 0,
           webOffset: 0,
-          stateDir: "/tmp/override-state",
-          authToken: "desktop-secret",
           t3Home: "/tmp/custom-t3",
           noBrowser: true,
           autoBootstrapProjectFromCwd: false,
           logWebSocketEvents: true,
           host: "0.0.0.0",
-          publicHost: "192.168.1.42",
           port: 4222,
           devUrl: new URL("http://localhost:7331"),
         });
 
         assert.equal(env.T3CODE_HOME, path.resolve("/tmp/custom-t3"));
-        assert.equal(env.TETHER_STATE_DIR, path.resolve("/tmp/override-state"));
         assert.equal(env.T3CODE_PORT, "4222");
-        assert.equal(env.TETHER_PORT, "4222");
-        assert.equal(env.VITE_HTTP_URL, "http://192.168.1.42:4222");
-        assert.equal(env.VITE_WS_URL, "ws://192.168.1.42:4222");
+        assert.equal(env.VITE_HTTP_URL, "http://localhost:4222");
+        assert.equal(env.VITE_WS_URL, "ws://localhost:4222");
         assert.equal(env.T3CODE_NO_BROWSER, "1");
-        assert.equal(env.TETHER_NO_BROWSER, "1");
         assert.equal(env.T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD, "0");
-        assert.equal(env.TETHER_AUTO_BOOTSTRAP_PROJECT_FROM_CWD, "0");
         assert.equal(env.T3CODE_LOG_WS_EVENTS, "1");
-        assert.equal(env.TETHER_LOG_WS_EVENTS, "1");
         assert.equal(env.T3CODE_HOST, "0.0.0.0");
-        assert.equal(env.TETHER_HOST, "0.0.0.0");
-        assert.equal(env.TETHER_PUBLIC_HOST, "192.168.1.42");
-        assert.equal(env.TETHER_AUTH_TOKEN, "desktop-secret");
         assert.equal(env.VITE_DEV_SERVER_URL, "http://localhost:7331/");
       }),
     );
@@ -123,26 +130,20 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           mode: "dev",
           baseEnv: {
             T3CODE_LOG_WS_EVENTS: "keep-me-out",
-            TETHER_LOG_WS_EVENTS: "keep-me-out",
           },
           serverOffset: 0,
           webOffset: 0,
-          stateDir: undefined,
-          authToken: undefined,
           t3Home: undefined,
           noBrowser: undefined,
           autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: undefined,
           host: undefined,
-          publicHost: undefined,
           port: undefined,
           devUrl: undefined,
         });
 
         assert.equal(env.T3CODE_MODE, "web");
-        assert.equal(env.TETHER_MODE, "web");
         assert.equal(env.T3CODE_LOG_WS_EVENTS, undefined);
-        assert.equal(env.TETHER_LOG_WS_EVENTS, undefined);
       }),
     );
 
@@ -152,24 +153,19 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           mode: "dev",
           baseEnv: {
             T3CODE_LOG_WS_EVENTS: "1",
-            TETHER_LOG_WS_EVENTS: "1",
           },
           serverOffset: 0,
           webOffset: 0,
-          stateDir: undefined,
-          authToken: undefined,
           t3Home: undefined,
           noBrowser: undefined,
           autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: false,
           host: undefined,
-          publicHost: undefined,
           port: undefined,
           devUrl: undefined,
         });
 
         assert.equal(env.T3CODE_LOG_WS_EVENTS, "0");
-        assert.equal(env.TETHER_LOG_WS_EVENTS, "0");
       }),
     );
 
@@ -181,14 +177,11 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           baseEnv: {},
           serverOffset: 0,
           webOffset: 0,
-          stateDir: undefined,
-          authToken: undefined,
           t3Home: "/tmp/my-t3",
           noBrowser: undefined,
           autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: undefined,
           host: undefined,
-          publicHost: undefined,
           port: undefined,
           devUrl: undefined,
         });
@@ -203,26 +196,19 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         const env = yield* createDevRunnerEnv({
           mode: "dev:desktop",
           baseEnv: {
-            T3CODE_PORT: "3773",
+            T3CODE_PORT: "13773",
             T3CODE_MODE: "web",
             T3CODE_NO_BROWSER: "0",
             T3CODE_HOST: "0.0.0.0",
-            TETHER_MODE: "web",
-            TETHER_NO_BROWSER: "0",
-            TETHER_HOST: "0.0.0.0",
-            TETHER_PUBLIC_HOST: "stale.example.com",
-            VITE_WS_URL: "ws://localhost:3773",
+            VITE_WS_URL: "ws://localhost:13773",
           },
           serverOffset: 0,
           webOffset: 0,
-          stateDir: undefined,
-          authToken: undefined,
           t3Home: "/tmp/my-t3",
           noBrowser: true,
           autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: undefined,
           host: "127.0.0.1",
-          publicHost: "192.168.1.42",
           port: 4222,
           devUrl: undefined,
         });
@@ -232,70 +218,34 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         assert.equal(env.VITE_DEV_SERVER_URL, "http://127.0.0.1:5733");
         assert.equal(env.HOST, "127.0.0.1");
         assert.equal(env.T3CODE_PORT, "4222");
-        assert.equal(env.TETHER_PORT, "4222");
         assert.equal(env.VITE_HTTP_URL, "http://127.0.0.1:4222");
-        assert.equal(env.VITE_WS_URL, "ws://127.0.0.1:4222");
         assert.equal(env.T3CODE_MODE, undefined);
         assert.equal(env.T3CODE_NO_BROWSER, undefined);
         assert.equal(env.T3CODE_HOST, undefined);
-        assert.equal(env.TETHER_MODE, undefined);
-        assert.equal(env.TETHER_NO_BROWSER, undefined);
-        assert.equal(env.TETHER_HOST, undefined);
-        assert.equal(env.TETHER_PUBLIC_HOST, undefined);
+        assert.equal(env.VITE_WS_URL, "ws://127.0.0.1:4222");
       }),
     );
 
-    it.effect("uses a non-wildcard bind host for public dev urls by default", () =>
+    it.effect("defaults dev server mode to the higher backend port range", () =>
       Effect.gen(function* () {
         const env = yield* createDevRunnerEnv({
           mode: "dev",
           baseEnv: {},
           serverOffset: 0,
           webOffset: 0,
-          stateDir: undefined,
-          authToken: undefined,
           t3Home: undefined,
           noBrowser: undefined,
           autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: undefined,
-          host: "100.88.10.4",
-          publicHost: undefined,
+          host: undefined,
           port: undefined,
           devUrl: undefined,
         });
 
-        assert.equal(env.VITE_HTTP_URL, "http://100.88.10.4:3773");
-        assert.equal(env.VITE_WS_URL, "ws://100.88.10.4:3773");
-        assert.equal(env.VITE_DEV_SERVER_URL, "http://100.88.10.4:5733");
+        assert.equal(env.T3CODE_PORT, "13773");
+        assert.equal(env.VITE_HTTP_URL, "http://localhost:13773");
+        assert.equal(env.VITE_WS_URL, "ws://localhost:13773");
       }),
-    );
-
-    it.effect(
-      "uses wildcard websocket host by default so LAN and localhost clients both work",
-      () =>
-        Effect.gen(function* () {
-          const env = yield* createDevRunnerEnv({
-            mode: "dev",
-            baseEnv: {},
-            serverOffset: 0,
-            webOffset: 0,
-            stateDir: undefined,
-            authToken: undefined,
-            t3Home: undefined,
-            noBrowser: undefined,
-            autoBootstrapProjectFromCwd: undefined,
-            logWebSocketEvents: undefined,
-            host: undefined,
-            publicHost: undefined,
-            port: undefined,
-            devUrl: undefined,
-          });
-
-          assert.equal(env.T3CODE_PORT, "3773");
-          assert.equal(env.VITE_HTTP_URL, "http://localhost:3773");
-          assert.equal(env.VITE_WS_URL, "ws://0.0.0.0:3773");
-          assert.equal(env.VITE_DEV_SERVER_URL, "http://localhost:5733");
-        }),
     );
   });
 
@@ -315,7 +265,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
 
     it.effect("advances until all required ports are available", () =>
       Effect.gen(function* () {
-        const taken = new Set([3773, 5733, 3774, 5734]);
+        const taken = new Set([13773, 5733, 13774, 5734]);
         const offset = yield* findFirstAvailableOffset({
           startOffset: 0,
           requireServerPort: true,
@@ -348,7 +298,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         const calls: Array<[number, string]> = [];
 
         const available = yield* checkPortAvailabilityOnHosts(
-          3773,
+          13_773,
           ["127.0.0.1", "0.0.0.0", "::"],
           (port, host) =>
             Effect.promise(async () => {
@@ -363,9 +313,9 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
 
         assert.equal(available, true);
         assert.deepStrictEqual(calls, [
-          [3773, "127.0.0.1"],
-          [3773, "0.0.0.0"],
-          [3773, "::"],
+          [13_773, "127.0.0.1"],
+          [13_773, "0.0.0.0"],
+          [13_773, "::"],
         ]);
       }),
     );
@@ -374,7 +324,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
   describe("resolveModePortOffsets", () => {
     it.effect("uses a shared fallback offset for dev mode", () =>
       Effect.gen(function* () {
-        const taken = new Set([3773, 5733]);
+        const taken = new Set([13773, 5733]);
         const offsets = yield* resolveModePortOffsets({
           mode: "dev",
           startOffset: 0,
@@ -404,7 +354,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
 
     it.effect("shifts only server offset for dev:server", () =>
       Effect.gen(function* () {
-        const taken = new Set([3773]);
+        const taken = new Set([13773]);
         const offsets = yield* resolveModePortOffsets({
           mode: "dev:server",
           startOffset: 0,

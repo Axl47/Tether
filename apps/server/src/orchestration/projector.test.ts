@@ -2,11 +2,12 @@ import {
   CommandId,
   EventId,
   ProjectId,
+  ProviderDriverKind,
   ThreadId,
   type OrchestrationEvent,
 } from "@t3tools/contracts";
-import { Effect } from "effect";
-import { describe, expect, it } from "vitest";
+import * as Effect from "effect/Effect";
+import { describe, expect, it } from "vite-plus/test";
 
 import { createEmptyReadModel, projectEvent } from "./projector.ts";
 
@@ -39,7 +40,7 @@ function makeEvent(input: {
 
 describe("orchestration projector", () => {
   it("applies thread.created events", async () => {
-    const now = new Date().toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
     const model = createEmptyReadModel(now);
 
     const next = await Effect.runPromise(
@@ -57,7 +58,7 @@ describe("orchestration projector", () => {
             projectId: "project-1",
             title: "demo",
             modelSelection: {
-              provider: "codex",
+              provider: ProviderDriverKind.make("codex"),
               model: "gpt-5-codex",
             },
             runtimeMode: "full-access",
@@ -77,7 +78,7 @@ describe("orchestration projector", () => {
         projectId: "project-1",
         title: "demo",
         modelSelection: {
-          provider: "codex",
+          instanceId: "codex",
           model: "gpt-5-codex",
         },
         runtimeMode: "full-access",
@@ -85,14 +86,12 @@ describe("orchestration projector", () => {
         branch: null,
         worktreePath: null,
         latestTurn: null,
-        lastAutoRenameUserMessageId: null,
         createdAt: now,
         updatedAt: now,
         archivedAt: null,
         deletedAt: null,
         messages: [],
         proposedPlans: [],
-        contextWindow: null,
         activities: [],
         checkpoints: [],
         session: null,
@@ -101,7 +100,7 @@ describe("orchestration projector", () => {
   });
 
   it("fails when event payload cannot be decoded by runtime schema", async () => {
-    const now = new Date().toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
     const model = createEmptyReadModel(now);
 
     await expect(
@@ -120,7 +119,7 @@ describe("orchestration projector", () => {
               projectId: "project-1",
               title: "demo",
               modelSelection: {
-                provider: "codex",
+                provider: ProviderDriverKind.make("codex"),
                 model: "gpt-5-codex",
               },
               branch: null,
@@ -135,8 +134,8 @@ describe("orchestration projector", () => {
   });
 
   it("applies thread.archived and thread.unarchived events", async () => {
-    const now = new Date().toISOString();
-    const later = new Date(Date.parse(now) + 1_000).toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
+    const later = "2026-01-01T00:00:01.000Z";
     const created = await Effect.runPromise(
       projectEvent(
         createEmptyReadModel(now),
@@ -152,7 +151,7 @@ describe("orchestration projector", () => {
             projectId: "project-1",
             title: "demo",
             modelSelection: {
-              provider: "codex",
+              provider: ProviderDriverKind.make("codex"),
               model: "gpt-5-codex",
             },
             runtimeMode: "full-access",
@@ -207,7 +206,7 @@ describe("orchestration projector", () => {
   });
 
   it("keeps projector forward-compatible for unhandled event types", async () => {
-    const now = new Date().toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
     const model = createEmptyReadModel(now);
 
     const next = await Effect.runPromise(
@@ -238,7 +237,6 @@ describe("orchestration projector", () => {
   it("tracks latest turn id from session lifecycle events", async () => {
     const createdAt = "2026-02-23T08:00:00.000Z";
     const startedAt = "2026-02-23T08:00:05.000Z";
-    const stoppedAt = "2026-02-23T08:00:12.000Z";
     const model = createEmptyReadModel(createdAt);
 
     const afterCreate = await Effect.runPromise(
@@ -256,7 +254,7 @@ describe("orchestration projector", () => {
             projectId: "project-1",
             title: "demo",
             modelSelection: {
-              provider: "codex",
+              provider: ProviderDriverKind.make("codex"),
               model: "gpt-5.3-codex",
             },
             runtimeMode: "full-access",
@@ -300,163 +298,6 @@ describe("orchestration projector", () => {
     const thread = afterRunning.threads[0];
     expect(thread?.latestTurn?.turnId).toBe("turn-1");
     expect(thread?.session?.status).toBe("running");
-
-    const afterStopped = await Effect.runPromise(
-      projectEvent(
-        afterRunning,
-        makeEvent({
-          sequence: 3,
-          type: "thread.session-set",
-          aggregateKind: "thread",
-          aggregateId: "thread-1",
-          occurredAt: stoppedAt,
-          commandId: "cmd-stopped",
-          payload: {
-            threadId: "thread-1",
-            session: {
-              threadId: "thread-1",
-              status: "stopped",
-              providerName: "codex",
-              runtimeMode: "approval-required",
-              activeTurnId: null,
-              lastError: null,
-              updatedAt: stoppedAt,
-            },
-          },
-        }),
-      ),
-    );
-
-    expect(afterStopped.threads[0]?.latestTurn).toMatchObject({
-      turnId: "turn-1",
-      state: "interrupted",
-      completedAt: stoppedAt,
-    });
-    expect(afterStopped.threads[0]?.session?.status).toBe("stopped");
-  });
-
-  it("projects thread context-window updates and clears them on explicit invalidation and revert", async () => {
-    const now = "2026-03-07T00:00:00.000Z";
-    const model = createEmptyReadModel(now);
-
-    const afterCreate = await Effect.runPromise(
-      projectEvent(
-        model,
-        makeEvent({
-          sequence: 1,
-          type: "thread.created",
-          aggregateKind: "thread",
-          aggregateId: "thread-1",
-          occurredAt: now,
-          commandId: "cmd-create",
-          payload: {
-            threadId: "thread-1",
-            projectId: "project-1",
-            title: "demo",
-            model: "gpt-5.3-codex",
-            runtimeMode: "full-access",
-            branch: null,
-            worktreePath: null,
-            createdAt: now,
-            updatedAt: now,
-          },
-        }),
-      ),
-    );
-
-    const afterContextWindow = await Effect.runPromise(
-      projectEvent(
-        afterCreate,
-        makeEvent({
-          sequence: 2,
-          type: "thread.context-window-set",
-          aggregateKind: "thread",
-          aggregateId: "thread-1",
-          occurredAt: now,
-          commandId: "cmd-context-window",
-          payload: {
-            threadId: "thread-1",
-            contextWindow: {
-              provider: "codex",
-              usedTokens: 119000,
-              maxTokens: 258000,
-              remainingTokens: 139000,
-              usedPercent: 46,
-              updatedAt: now,
-            },
-          },
-        }),
-      ),
-    );
-
-    expect(afterContextWindow.threads[0]?.contextWindow).toMatchObject({
-      provider: "codex",
-      usedPercent: 46,
-    });
-
-    const afterClear = await Effect.runPromise(
-      projectEvent(
-        afterContextWindow,
-        makeEvent({
-          sequence: 3,
-          type: "thread.context-window-cleared",
-          aggregateKind: "thread",
-          aggregateId: "thread-1",
-          occurredAt: now,
-          commandId: "cmd-context-window-clear",
-          payload: {
-            threadId: "thread-1",
-          },
-        }),
-      ),
-    );
-
-    expect(afterClear.threads[0]?.contextWindow).toBeNull();
-
-    const afterRevertedContextWindow = await Effect.runPromise(
-      projectEvent(
-        afterClear,
-        makeEvent({
-          sequence: 4,
-          type: "thread.context-window-set",
-          aggregateKind: "thread",
-          aggregateId: "thread-1",
-          occurredAt: now,
-          commandId: "cmd-context-window-2",
-          payload: {
-            threadId: "thread-1",
-            contextWindow: {
-              provider: "codex",
-              usedTokens: 100000,
-              maxTokens: 258000,
-              remainingTokens: 158000,
-              usedPercent: 39,
-              updatedAt: now,
-            },
-          },
-        }),
-      ),
-    );
-
-    const afterRevert = await Effect.runPromise(
-      projectEvent(
-        afterRevertedContextWindow,
-        makeEvent({
-          sequence: 5,
-          type: "thread.reverted",
-          aggregateKind: "thread",
-          aggregateId: "thread-1",
-          occurredAt: now,
-          commandId: "cmd-revert",
-          payload: {
-            threadId: "thread-1",
-            turnCount: 0,
-          },
-        }),
-      ),
-    );
-
-    expect(afterRevert.threads[0]?.contextWindow).toBeNull();
   });
 
   it("updates canonical thread runtime mode from thread.runtime-mode-set", async () => {
@@ -479,7 +320,7 @@ describe("orchestration projector", () => {
             projectId: "project-1",
             title: "demo",
             modelSelection: {
-              provider: "codex",
+              provider: ProviderDriverKind.make("codex"),
               model: "gpt-5.3-codex",
             },
             runtimeMode: "full-access",
@@ -536,7 +377,7 @@ describe("orchestration projector", () => {
             projectId: "project-1",
             title: "demo",
             modelSelection: {
-              provider: "codex",
+              provider: ProviderDriverKind.make("codex"),
               model: "gpt-5.3-codex",
             },
             runtimeMode: "full-access",
@@ -623,7 +464,7 @@ describe("orchestration projector", () => {
             projectId: "project-1",
             title: "demo",
             modelSelection: {
-              provider: "codex",
+              provider: ProviderDriverKind.make("codex"),
               model: "gpt-5.3-codex",
             },
             runtimeMode: "full-access",
@@ -838,7 +679,7 @@ describe("orchestration projector", () => {
             projectId: "project-1",
             title: "demo",
             modelSelection: {
-              provider: "codex",
+              provider: ProviderDriverKind.make("codex"),
               model: "gpt-5.3-codex",
             },
             runtimeMode: "full-access",
@@ -991,7 +832,7 @@ describe("orchestration projector", () => {
             projectId: "project-1",
             title: "capped",
             modelSelection: {
-              provider: "codex",
+              provider: ProviderDriverKind.make("codex"),
               model: "gpt-5-codex",
             },
             runtimeMode: "full-access",

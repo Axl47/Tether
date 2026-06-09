@@ -1,145 +1,58 @@
 import type { EnvironmentId, EnvironmentApi } from "@t3tools/contracts";
 
-import type { WsRpcClient } from "./rpc/wsRpcClient";
+import type { WsRpcClient } from "@t3tools/client-runtime";
 import { readEnvironmentConnection } from "./environments/runtime";
 
 const environmentApiOverridesForTests = new Map<EnvironmentId, EnvironmentApi>();
 
 export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
-  const unsupportedOrchestrationOperation = (name: string) =>
-    new Error(`Environment orchestration.${name} is unavailable in this runtime.`);
-  const unsupportedBrowserOperation = (name: string) =>
-    new Error(`Environment browser.${name} is unavailable in this runtime.`);
-  const desktopBrowser = typeof window === "undefined" ? undefined : window.desktopBridge?.browser;
-
   return {
     terminal: {
       open: (input) => rpcClient.terminal.open(input as never),
+      attach: (input, callback, options) =>
+        rpcClient.terminal.attach(input as never, callback, options),
       write: (input) => rpcClient.terminal.write(input as never),
       resize: (input) => rpcClient.terminal.resize(input as never),
       clear: (input) => rpcClient.terminal.clear(input as never),
       restart: (input) => rpcClient.terminal.restart(input as never),
       close: (input) => rpcClient.terminal.close(input as never),
-      onEvent: (callback) => rpcClient.terminal.onEvent(callback),
+      onMetadata: (callback, options) => rpcClient.terminal.onMetadata(callback, options),
     },
     projects: {
       searchEntries: rpcClient.projects.searchEntries,
-      readFile: async () => {
-        throw new Error("Environment projects.readFile is unavailable in this runtime.");
-      },
       writeFile: rpcClient.projects.writeFile,
     },
     filesystem: {
       browse: rpcClient.filesystem.browse,
     },
+    sourceControl: {
+      lookupRepository: rpcClient.sourceControl.lookupRepository,
+      cloneRepository: rpcClient.sourceControl.cloneRepository,
+      publishRepository: rpcClient.sourceControl.publishRepository,
+    },
+    vcs: {
+      pull: rpcClient.vcs.pull,
+      refreshStatus: rpcClient.vcs.refreshStatus,
+      onStatus: (input, callback, options) => rpcClient.vcs.onStatus(input, callback, options),
+      listRefs: rpcClient.vcs.listRefs,
+      createWorktree: rpcClient.vcs.createWorktree,
+      removeWorktree: rpcClient.vcs.removeWorktree,
+      createRef: rpcClient.vcs.createRef,
+      switchRef: rpcClient.vcs.switchRef,
+      init: rpcClient.vcs.init,
+    },
     git: {
-      pull: rpcClient.git.pull,
-      refreshStatus: rpcClient.git.refreshStatus,
-      onStatus: (input, callback, options) => rpcClient.git.onStatus(input, callback, options),
-      listBranches: rpcClient.git.listBranches,
-      createWorktree: rpcClient.git.createWorktree,
-      removeWorktree: rpcClient.git.removeWorktree,
-      createBranch: rpcClient.git.createBranch,
-      checkout: rpcClient.git.checkout,
-      init: rpcClient.git.init,
       resolvePullRequest: rpcClient.git.resolvePullRequest,
       preparePullRequestThread: rpcClient.git.preparePullRequestThread,
     },
-    browser: {
-      ensurePane: async (input) => {
-        if (!desktopBrowser) {
-          throw unsupportedBrowserOperation("ensurePane");
-        }
-        return desktopBrowser.ensurePane(input);
-      },
-      destroyPane: async (input) => {
-        if (!desktopBrowser) {
-          throw unsupportedBrowserOperation("destroyPane");
-        }
-        return desktopBrowser.destroyPane(input);
-      },
-      setBounds: async (input) => {
-        if (!desktopBrowser) {
-          throw unsupportedBrowserOperation("setBounds");
-        }
-        return desktopBrowser.setBounds(input);
-      },
-      setVisible: async (input) => {
-        if (!desktopBrowser) {
-          throw unsupportedBrowserOperation("setVisible");
-        }
-        return desktopBrowser.setVisible(input);
-      },
-      navigate: async (input) => {
-        if (!desktopBrowser) {
-          throw unsupportedBrowserOperation("navigate");
-        }
-        return desktopBrowser.navigate(input);
-      },
-      goBack: async (input) => {
-        if (!desktopBrowser) {
-          throw unsupportedBrowserOperation("goBack");
-        }
-        return desktopBrowser.goBack(input);
-      },
-      goForward: async (input) => {
-        if (!desktopBrowser) {
-          throw unsupportedBrowserOperation("goForward");
-        }
-        return desktopBrowser.goForward(input);
-      },
-      reload: async (input) => {
-        if (!desktopBrowser) {
-          throw unsupportedBrowserOperation("reload");
-        }
-        return desktopBrowser.reload(input);
-      },
-      stop: async (input) => {
-        if (!desktopBrowser) {
-          throw unsupportedBrowserOperation("stop");
-        }
-        return desktopBrowser.stop(input);
-      },
-      captureScreenshot: async (input) => {
-        if (!desktopBrowser) {
-          throw unsupportedBrowserOperation("captureScreenshot");
-        }
-        return desktopBrowser.captureScreenshot(input);
-      },
-      getSnapshot: async (input) => {
-        if (!desktopBrowser) {
-          throw unsupportedBrowserOperation("getSnapshot");
-        }
-        return desktopBrowser.getSnapshot(input);
-      },
-      onEvent: (callback) => {
-        if (!desktopBrowser) {
-          return () => undefined;
-        }
-        return desktopBrowser.onEvent(callback);
-      },
-      syncShortcutState: async (state) => {
-        if (!desktopBrowser) {
-          throw unsupportedBrowserOperation("syncShortcutState");
-        }
-        return desktopBrowser.syncShortcutState(state);
-      },
+    review: {
+      getDiffPreview: rpcClient.review.getDiffPreview,
     },
     orchestration: {
-      getSnapshot: async () => {
-        throw unsupportedOrchestrationOperation("getSnapshot");
-      },
       dispatchCommand: rpcClient.orchestration.dispatchCommand,
-      forceDeleteThread: async () => {
-        throw unsupportedOrchestrationOperation("forceDeleteThread");
-      },
       getTurnDiff: rpcClient.orchestration.getTurnDiff,
       getFullThreadDiff: rpcClient.orchestration.getFullThreadDiff,
-      autorenameProjectThreads: async () => {
-        throw unsupportedOrchestrationOperation("autorenameProjectThreads");
-      },
-      replayEvents: async () => [],
-      onDomainEvent: () => () => undefined,
+      getArchivedShellSnapshot: rpcClient.orchestration.getArchivedShellSnapshot,
       subscribeShell: (callback, options) =>
         rpcClient.orchestration.subscribeShell(callback, options),
       subscribeThread: (input, callback, options) =>

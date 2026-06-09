@@ -6,7 +6,7 @@ type ThemeSnapshot = {
   systemDark: boolean;
 };
 
-const STORAGE_KEY = "tether:theme";
+const STORAGE_KEY = "t3code:theme";
 const MEDIA_QUERY = "(prefers-color-scheme: dark)";
 const DEFAULT_THEME_SNAPSHOT: ThemeSnapshot = {
   theme: "system",
@@ -109,7 +109,7 @@ function applyTheme(theme: Theme, suppressTransitions = false) {
 function syncDesktopTheme(theme: Theme) {
   if (typeof window === "undefined") return;
   const bridge = window.desktopBridge;
-  if (!bridge || lastDesktopTheme === theme) {
+  if (!bridge || typeof bridge.setTheme !== "function" || lastDesktopTheme === theme) {
     return;
   }
 

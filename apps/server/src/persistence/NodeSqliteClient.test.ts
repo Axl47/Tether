@@ -1,5 +1,5 @@
 import { assert, it } from "@effect/vitest";
-import { Effect } from "effect";
+import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as SqliteClient from "./NodeSqliteClient.ts";
@@ -25,25 +25,6 @@ layer("NodeSqliteClient", (it) => {
       assert.equal(values.length, 2);
       assert.equal(values[0]?.[1], "alpha");
       assert.equal(values[1]?.[1], "beta");
-    }),
-  );
-
-  it.effect("treats write-only statements as empty result sets", () =>
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient;
-
-      const createRows =
-        yield* sql`CREATE TABLE write_only(id INTEGER PRIMARY KEY, name TEXT NOT NULL)`;
-      assert.deepStrictEqual(createRows, []);
-
-      const insertRows = yield* sql`INSERT INTO write_only(name) VALUES (${"alpha"})`;
-      assert.deepStrictEqual(insertRows, []);
-
-      const updateRows = yield* sql`UPDATE write_only SET name = ${"beta"} WHERE id = ${1}`;
-      assert.deepStrictEqual(updateRows, []);
-
-      const deleteValues = yield* sql`DELETE FROM write_only WHERE id = ${1}`.values;
-      assert.deepStrictEqual(deleteValues, []);
     }),
   );
 });

@@ -4,7 +4,6 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { PanelLeftCloseIcon, PanelLeftIcon } from "lucide-react";
 import * as React from "react";
 import { cn } from "~/lib/utils";
-import { shouldApplyControlledOpenChange } from "~/lib/controlledOpenState";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { ScrollArea } from "~/components/ui/scroll-area";
@@ -18,11 +17,14 @@ import {
 } from "~/components/ui/sheet";
 import { Skeleton } from "~/components/ui/skeleton";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
-import { useMediaQuery } from "~/hooks/useMediaQuery";
-import { persistSidebarOpenState, readPersistedSidebarOpenState } from "./sidebar.logic";
+import { useIsMobile } from "~/hooks/useMediaQuery";
+import { getLocalStorageItem, setLocalStorageItem } from "~/hooks/useLocalStorage";
+import * as Schema from "effect/Schema";
 
+const SIDEBAR_COOKIE_NAME = "sidebar_state";
+const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
 const SIDEBAR_WIDTH = "16rem";
-const SIDEBAR_WIDTH_MOBILE = "min(16rem, calc(100vw - var(--spacing(28))))";
+const SIDEBAR_WIDTH_MOBILE = "calc(100vw - var(--spacing(3)))";
 const SIDEBAR_WIDTH_ICON = "3rem";
 const SIDEBAR_RESIZE_DEFAULT_MIN_WIDTH = 16 * 16;
 
@@ -75,7 +77,7 @@ const SidebarContext = React.createContext<SidebarContextProps | null>(null);
 const SidebarInstanceContext = React.createContext<SidebarInstanceContextProps | null>(null);
 
 function useSidebar() {
-  const context = React.useContext(SidebarContext);
+  const context = React.use(SidebarContext);
   if (!context) {
     throw new Error("useSidebar must be used within a SidebarProvider.");
   }
@@ -87,7 +89,6 @@ function SidebarProvider({
   defaultOpen = true,
   open: openProp,
   onOpenChange: setOpenProp,
-  storageKey = null,
   className,
   style,
   children,
@@ -96,45 +97,32 @@ function SidebarProvider({
   defaultOpen?: boolean;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
-  storageKey?: string | null;
 }) {
-  const isMobile = useMediaQuery("(max-width: 767px)");
+  const isMobile = useIsMobile();
   const [openMobile, setOpenMobile] = React.useState(false);
 
   // This is the internal state of the sidebar.
   // We use openProp and setOpenProp for control from outside the component.
-  const [_open, _setOpen] = React.useState(() => {
-    if (typeof document === "undefined") {
-      return defaultOpen;
-    }
-
-    return readPersistedSidebarOpenState({
-      cookieString: document.cookie,
-      defaultOpen,
-      storage: typeof window === "undefined" ? null : window.localStorage,
-      storageKey,
-    });
-  });
+  const [_open, _setOpen] = React.useState(defaultOpen);
   const open = openProp ?? _open;
   const setOpen = React.useCallback(
-    (value: boolean | ((value: boolean) => boolean)) => {
+    async (value: boolean | ((value: boolean) => boolean)) => {
       const openState = typeof value === "function" ? value(open) : value;
-      if (!shouldApplyControlledOpenChange(open, openState)) {
-        return;
-      }
       if (setOpenProp) {
         setOpenProp(openState);
       } else {
         _setOpen(openState);
       }
 
-      persistSidebarOpenState({
-        open: openState,
-        storage: typeof window === "undefined" ? null : window.localStorage,
-        storageKey,
+      // This sets the cookie to keep the sidebar state.
+      await cookieStore.set({
+        expires: Date.now() + SIDEBAR_COOKIE_MAX_AGE * 1000,
+        name: SIDEBAR_COOKIE_NAME,
+        path: "/",
+        value: String(openState),
       });
     },
-    [setOpenProp, open, storageKey],
+    [setOpenProp, open],
   );
 
   // Helper to toggle the sidebar.
@@ -160,10 +148,10 @@ function SidebarProvider({
   );
 
   return (
-    <SidebarContext.Provider value={contextValue}>
+    <SidebarContext value={contextValue}>
       <div
         className={cn(
-          "group/sidebar-wrapper flex min-h-[var(--app-viewport-height)] w-full has-data-[variant=inset]:bg-sidebar",
+          "group/sidebar-wrapper flex min-h-svh w-full has-data-[variant=inset]:bg-sidebar",
           className,
         )}
         data-slot="sidebar-wrapper"
@@ -178,7 +166,7 @@ function SidebarProvider({
       >
         {children}
       </div>
-    </SidebarContext.Provider>
+    </SidebarContext>
   );
 }
 
@@ -218,7 +206,7 @@ function Sidebar({
 
   if (collapsible === "none") {
     return (
-      <SidebarInstanceContext.Provider value={instanceContextValue}>
+      <SidebarInstanceContext value={instanceContextValue}>
         <div
           className={cn(
             "flex h-full w-(--sidebar-width) flex-col bg-sidebar text-sidebar-foreground",
@@ -229,13 +217,13 @@ function Sidebar({
         >
           {children}
         </div>
-      </SidebarInstanceContext.Provider>
+      </SidebarInstanceContext>
     );
   }
 
   if (isMobile) {
     return (
-      <SidebarInstanceContext.Provider value={instanceContextValue}>
+      <SidebarInstanceContext value={instanceContextValue}>
         <Sheet onOpenChange={setOpenMobile} open={openMobile} {...props}>
           <SheetPopup
             className={cn(
@@ -245,7 +233,6 @@ function Sidebar({
             data-mobile="true"
             data-sidebar="sidebar"
             data-slot="sidebar"
-            keepMounted
             showCloseButton={false}
             side={side}
             style={
@@ -258,15 +245,22 @@ function Sidebar({
               <SheetTitle>Sidebar</SheetTitle>
               <SheetDescription>Displays the mobile sidebar.</SheetDescription>
             </SheetHeader>
-            <div className="flex h-full w-full flex-col">{children}</div>
+            <div
+              className={cn(
+                "flex h-full w-full flex-col pb-safe pt-safe",
+                side === "left" ? "pl-safe" : "pr-safe",
+              )}
+            >
+              {children}
+            </div>
           </SheetPopup>
         </Sheet>
-      </SidebarInstanceContext.Provider>
+      </SidebarInstanceContext>
     );
   }
 
   return (
-    <SidebarInstanceContext.Provider value={instanceContextValue}>
+    <SidebarInstanceContext value={instanceContextValue}>
       <div
         className="group peer hidden text-sidebar-foreground md:block"
         data-collapsible={state === "collapsed" ? collapsible : ""}
@@ -289,7 +283,7 @@ function Sidebar({
         />
         <div
           className={cn(
-            "fixed inset-y-0 z-10 hidden h-[var(--app-viewport-height)] w-(--sidebar-width) transition-[left,right,width] duration-200 ease-linear md:flex",
+            "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-linear md:flex",
             side === "left"
               ? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
               : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
@@ -311,7 +305,7 @@ function Sidebar({
           </div>
         </div>
       </div>
-    </SidebarInstanceContext.Provider>
+    </SidebarInstanceContext>
   );
 }
 
@@ -351,7 +345,7 @@ function SidebarRail({
   ...props
 }: React.ComponentProps<"button">) {
   const { open, toggleSidebar } = useSidebar();
-  const sidebarInstance = React.useContext(SidebarInstanceContext);
+  const sidebarInstance = React.use(SidebarInstanceContext);
   const railRef = React.useRef<HTMLButtonElement | null>(null);
   const suppressClickRef = React.useRef(false);
   const resizeStateRef = React.useRef<{
@@ -386,7 +380,7 @@ function SidebarRail({
         element.style.removeProperty("transition-duration");
       });
       if (resolvedResizable?.storageKey && typeof window !== "undefined") {
-        window.localStorage.setItem(resolvedResizable.storageKey, String(resizeState.width));
+        setLocalStorageItem(resolvedResizable.storageKey, resizeState.width, Schema.Finite);
       }
       resolvedResizable?.onResize?.(resizeState.width);
       resizeStateRef.current = null;
@@ -556,8 +550,8 @@ function SidebarRail({
     const wrapper = rail.closest<HTMLElement>("[data-slot='sidebar-wrapper']");
     if (!wrapper) return;
 
-    const storedWidth = Number(window.localStorage.getItem(resolvedResizable.storageKey));
-    if (!Number.isFinite(storedWidth)) return;
+    const storedWidth = getLocalStorageItem(resolvedResizable.storageKey, Schema.Finite);
+    if (storedWidth === null) return;
     const clampedWidth = clampSidebarWidth(storedWidth, resolvedResizable);
     wrapper.style.setProperty("--sidebar-width", `${clampedWidth}px`);
     resolvedResizable.onResize?.(clampedWidth);
@@ -694,7 +688,7 @@ function SidebarGroup({ className, ...props }: React.ComponentProps<"div">) {
 function SidebarGroupLabel({ className, render, ...props }: useRender.ComponentProps<"div">) {
   const defaultProps = {
     className: cn(
-      "flex h-8 shrink-0 items-center rounded-lg px-2 font-medium text-sidebar-foreground text-xs outline-hidden ring-sidebar-ring transition-[margin,opacity] duration-200 ease-linear focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
+      "flex h-8 shrink-0 items-center rounded-lg px-2 font-medium text-sidebar-foreground text-xs outline-hidden ring-ring transition-[margin,opacity] duration-200 ease-linear focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
       "group-data-[collapsible=icon]:-mt-8 group-data-[collapsible=icon]:opacity-0",
       className,
     ),
@@ -712,7 +706,7 @@ function SidebarGroupLabel({ className, render, ...props }: useRender.ComponentP
 function SidebarGroupAction({ className, render, ...props }: useRender.ComponentProps<"button">) {
   const defaultProps = {
     className: cn(
-      "absolute top-3.5 right-3 flex aspect-square w-5 items-center justify-center rounded-lg p-0 text-sidebar-foreground outline-hidden ring-sidebar-ring transition-transform hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 [&>svg:not([class*='size-'])]:size-4 [&>svg]:shrink-0",
+      "absolute top-3.5 right-3 flex aspect-square w-5 items-center justify-center rounded-lg p-0 text-sidebar-foreground outline-hidden ring-ring transition-transform hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 [&>svg:not([class*='size-'])]:size-4 [&>svg]:shrink-0",
       // Increases the hit area of the button on mobile.
       "after:-inset-2 after:absolute md:after:hidden",
       "group-data-[collapsible=icon]:hidden",
@@ -763,7 +757,7 @@ function SidebarMenuItem({ className, ...props }: React.ComponentProps<"li">) {
 }
 
 const sidebarMenuButtonVariants = cva(
-  "peer/menu-button flex w-full items-center gap-2 overflow-hidden rounded-lg p-2 text-left text-sm outline-hidden ring-sidebar-ring transition-[width,height,padding] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 group-has-data-[sidebar=menu-action]/menu-item:pe-8 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground data-[state=open]:hover:bg-sidebar-accent data-[state=open]:hover:text-sidebar-accent-foreground group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! [&>span:last-child]:truncate [&>svg:not([class*='size-'])]:size-4 [&>svg]:shrink-0",
+  "peer/menu-button flex w-full cursor-pointer items-center gap-2 overflow-hidden rounded-lg p-2 text-left text-sm outline-hidden ring-ring transition-[width,height,padding] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 group-has-data-[sidebar=menu-action]/menu-item:pe-8 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground data-[state=open]:hover:bg-sidebar-accent data-[state=open]:hover:text-sidebar-accent-foreground group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! [&>span:last-child]:truncate [&>svg:not([class*='size-'])]:size-4 [&>svg]:shrink-0",
   {
     defaultVariants: {
       size: "default",
@@ -847,7 +841,7 @@ function SidebarMenuAction({
 }) {
   const defaultProps = {
     className: cn(
-      "absolute top-1.5 right-1 flex aspect-square w-5 items-center justify-center rounded-lg p-0 text-sidebar-foreground outline-hidden ring-sidebar-ring transition-transform hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 peer-hover/menu-button:text-sidebar-accent-foreground [&>svg:not([class*='size-'])]:size-4 [&>svg]:shrink-0",
+      "absolute top-1.5 right-1 flex aspect-square w-5 cursor-pointer items-center justify-center rounded-lg p-0 text-sidebar-foreground outline-hidden ring-ring transition-transform hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 peer-hover/menu-button:text-sidebar-accent-foreground [&>svg:not([class*='size-'])]:size-4 [&>svg]:shrink-0",
       // Increases the hit area of the button on mobile.
       "after:-inset-2 after:absolute md:after:hidden",
       "peer-data-[size=sm]/menu-button:top-1",
@@ -895,7 +889,7 @@ function SidebarMenuSkeleton({
 }: React.ComponentProps<"div"> & {
   showIcon?: boolean;
 }) {
-  // Random width between 50 to 90%.
+  // Random width between 50 to 90%. Intentionally wrapped in useMemo to avoid changing width on every render.
   const width = React.useMemo(() => {
     return `${Math.floor(Math.random() * 40) + 50}%`;
   }, []);
@@ -959,7 +953,7 @@ function SidebarMenuSubButton({
 }) {
   const defaultProps = {
     className: cn(
-      "-translate-x-px flex h-7 min-w-0 items-center gap-2 overflow-hidden rounded-lg px-2 text-sidebar-foreground outline-hidden ring-sidebar-ring hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 [&>span:last-child]:truncate [&>svg:not([class*='size-'])]:size-4 [&>svg]:shrink-0 [&>svg]:text-sidebar-accent-foreground",
+      "-translate-x-px flex h-7 min-w-0 cursor-pointer items-center gap-2 overflow-hidden rounded-lg px-2 text-sidebar-foreground outline-hidden ring-ring hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 [&>span:last-child]:truncate [&>svg:not([class*='size-'])]:size-4 [&>svg]:shrink-0 [&>svg]:text-sidebar-accent-foreground",
       "data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground",
       size === "sm" && "text-xs",
       size === "md" && "text-sm",

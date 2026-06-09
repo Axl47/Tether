@@ -9,17 +9,17 @@
 import {
   IsoDateTime,
   ModelSelection,
-  MessageId,
   NonNegativeInt,
-  OrchestrationContextWindow,
   ProjectId,
   ProviderInteractionMode,
   RuntimeMode,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
-import { Option, Schema, Context } from "effect";
-import type { Effect } from "effect";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+import * as Context from "effect/Context";
+import type * as Effect from "effect/Effect";
 
 import type { ProjectionRepositoryError } from "../Errors.ts";
 
@@ -32,9 +32,7 @@ export const ProjectionThread = Schema.Struct({
   interactionMode: ProviderInteractionMode,
   branch: Schema.NullOr(Schema.String),
   worktreePath: Schema.NullOr(Schema.String),
-  contextWindow: Schema.NullOr(OrchestrationContextWindow),
   latestTurnId: Schema.NullOr(TurnId),
-  lastAutoRenameUserMessageId: Schema.NullOr(MessageId),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime),

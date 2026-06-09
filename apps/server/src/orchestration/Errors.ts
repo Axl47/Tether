@@ -1,4 +1,5 @@
-import { SchemaIssue, Schema } from "effect";
+import * as SchemaIssue from "effect/SchemaIssue";
+import * as Schema from "effect/Schema";
 
 import type { ProjectionRepositoryError } from "../persistence/Errors.ts";
 
@@ -6,7 +7,7 @@ export class OrchestrationCommandJsonParseError extends Schema.TaggedErrorClass<
   "OrchestrationCommandJsonParseError",
   {
     detail: Schema.String,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
@@ -18,7 +19,7 @@ export class OrchestrationCommandDecodeError extends Schema.TaggedErrorClass<Orc
   "OrchestrationCommandDecodeError",
   {
     issue: Schema.String,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
@@ -31,7 +32,7 @@ export class OrchestrationCommandInvariantError extends Schema.TaggedErrorClass<
   {
     commandType: Schema.String,
     detail: Schema.String,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
@@ -44,7 +45,7 @@ export class OrchestrationCommandPreviouslyRejectedError extends Schema.TaggedEr
   {
     commandId: Schema.String,
     detail: Schema.String,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
@@ -57,7 +58,7 @@ export class OrchestrationProjectorDecodeError extends Schema.TaggedErrorClass<O
   {
     eventType: Schema.String,
     issue: Schema.String,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
@@ -70,7 +71,7 @@ export class OrchestrationListenerCallbackError extends Schema.TaggedErrorClass<
   {
     listener: Schema.Literals(["read-model", "domain-event"]),
     detail: Schema.String,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
@@ -90,26 +91,9 @@ export type OrchestrationEngineError =
   | OrchestrationCommandJsonParseError
   | OrchestrationCommandDecodeError;
 
-function formatSchemaIssue(error: unknown): string {
-  if (error && typeof error === "object" && "issue" in error) {
-    const issue = (error as { issue?: unknown }).issue;
-    if (SchemaIssue.isIssue(issue)) {
-      try {
-        return SchemaIssue.makeFormatterDefault()(issue);
-      } catch {
-        // Fall through to generic formatting below.
-      }
-    }
-  }
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message;
-  }
-  return String(error);
-}
-
 export function toOrchestrationCommandDecodeError(error: Schema.SchemaError) {
   return new OrchestrationCommandDecodeError({
-    issue: formatSchemaIssue(error),
+    issue: SchemaIssue.makeFormatterDefault()(error.issue),
     cause: error,
   });
 }
@@ -118,7 +102,7 @@ export function toProjectorDecodeError(eventType: string) {
   return (error: Schema.SchemaError): OrchestrationProjectorDecodeError =>
     new OrchestrationProjectorDecodeError({
       eventType,
-      issue: formatSchemaIssue(error),
+      issue: SchemaIssue.makeFormatterDefault()(error.issue),
       cause: error,
     });
 }

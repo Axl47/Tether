@@ -1,37 +1,32 @@
----
-created_at: 2026-04-19T19:21Z
-updated_at: 2026-04-20T09:55Z
----
-
 # Working List
-
-## Pending
-
-- [ ] Re-run the server integration overlap suites in a Vitest environment that uses Node `>=22.16` so the sqlite-backed tests can execute past startup.
 
 ## In Progress
 
-- [~] Prepare user verification for the composer draft selector stabilization follow-up
+No active implementation tasks.
+
+## Pending
+
+- [ ] Manual launch verification from the replay worktree.
 
 ## Done
 
-- [x] Confirm clean `Sync-upstream` worktree and current tip `5ade17e7`
-- [x] Create safety branch `safety/sync-upstream-before-upstream-2026-04-19`
-- [x] Review the prior upstream integration ExecPlan and existing checklist context
-- [x] Write the current upstream integration ExecPlan
-- [x] Fetch upstream `pingdotgg/t3code` main into `refs/remotes/upstream-pingdotgg/main`
-- [x] Merge upstream main into `Sync-upstream`
-- [x] Resolve merge conflicts across server, web, desktop, contracts, and docs
-- [x] Audit the merged tree via targeted typecheck-driven compatibility fixes and `git diff --check`
-- [x] Run targeted overlap suites for server/web units; record the Node `20.19.4` sqlite blocker for server integration suites
-- [x] Run `bun fmt`, `bun -b lint`, and `bun typecheck`
-- [x] Finalize ExecPlan and working list outcomes
-- [x] Capture the post-merge stabilization pass in follow-up commit `316196ef`
-- [x] Fix the provider cache atomic temp-file collision and validate desktop startup no longer shows the rename error
-- [x] Harden root-level shell state subscriptions against several no-op external-store writes in commit `8116cf32`
-- [x] Trace the render loop to controlled open/close handlers in the merged diff panel shell and add no-op guards plus regression coverage
-- [x] Isolate the remaining render loop to `Sidebar` consuming unstable composer draft store snapshots
-- [x] Stabilize composer draft legacy aliasing plus derived id-indexed snapshot builders in `composerDraftStore`
-- [x] Add regression coverage for repeated and unrelated-read snapshot stability in `composerDraftStore.test.ts`
-- [x] Re-run the stubbed browser repro and confirm the `Sidebar` loop no longer appears
-- [x] Run `bun fmt`, `bun -b lint`, and `bun typecheck`
+- [x] Preflight current checkout and confirm clean `main`.
+- [x] Create safety refs for current main and stale upstream.
+- [x] Fetch live upstream into `refs/remotes/upstream-pingdotgg/live-main`.
+- [x] Create sibling worktree at `/Users/axel/Desktop/Code_Projects/Personal/Tether-upstream-replay`.
+- [x] Build replay ledger and create migration tracking files.
+- [x] Replay repo identity and project instructions.
+- [x] Replay Tether desktop/web branding onto upstream's current branding paths.
+- [x] Confirm GPT-5.5 model support is already present in upstream.
+- [x] Confirm git action completion toasts already include commit ids in upstream.
+- [x] Confirm stale stop/interruption handling is already present in upstream provider/orchestration layers.
+- [x] Replay local Tether discovery records using the new EnvironmentAuth/WebSocket ticket flow.
+- [x] Run final verification commands: `vp check`, `vp run typecheck`, `vp run test`, and `git diff --check`.
+- [x] Stage and commit the verified replay bundle.
+
+## Blocked / Notes
+
+- [!] The new upstream base uses pnpm/vp instead of Bun/Turbo. Verification will use upstream's `vp` scripts unless a replayed feature requires restoring Bun tooling.
+- [!] The old custom `/pragma` WebSocket RPC route is deferred. Upstream now has a different auth and server API shape; the migrated branch preserves local discovery records but points them at the standard `/ws` route with a short-lived `wsTicket`.
+- [!] Focused verification required local dependency installation because the replay worktree had no `node_modules` and `vp` was not globally installed.
+- [!] `vp check` passes with nine unrelated existing React nested-component warnings in web/mobile files.

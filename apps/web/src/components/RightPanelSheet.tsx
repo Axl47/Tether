@@ -1,7 +1,6 @@
 import { type ReactNode } from "react";
 
 import { RIGHT_PANEL_SHEET_CLASS_NAME } from "../rightPanelLayout";
-import { shouldApplyControlledOpenChange } from "../lib/controlledOpenState";
 import { Sheet, SheetPopup } from "./ui/sheet";
 
 export function RightPanelSheet(props: {
@@ -13,7 +12,7 @@ export function RightPanelSheet(props: {
     <Sheet
       open={props.open}
       onOpenChange={(open) => {
-        if (shouldApplyControlledOpenChange(props.open, open) && !open) {
+        if (!open) {
           props.onClose();
         }
       }}

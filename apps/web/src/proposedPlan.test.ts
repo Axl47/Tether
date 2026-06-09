@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import {
   buildCollapsedProposedPlanPreviewMarkdown,
@@ -7,7 +7,6 @@ import {
   buildProposedPlanMarkdownFilename,
   proposedPlanTitle,
   resolvePlanFollowUpSubmission,
-  summarizeCollapsedPlan,
   stripDisplayedPlanMarkdown,
 } from "./proposedPlan";
 
@@ -111,25 +110,5 @@ describe("buildProposedPlanMarkdownFilename", () => {
 
   it("falls back to a generic filename when the plan has no heading", () => {
     expect(buildProposedPlanMarkdownFilename("- step 1")).toBe("plan.md");
-  });
-});
-
-describe("summarizeCollapsedPlan", () => {
-  it("returns the first sentence of the explanation", () => {
-    expect(
-      summarizeCollapsedPlan({
-        explanation: "Break this into phases. Then validate each phase.",
-        steps: [],
-      }),
-    ).toBe("Break this into phases.");
-  });
-
-  it("falls back to the first non-empty step when there is no explanation", () => {
-    expect(
-      summarizeCollapsedPlan({
-        explanation: "",
-        steps: [{ step: "Initialize the plan state" }],
-      }),
-    ).toBe("Initialize the plan state");
   });
 });

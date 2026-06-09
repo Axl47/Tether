@@ -1,4 +1,13 @@
-import { Cause, Deferred, Effect, Exit, Layer, Queue, Ref, Scope, Context, Stream } from "effect";
+import * as Cause from "effect/Cause";
+import * as Deferred from "effect/Deferred";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
+import * as Queue from "effect/Queue";
+import * as Ref from "effect/Ref";
+import * as Scope from "effect/Scope";
+import * as Context from "effect/Context";
+import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import * as EffectAcpClient from "effect-acp/client";
 import * as EffectAcpErrors from "effect-acp/errors";
@@ -17,11 +26,15 @@ import {
   type AcpToolCallState,
 } from "./AcpRuntimeModel.ts";
 
+function formatConfigOptionValue(value: string | boolean): string {
+  return JSON.stringify(value);
+}
+
 export interface AcpSpawnInput {
   readonly command: string;
   readonly args: ReadonlyArray<string>;
   readonly cwd?: string;
-  readonly env?: Readonly<Record<string, string>>;
+  readonly env?: NodeJS.ProcessEnv;
 }
 
 export interface AcpSessionRuntimeOptions {
@@ -92,6 +105,9 @@ export interface AcpSessionRuntimeShape {
     value: string | boolean,
   ) => Effect.Effect<EffectAcpSchema.SetSessionConfigOptionResponse, EffectAcpErrors.AcpError>;
   readonly setModel: (model: string) => Effect.Effect<void, EffectAcpErrors.AcpError>;
+  readonly setSessionModel: (
+    modelId: string,
+  ) => Effect.Effect<EffectAcpSchema.SetSessionModelResponse, EffectAcpErrors.AcpError>;
   readonly request: (
     method: string,
     payload: unknown,
@@ -248,7 +264,7 @@ const makeAcpSessionRuntime = (
       }
       return yield* new EffectAcpErrors.AcpTransportError({
         detail: "ACP session runtime has not been started",
-        cause: new Error("ACP session runtime has not been started"),
+        cause: "ACP session runtime has not been started",
       });
     });
 
@@ -267,7 +283,7 @@ const makeAcpSessionRuntime = (
           }
           return yield* new EffectAcpErrors.AcpRequestError({
             code: -32602,
-            errorMessage: `Invalid value ${JSON.stringify(value)} for session config option "${configOption.id}": expected boolean`,
+            errorMessage: `Invalid value ${formatConfigOptionValue(value)} for session config option "${configOption.id}": expected boolean`,
             data: {
               configId: configOption.id,
               expectedType: "boolean",
@@ -278,7 +294,7 @@ const makeAcpSessionRuntime = (
         if (typeof value !== "string") {
           return yield* new EffectAcpErrors.AcpRequestError({
             code: -32602,
-            errorMessage: `Invalid value ${JSON.stringify(value)} for session config option "${configOption.id}": expected string`,
+            errorMessage: `Invalid value ${formatConfigOptionValue(value)} for session config option "${configOption.id}": expected string`,
             data: {
               configId: configOption.id,
               expectedType: "string",
@@ -292,7 +308,7 @@ const makeAcpSessionRuntime = (
         }
         return yield* new EffectAcpErrors.AcpRequestError({
           code: -32602,
-          errorMessage: `Invalid value ${JSON.stringify(value)} for session config option "${configOption.id}": expected one of ${allowedValues.join(", ")}`,
+          errorMessage: `Invalid value ${formatConfigOptionValue(value)} for session config option "${configOption.id}": expected one of ${allowedValues.join(", ")}`,
           data: {
             configId: configOption.id,
             allowedValues,
@@ -532,6 +548,20 @@ const makeAcpSessionRuntime = (
         getStartedState.pipe(
           Effect.flatMap((started) => setConfigOption(started.modelConfigId ?? "model", model)),
           Effect.asVoid,
+        ),
+      setSessionModel: (modelId) =>
+        getStartedState.pipe(
+          Effect.flatMap((started) => {
+            const requestPayload = {
+              sessionId: started.sessionId,
+              modelId,
+            } satisfies EffectAcpSchema.SetSessionModelRequest;
+            return runLoggedRequest(
+              "session/set_model",
+              requestPayload,
+              acp.agent.setSessionModel(requestPayload),
+            );
+          }),
         ),
       request: (method, payload) =>
         runLoggedRequest(method, payload, acp.raw.request(method, payload)),

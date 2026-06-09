@@ -1,11 +1,13 @@
 import { getKnownEnvironmentHttpBaseUrl } from "@t3tools/client-runtime";
 import type {
-  AuthSessionRole,
+  AuthEnvironmentScope,
   EnvironmentId,
   ExecutionEnvironmentDescriptor,
   PersistedSavedEnvironmentRecord,
   ServerConfig,
 } from "@t3tools/contracts";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import { create } from "zustand";
 
 import { ensureLocalApi } from "../../localApi";
@@ -18,7 +20,29 @@ export interface SavedEnvironmentRecord {
   readonly httpBaseUrl: string;
   readonly createdAt: string;
   readonly lastConnectedAt: string | null;
+  readonly desktopSsh?: PersistedSavedEnvironmentRecord["desktopSsh"];
+  readonly relayManaged?: PersistedSavedEnvironmentRecord["relayManaged"];
 }
+
+export const SavedEnvironmentCredential = Schema.Union([
+  Schema.Struct({
+    version: Schema.Literal(1),
+    method: Schema.Literal("bearer"),
+    token: Schema.String,
+  }),
+  Schema.Struct({
+    version: Schema.Literal(1),
+    method: Schema.Literal("dpop"),
+    accessToken: Schema.String,
+  }),
+]);
+export type SavedEnvironmentCredential = typeof SavedEnvironmentCredential.Type;
+
+const SavedEnvironmentCredentialJson = Schema.fromJsonString(SavedEnvironmentCredential);
+const decodeSavedEnvironmentCredentialJson = Schema.decodeUnknownOption(
+  SavedEnvironmentCredentialJson,
+);
+const encodeSavedEnvironmentCredentialJson = Schema.encodeSync(SavedEnvironmentCredentialJson);
 
 interface SavedEnvironmentRegistryState {
   readonly byId: Record<EnvironmentId, SavedEnvironmentRecord>;
@@ -28,13 +52,14 @@ interface SavedEnvironmentRegistryStore extends SavedEnvironmentRegistryState {
   readonly upsert: (record: SavedEnvironmentRecord) => void;
   readonly remove: (environmentId: EnvironmentId) => void;
   readonly markConnected: (environmentId: EnvironmentId, connectedAt: string) => void;
+  readonly rename: (environmentId: EnvironmentId, label: string) => void;
   readonly reset: () => void;
 }
 
 let savedEnvironmentRegistryHydrated = false;
 let savedEnvironmentRegistryHydrationPromise: Promise<void> | null = null;
 
-function toPersistedSavedEnvironmentRecord(
+export function toPersistedSavedEnvironmentRecord(
   record: SavedEnvironmentRecord,
 ): PersistedSavedEnvironmentRecord {
   return {
@@ -44,6 +69,8 @@ function toPersistedSavedEnvironmentRecord(
     wsBaseUrl: record.wsBaseUrl,
     createdAt: record.createdAt,
     lastConnectedAt: record.lastConnectedAt,
+    ...(record.desktopSsh ? { desktopSsh: record.desktopSsh } : {}),
+    ...(record.relayManaged ? { relayManaged: record.relayManaged } : {}),
   };
 }
 
@@ -51,46 +78,6 @@ function valuesOfSavedEnvironmentRegistry(
   byId: Record<EnvironmentId, SavedEnvironmentRecord>,
 ): ReadonlyArray<SavedEnvironmentRecord> {
   return Object.values(byId) as ReadonlyArray<SavedEnvironmentRecord>;
-}
-
-function areSavedEnvironmentRecordsEqual(
-  left: SavedEnvironmentRecord | undefined,
-  right: SavedEnvironmentRecord | undefined,
-): boolean {
-  if (left === right) {
-    return true;
-  }
-  if (!left || !right) {
-    return false;
-  }
-
-  return (
-    left.environmentId === right.environmentId &&
-    left.label === right.label &&
-    left.wsBaseUrl === right.wsBaseUrl &&
-    left.httpBaseUrl === right.httpBaseUrl &&
-    left.createdAt === right.createdAt &&
-    left.lastConnectedAt === right.lastConnectedAt
-  );
-}
-
-function areSavedEnvironmentRegistryStatesEqual(
-  left: Record<EnvironmentId, SavedEnvironmentRecord>,
-  right: Record<EnvironmentId, SavedEnvironmentRecord>,
-): boolean {
-  const leftEntries = Object.entries(left);
-  const rightEntries = Object.entries(right);
-  if (leftEntries.length !== rightEntries.length) {
-    return false;
-  }
-
-  for (const [environmentId, leftRecord] of leftEntries) {
-    if (!areSavedEnvironmentRecordsEqual(leftRecord, right[environmentId as EnvironmentId])) {
-      return false;
-    }
-  }
-
-  return true;
 }
 
 function persistSavedEnvironmentRegistryState(
@@ -116,15 +103,11 @@ function replaceSavedEnvironmentRegistryState(
 ): void {
   const currentById = useSavedEnvironmentRegistryStore.getState().byId;
   const hydratedById = Object.fromEntries(records.map((record) => [record.environmentId, record]));
-  const nextById = {
-    ...hydratedById,
-    ...currentById,
-  };
-  if (areSavedEnvironmentRegistryStatesEqual(currentById, nextById)) {
-    return;
-  }
   useSavedEnvironmentRegistryStore.setState({
-    byId: nextById,
+    byId: {
+      ...hydratedById,
+      ...currentById,
+    },
   });
 }
 
@@ -161,10 +144,6 @@ export const useSavedEnvironmentRegistryStore = create<SavedEnvironmentRegistryS
   byId: {},
   upsert: (record) =>
     set((state) => {
-      const existing = state.byId[record.environmentId];
-      if (areSavedEnvironmentRecordsEqual(existing, record)) {
-        return state;
-      }
       const byId = {
         ...state.byId,
         [record.environmentId]: record,
@@ -183,7 +162,7 @@ export const useSavedEnvironmentRegistryStore = create<SavedEnvironmentRegistryS
   markConnected: (environmentId, connectedAt) =>
     set((state) => {
       const existing = state.byId[environmentId];
-      if (!existing || existing.lastConnectedAt === connectedAt) {
+      if (!existing) {
         return state;
       }
       const byId = {
@@ -191,6 +170,23 @@ export const useSavedEnvironmentRegistryStore = create<SavedEnvironmentRegistryS
         [environmentId]: {
           ...existing,
           lastConnectedAt: connectedAt,
+        },
+      };
+      persistSavedEnvironmentRegistryState(byId);
+      return { byId };
+    }),
+  rename: (environmentId, label) =>
+    set((state) => {
+      const existing = state.byId[environmentId];
+      const nextLabel = label.trim();
+      if (!existing || nextLabel.length === 0 || existing.label === nextLabel) {
+        return state;
+      }
+      const byId = {
+        ...state.byId,
+        [environmentId]: {
+          ...existing,
+          label: nextLabel,
         },
       };
       persistSavedEnvironmentRegistryState(byId);
@@ -278,6 +274,31 @@ export async function readSavedEnvironmentBearerToken(
   return ensureLocalApi().persistence.getSavedEnvironmentSecret(environmentId);
 }
 
+export async function readSavedEnvironmentCredential(
+  environmentId: EnvironmentId,
+): Promise<SavedEnvironmentCredential | null> {
+  const secret = await ensureLocalApi().persistence.getSavedEnvironmentSecret(environmentId);
+  if (!secret) {
+    return null;
+  }
+  const decoded = decodeSavedEnvironmentCredentialJson(secret);
+  if (Option.isSome(decoded)) {
+    return decoded.value;
+  }
+  // Legacy bearer secrets were stored directly as strings.
+  return { version: 1, method: "bearer", token: secret };
+}
+
+export async function writeSavedEnvironmentCredential(
+  environmentId: EnvironmentId,
+  credential: SavedEnvironmentCredential,
+): Promise<boolean> {
+  return ensureLocalApi().persistence.setSavedEnvironmentSecret(
+    environmentId,
+    encodeSavedEnvironmentCredentialJson(credential),
+  );
+}
+
 export async function writeSavedEnvironmentBearerToken(
   environmentId: EnvironmentId,
   bearerToken: string,
@@ -300,7 +321,7 @@ export interface SavedEnvironmentRuntimeState {
   readonly authState: SavedEnvironmentAuthState;
   readonly lastError: string | null;
   readonly lastErrorAt: string | null;
-  readonly role: AuthSessionRole | null;
+  readonly scopes: ReadonlyArray<AuthEnvironmentScope> | null;
   readonly descriptor: ExecutionEnvironmentDescriptor | null;
   readonly serverConfig: ServerConfig | null;
   readonly connectedAt: string | null;
@@ -323,7 +344,7 @@ const DEFAULT_SAVED_ENVIRONMENT_RUNTIME_STATE: SavedEnvironmentRuntimeState = Ob
   authState: "unknown",
   lastError: null,
   lastErrorAt: null,
-  role: null,
+  scopes: null,
   descriptor: null,
   serverConfig: null,
   connectedAt: null,
@@ -334,23 +355,6 @@ function createDefaultSavedEnvironmentRuntimeState(): SavedEnvironmentRuntimeSta
   return {
     ...DEFAULT_SAVED_ENVIRONMENT_RUNTIME_STATE,
   };
-}
-
-function areSavedEnvironmentRuntimeStatesEqual(
-  left: SavedEnvironmentRuntimeState,
-  right: SavedEnvironmentRuntimeState,
-): boolean {
-  return (
-    left.connectionState === right.connectionState &&
-    left.authState === right.authState &&
-    left.lastError === right.lastError &&
-    left.lastErrorAt === right.lastErrorAt &&
-    left.role === right.role &&
-    left.descriptor === right.descriptor &&
-    left.serverConfig === right.serverConfig &&
-    left.connectedAt === right.connectedAt &&
-    left.disconnectedAt === right.disconnectedAt
-  );
 }
 
 export const useSavedEnvironmentRuntimeStore = create<SavedEnvironmentRuntimeStoreState>()(
@@ -369,23 +373,15 @@ export const useSavedEnvironmentRuntimeStore = create<SavedEnvironmentRuntimeSto
         };
       }),
     patch: (environmentId, patch) =>
-      set((state) => {
-        const currentEntry =
-          state.byId[environmentId] ?? createDefaultSavedEnvironmentRuntimeState();
-        const nextEntry = {
-          ...currentEntry,
-          ...patch,
-        };
-        if (areSavedEnvironmentRuntimeStatesEqual(currentEntry, nextEntry)) {
-          return state;
-        }
-        return {
-          byId: {
-            ...state.byId,
-            [environmentId]: nextEntry,
+      set((state) => ({
+        byId: {
+          ...state.byId,
+          [environmentId]: {
+            ...(state.byId[environmentId] ?? createDefaultSavedEnvironmentRuntimeState()),
+            ...patch,
           },
-        };
-      }),
+        },
+      })),
     clear: (environmentId) =>
       set((state) => {
         const { [environmentId]: _removed, ...remaining } = state.byId;

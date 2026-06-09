@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { scopeThreadRef } from "@t3tools/client-runtime";
 import { ThreadId } from "@t3tools/contracts";
 import { DraftId } from "./composerDraftStore";
@@ -35,19 +35,6 @@ describe("threadRoutes", () => {
     expect(resolveThreadRouteRef({ threadId: "thread-1" })).toBeNull();
   });
 
-  it("reuses the same scoped ref for identical route params", () => {
-    const first = resolveThreadRouteRef({
-      environmentId: "env-1",
-      threadId: "thread-1",
-    });
-    const second = resolveThreadRouteRef({
-      environmentId: "env-1",
-      threadId: "thread-1",
-    });
-
-    expect(first).toBe(second);
-  });
-
   it("builds canonical draft route params from a draft id", () => {
     expect(buildDraftThreadRouteParams(DraftId.make("draft-1"))).toEqual({
       draftId: "draft-1",
@@ -76,25 +63,5 @@ describe("threadRoutes", () => {
       kind: "draft",
       draftId: "draft-1",
     });
-  });
-
-  it("reuses the same route target for identical params", () => {
-    const firstServerTarget = resolveThreadRouteTarget({
-      environmentId: "env-1",
-      threadId: "thread-1",
-    });
-    const secondServerTarget = resolveThreadRouteTarget({
-      environmentId: "env-1",
-      threadId: "thread-1",
-    });
-    const firstDraftTarget = resolveThreadRouteTarget({
-      draftId: "draft-1",
-    });
-    const secondDraftTarget = resolveThreadRouteTarget({
-      draftId: "draft-1",
-    });
-
-    expect(firstServerTarget).toBe(secondServerTarget);
-    expect(firstDraftTarget).toBe(secondDraftTarget);
   });
 });

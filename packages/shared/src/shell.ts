@@ -1,10 +1,11 @@
-import * as OS from "node:os";
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeOS from "node:os";
 import { execFileSync } from "node:child_process";
 import { accessSync, constants, statSync } from "node:fs";
 import { extname, join } from "node:path";
 
-const PATH_CAPTURE_START = "__TETHER_PATH_START__";
-const PATH_CAPTURE_END = "__TETHER_PATH_END__";
+const PATH_CAPTURE_START = "__T3CODE_PATH_START__";
+const PATH_CAPTURE_END = "__T3CODE_PATH_END__";
 const SHELL_ENV_NAME_PATTERN = /^[A-Z0-9_]+$/;
 const WINDOWS_PATH_DELIMITER = ";";
 const POSIX_PATH_DELIMITER = ":";
@@ -32,7 +33,7 @@ function trimNonEmpty(value: string | null | undefined): string | undefined {
 
 function readUserLoginShell(): string | undefined {
   try {
-    return trimNonEmpty(OS.userInfo().shell);
+    return trimNonEmpty(NodeOS.userInfo().shell);
   } catch {
     return undefined;
   }
@@ -75,17 +76,7 @@ export function readPathFromLoginShell(
   shell: string,
   execFile: ExecFileSyncLike = execFileSync,
 ): string | undefined {
-  const output = execFile(shell, ["-ilc", buildEnvironmentCaptureCommand(["PATH"])], {
-    encoding: "utf8",
-    timeout: 5000,
-  });
-
-  const legacyPath = extractPathFromShellOutput(output);
-  if (legacyPath !== null) {
-    return legacyPath;
-  }
-
-  return extractEnvironmentValue(output, "PATH");
+  return readEnvironmentFromLoginShell(shell, ["PATH"], execFile).PATH;
 }
 
 export function readPathFromLaunchctl(
@@ -143,13 +134,9 @@ function buildEnvironmentCaptureCommand(names: ReadonlyArray<string>): string {
       }
 
       return [
-        name === "PATH"
-          ? `printf '%s\n' '${PATH_CAPTURE_START}'`
-          : `printf '%s\n' '${envCaptureStart(name)}'`,
+        `printf '%s\\n' '${envCaptureStart(name)}'`,
         `printenv ${name} || true`,
-        name === "PATH"
-          ? `printf '%s\n' '${PATH_CAPTURE_END}'`
-          : `printf '%s\n' '${envCaptureEnd(name)}'`,
+        `printf '%s\\n' '${envCaptureEnd(name)}'`,
       ].join("; ");
     })
     .join("; ");
@@ -213,14 +200,6 @@ export const readEnvironmentFromLoginShell: ShellEnvironmentReader = (
 
   const environment: Partial<Record<string, string>> = {};
   for (const name of names) {
-    if (name === "PATH") {
-      const legacyPath = extractPathFromShellOutput(output);
-      if (legacyPath !== null) {
-        environment[name] = legacyPath;
-        continue;
-      }
-    }
-
     const value = extractEnvironmentValue(output, name);
     if (value !== undefined) {
       environment[name] = value;
@@ -342,11 +321,12 @@ function resolveWindowsPathExtensions(env: NodeJS.ProcessEnv): ReadonlyArray<str
   const fallback = [".COM", ".EXE", ".BAT", ".CMD"];
   if (!rawValue) return fallback;
 
-  const parsed = rawValue
-    .split(";")
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0)
-    .map((entry) => (entry.startsWith(".") ? entry.toUpperCase() : `.${entry.toUpperCase()}`));
+  const parsed: string[] = [];
+  for (const entry of rawValue.split(";")) {
+    const trimmed = entry.trim();
+    if (trimmed.length === 0) continue;
+    parsed.push(trimmed.startsWith(".") ? trimmed.toUpperCase() : `.${trimmed.toUpperCase()}`);
+  }
   return parsed.length > 0 ? Array.from(new Set(parsed)) : fallback;
 }
 
@@ -398,36 +378,50 @@ function isExecutableFile(
   }
 }
 
-export function isCommandAvailable(
+export function resolveCommandPath(
   command: string,
   options: CommandAvailabilityOptions = {},
-): boolean {
+): string | null {
   const platform = options.platform ?? process.platform;
   const env = options.env ?? process.env;
   const windowsPathExtensions = platform === "win32" ? resolveWindowsPathExtensions(env) : [];
   const commandCandidates = resolveCommandCandidates(command, platform, windowsPathExtensions);
 
   if (command.includes("/") || command.includes("\\")) {
-    return commandCandidates.some((candidate) =>
-      isExecutableFile(candidate, platform, windowsPathExtensions),
-    );
+    for (const candidate of commandCandidates) {
+      if (isExecutableFile(candidate, platform, windowsPathExtensions)) {
+        return candidate;
+      }
+    }
+    return null;
   }
 
   const pathValue = resolvePathEnvironmentVariable(env);
-  if (pathValue.length === 0) return false;
-  const pathEntries = pathValue
-    .split(pathDelimiterForPlatform(platform))
-    .map((entry) => stripWrappingQuotes(entry.trim()))
-    .filter((entry) => entry.length > 0);
+  if (pathValue.length === 0) return null;
+  const pathEntries: string[] = [];
+  for (const entry of pathValue.split(pathDelimiterForPlatform(platform))) {
+    const pathEntry = stripWrappingQuotes(entry.trim());
+    if (pathEntry.length > 0) {
+      pathEntries.push(pathEntry);
+    }
+  }
 
   for (const pathEntry of pathEntries) {
     for (const candidate of commandCandidates) {
-      if (isExecutableFile(join(pathEntry, candidate), platform, windowsPathExtensions)) {
-        return true;
+      const candidatePath = join(pathEntry, candidate);
+      if (isExecutableFile(candidatePath, platform, windowsPathExtensions)) {
+        return candidatePath;
       }
     }
   }
-  return false;
+  return null;
+}
+
+export function isCommandAvailable(
+  command: string,
+  options: CommandAvailabilityOptions = {},
+): boolean {
+  return resolveCommandPath(command, options) !== null;
 }
 
 export function resolveKnownWindowsCliDirs(env: NodeJS.ProcessEnv): ReadonlyArray<string> {

@@ -3,15 +3,21 @@ import {
   type LocalApi,
   type PersistedSavedEnvironmentRecord,
 } from "@t3tools/contracts";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
+  readSavedEnvironmentCredential,
   resetSavedEnvironmentRegistryStoreForTests,
   resetSavedEnvironmentRuntimeStoreForTests,
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
   waitForSavedEnvironmentRegistryHydration,
+  writeSavedEnvironmentCredential,
 } from "./catalog";
+
+let resolveRegistryRead: () => void = () => {
+  throw new Error("Registry read resolver was not initialized.");
+};
 
 describe("environment runtime catalog stores", () => {
   beforeEach(async () => {
@@ -74,40 +80,45 @@ describe("environment runtime catalog stores", () => {
     expect(useSavedEnvironmentRuntimeStore.getState().byId).toEqual({});
   });
 
-  it("does not replace a saved environment record when the next value is unchanged", () => {
-    const environmentId = EnvironmentId.make("environment-1");
-    const record = {
-      environmentId,
-      label: "Remote environment",
-      httpBaseUrl: "https://remote.example.com/",
-      wsBaseUrl: "wss://remote.example.com/",
-      createdAt: "2026-04-09T00:00:00.000Z",
-      lastConnectedAt: null,
-    } as const;
-
-    useSavedEnvironmentRegistryStore.getState().upsert(record);
-    const firstState = useSavedEnvironmentRegistryStore.getState().byId;
-
-    useSavedEnvironmentRegistryStore.getState().upsert(record);
-
-    expect(useSavedEnvironmentRegistryStore.getState().byId).toBe(firstState);
-  });
-
-  it("does not replace a saved environment runtime entry when a patch is a no-op", () => {
-    const environmentId = EnvironmentId.make("environment-1");
-
-    useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {
-      connectionState: "connected",
-      connectedAt: "2026-04-09T00:00:00.000Z",
+  it("decodes legacy bearer secrets and writes versioned DPoP credentials", async () => {
+    let storedSecret: string | null = "legacy-bearer-token";
+    vi.stubGlobal("window", {
+      nativeApi: {
+        persistence: {
+          getClientSettings: async () => null,
+          setClientSettings: async () => undefined,
+          getSavedEnvironmentRegistry: async () => [],
+          setSavedEnvironmentRegistry: async () => undefined,
+          getSavedEnvironmentSecret: async () => storedSecret,
+          setSavedEnvironmentSecret: async (_environmentId, secret) => {
+            storedSecret = secret;
+            return true;
+          },
+          removeSavedEnvironmentSecret: async () => undefined,
+        },
+      } satisfies Pick<LocalApi, "persistence">,
     });
-    const firstEntry = useSavedEnvironmentRuntimeStore.getState().byId[environmentId];
+    const { __resetLocalApiForTests } = await import("../../localApi");
+    await __resetLocalApiForTests();
+    const environmentId = EnvironmentId.make("environment-1");
 
-    useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {
-      connectionState: "connected",
-      connectedAt: "2026-04-09T00:00:00.000Z",
+    await expect(readSavedEnvironmentCredential(environmentId)).resolves.toEqual({
+      version: 1,
+      method: "bearer",
+      token: "legacy-bearer-token",
     });
-
-    expect(useSavedEnvironmentRuntimeStore.getState().byId[environmentId]).toBe(firstEntry);
+    await expect(
+      writeSavedEnvironmentCredential(environmentId, {
+        version: 1,
+        method: "dpop",
+        accessToken: "managed-dpop-access-token",
+      }),
+    ).resolves.toBe(true);
+    await expect(readSavedEnvironmentCredential(environmentId)).resolves.toEqual({
+      version: 1,
+      method: "dpop",
+      accessToken: "managed-dpop-access-token",
+    });
   });
 
   it("does not throw when local api lookup fails during registry persistence", async () => {
@@ -131,7 +142,7 @@ describe("environment runtime catalog stores", () => {
   });
 
   it("does not let stale hydration overwrite records added while hydration is in flight", async () => {
-    let resolveRegistryRead: () => void = () => {
+    resolveRegistryRead = () => {
       throw new Error("Registry read resolver was not initialized.");
     };
 

@@ -1,7 +1,9 @@
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
-import { ConfigProvider, Effect, Layer } from "effect";
+import * as ConfigProvider from "effect/ConfigProvider";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as HttpServer from "effect/unstable/http/HttpServer";
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
@@ -45,10 +47,10 @@ it.layer(NodeServices.layer)("AnalyticsService test", (it) => {
       const telemetryLayer = AnalyticsServiceLayerLive.pipe(Layer.provideMerge(serverConfigLayer));
       const configLayer = ConfigProvider.layer(
         ConfigProvider.fromUnknown({
-          TETHER_TELEMETRY_ENABLED: true,
-          TETHER_POSTHOG_KEY: "phc_test_key",
-          TETHER_POSTHOG_HOST: "",
-          TETHER_TELEMETRY_FLUSH_BATCH_SIZE: 20,
+          T3CODE_TELEMETRY_ENABLED: true,
+          T3CODE_POSTHOG_KEY: "phc_test_key",
+          T3CODE_POSTHOG_HOST: "",
+          T3CODE_TELEMETRY_FLUSH_BATCH_SIZE: 20,
         }),
       );
       const batchServerLayer = HttpServer.serve(
@@ -60,7 +62,7 @@ it.layer(NodeServices.layer)("AnalyticsService test", (it) => {
 
           const payload = yield* request.json.pipe(
             Effect.map((body) => body as RecordedBatchRequest["body"]),
-            Effect.catch(() => Effect.succeed(null)),
+            Effect.orElseSucceed(() => null),
           );
 
           capturedRequests.push({ path: request.url, body: payload });
@@ -87,11 +89,8 @@ it.layer(NodeServices.layer)("AnalyticsService test", (it) => {
       }).pipe(Effect.provide(runtimeLayer));
 
       const batchRequests = capturedRequests.filter(
-        (
-          request,
-        ): request is RecordedBatchRequest & {
-          readonly body: RecordedBatchBody;
-        } => Array.isArray(request.body?.batch),
+        (request): request is RecordedBatchRequest & { readonly body: RecordedBatchBody } =>
+          Array.isArray(request.body?.batch),
       );
       assert.equal(batchRequests.length, 3);
       assert.equal(

@@ -4,13 +4,15 @@ import {
   type KnownEnvironment,
 } from "@t3tools/client-runtime";
 import type { EnvironmentId, ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
+import * as Effect from "effect/Effect";
+import { HttpClientError } from "effect/unstable/http";
 import { create } from "zustand";
 
 import { BootstrapHttpError, retryTransientBootstrap } from "./auth";
+import { PrimaryEnvironmentHttpClient } from "./httpClient";
 
-import { readPrimaryEnvironmentTarget, resolvePrimaryEnvironmentHttpUrl } from "./target";
-
-const SERVER_ENVIRONMENT_DESCRIPTOR_PATH = "/.well-known/t3/environment";
+import { runPrimaryHttp } from "../../lib/runtime";
+import { readPrimaryEnvironmentTarget } from "./target";
 
 interface PrimaryEnvironmentBootstrapState {
   readonly descriptor: ExecutionEnvironmentDescriptor | null;
@@ -25,27 +27,6 @@ const usePrimaryEnvironmentBootstrapStore = create<PrimaryEnvironmentBootstrapSt
 }));
 
 let primaryEnvironmentDescriptorPromise: Promise<ExecutionEnvironmentDescriptor> | null = null;
-
-function areExecutionEnvironmentDescriptorsEqual(
-  left: ExecutionEnvironmentDescriptor | null,
-  right: ExecutionEnvironmentDescriptor | null,
-): boolean {
-  if (left === right) {
-    return true;
-  }
-  if (left === null || right === null) {
-    return false;
-  }
-
-  return (
-    left.environmentId === right.environmentId &&
-    left.label === right.label &&
-    left.serverVersion === right.serverVersion &&
-    left.platform.os === right.platform.os &&
-    left.platform.arch === right.platform.arch &&
-    left.capabilities.repositoryIdentity === right.capabilities.repositoryIdentity
-  );
-}
 
 function createPrimaryKnownEnvironment(input: {
   readonly source: KnownEnvironment["source"];
@@ -69,17 +50,22 @@ function createPrimaryKnownEnvironment(input: {
 
 async function fetchPrimaryEnvironmentDescriptor(): Promise<ExecutionEnvironmentDescriptor> {
   return retryTransientBootstrap(async () => {
-    const response = await fetch(
-      resolvePrimaryEnvironmentHttpUrl(SERVER_ENVIRONMENT_DESCRIPTOR_PATH),
-    );
-    if (!response.ok) {
+    let descriptor: ExecutionEnvironmentDescriptor;
+    try {
+      descriptor = await runPrimaryHttp(
+        PrimaryEnvironmentHttpClient.pipe(Effect.flatMap((client) => client.metadata.descriptor())),
+      );
+    } catch (error) {
+      const status =
+        HttpClientError.isHttpClientError(error) && error.response !== undefined
+          ? error.response.status
+          : 500;
       throw new BootstrapHttpError({
-        message: `Failed to load server environment descriptor (${response.status}).`,
-        status: response.status,
+        message: `Failed to load server environment descriptor (${status}).`,
+        status,
       });
     }
 
-    const descriptor = (await response.json()) as ExecutionEnvironmentDescriptor;
     writePrimaryEnvironmentDescriptor(descriptor);
     return descriptor;
   });
@@ -96,10 +82,6 @@ export function usePrimaryEnvironmentId(): EnvironmentId | null {
 export function writePrimaryEnvironmentDescriptor(
   descriptor: ExecutionEnvironmentDescriptor | null,
 ): void {
-  const currentDescriptor = readPrimaryEnvironmentDescriptor();
-  if (areExecutionEnvironmentDescriptorsEqual(currentDescriptor, descriptor)) {
-    return;
-  }
   usePrimaryEnvironmentBootstrapStore.getState().setDescriptor(descriptor);
 }
 

@@ -17,7 +17,6 @@ import {
   stripDiffSearchParams,
 } from "../diffRouteSearch";
 import { useMediaQuery } from "../hooks/useMediaQuery";
-import { shouldApplyControlledOpenChange } from "../lib/controlledOpenState";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import { selectEnvironmentState, selectThreadExistsByRef, useStore } from "../store";
 import { createThreadSelectorByRef } from "../storeSelectors";
@@ -27,8 +26,9 @@ import { Sidebar, SidebarInset, SidebarProvider, SidebarRail } from "~/component
 
 const DiffPanel = lazy(() => import("../components/DiffPanel"));
 const DIFF_INLINE_SIDEBAR_WIDTH_STORAGE_KEY = "chat_diff_sidebar_width";
-const DIFF_INLINE_DEFAULT_WIDTH = "clamp(28rem,48vw,44rem)";
-const DIFF_INLINE_SIDEBAR_MIN_WIDTH = 26 * 16;
+const DIFF_INLINE_DEFAULT_WIDTH = "clamp(24rem,34vw,36rem)";
+const DIFF_INLINE_SIDEBAR_MIN_WIDTH = 22 * 16;
+const DIFF_INLINE_SIDEBAR_MAX_WIDTH = 256 * 16;
 const COMPOSER_COMPACT_MIN_LEFT_CONTROLS_WIDTH_PX = 208;
 
 const DiffLoadingFallback = (props: { mode: DiffPanelMode }) => {
@@ -58,16 +58,13 @@ const DiffPanelInlineSidebar = (props: {
   const { diffOpen, onCloseDiff, onOpenDiff, renderDiffContent } = props;
   const onOpenChange = useCallback(
     (open: boolean) => {
-      if (!shouldApplyControlledOpenChange(diffOpen, open)) {
-        return;
-      }
       if (open) {
         onOpenDiff();
         return;
       }
       onCloseDiff();
     },
-    [diffOpen, onCloseDiff, onOpenDiff],
+    [onCloseDiff, onOpenDiff],
   );
   const shouldAcceptInlineSidebarWidth = useCallback(
     ({ nextWidth, wrapper }: { nextWidth: number; wrapper: HTMLElement }) => {
@@ -128,6 +125,7 @@ const DiffPanelInlineSidebar = (props: {
         collapsible="offcanvas"
         className="border-l border-border bg-card text-foreground"
         resizable={{
+          maxWidth: DIFF_INLINE_SIDEBAR_MAX_WIDTH,
           minWidth: DIFF_INLINE_SIDEBAR_MIN_WIDTH,
           shouldAcceptWidth: shouldAcceptInlineSidebarWidth,
           storageKey: DIFF_INLINE_SIDEBAR_WIDTH_STORAGE_KEY,
@@ -145,9 +143,7 @@ function ChatThreadRouteView() {
   const threadRef = Route.useParams({
     select: (params) => resolveThreadRouteRef(params),
   });
-  const diffSearch = Route.useSearch({
-    select: (search) => parseDiffRouteSearch(search),
-  });
+  const search = Route.useSearch();
   const bootstrapComplete = useStore(
     (store) => selectEnvironmentState(store, threadRef?.environmentId ?? null).bootstrapComplete,
   );
@@ -171,7 +167,7 @@ function ChatThreadRouteView() {
   const routeThreadExists = threadExists || draftThreadExists;
   const serverThreadStarted = threadHasStarted(serverThread);
   const environmentHasAnyThreads = environmentHasServerThreads || environmentHasDraftThreads;
-  const diffOpen = diffSearch.diff === "1";
+  const diffOpen = search.diff === "1";
   const shouldUseDiffSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const currentThreadKey = threadRef ? `${threadRef.environmentId}:${threadRef.threadId}` : null;
   const [diffPanelMountState, setDiffPanelMountState] = useState(() => ({
@@ -194,17 +190,17 @@ function ChatThreadRouteView() {
     });
   }, [currentThreadKey]);
   const closeDiff = useCallback(() => {
-    if (!threadRef || !diffOpen) {
+    if (!threadRef) {
       return;
     }
     void navigate({
       to: "/$environmentId/$threadId",
       params: buildThreadRouteParams(threadRef),
-      search: () => ({}),
+      search: { diff: undefined },
     });
-  }, [diffOpen, navigate, threadRef]);
+  }, [navigate, threadRef]);
   const openDiff = useCallback(() => {
-    if (!threadRef || diffOpen) {
+    if (!threadRef) {
       return;
     }
     markDiffOpened();
@@ -216,7 +212,7 @@ function ChatThreadRouteView() {
         return { ...rest, diff: "1" };
       },
     });
-  }, [diffOpen, markDiffOpened, navigate, threadRef]);
+  }, [markDiffOpened, navigate, threadRef]);
 
   useEffect(() => {
     if (!threadRef || !bootstrapComplete) {
@@ -244,7 +240,7 @@ function ChatThreadRouteView() {
   if (!shouldUseDiffSheet) {
     return (
       <>
-        <SidebarInset className="h-dvh  min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
+        <SidebarInset className="h-svh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground md:h-dvh">
           <ChatView
             environmentId={threadRef.environmentId}
             threadId={threadRef.threadId}
@@ -265,7 +261,7 @@ function ChatThreadRouteView() {
 
   return (
     <>
-      <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
+      <SidebarInset className="h-svh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground md:h-dvh">
         <ChatView
           environmentId={threadRef.environmentId}
           threadId={threadRef.threadId}

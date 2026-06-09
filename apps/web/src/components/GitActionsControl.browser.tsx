@@ -1,7 +1,7 @@
 import { scopeThreadRef } from "@t3tools/client-runtime";
-import { type GitStatusResult, ThreadId } from "@t3tools/contracts";
+import { ThreadId } from "@t3tools/contracts";
 import { useState } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
 
 const SHARED_THREAD_ID = ThreadId.make("thread-shared");
@@ -25,83 +25,30 @@ function createDeferredPromise<T>() {
 const {
   activeRunStackedActionDeferredRef,
   activeDraftThreadRef,
-  defaultGitStatus,
   hasServerThreadRef,
-  invalidateGitQueriesSpy,
-  gitStatusRef,
-  refreshGitStatusSpy,
-  runStackedActionMutateAsyncSpy,
+  invalidateSourceControlStateSpy,
+  refreshVcsStatusSpy,
+  runStackedActionSpy,
   setDraftThreadContextSpy,
   setThreadBranchSpy,
   toastAddSpy,
   toastCloseSpy,
   toastPromiseSpy,
   toastUpdateSpy,
-} = vi.hoisted(() => {
-  const defaultGitStatus: GitStatusResult = {
-    branch: "feature/toast-scope",
-    hasWorkingTreeChanges: false,
-    workingTree: { files: [], insertions: 0, deletions: 0 },
-    hasUpstream: true,
-    hasOriginRemote: true,
-    aheadCount: 1,
-    behindCount: 0,
-    pr: null,
-    isRepo: true,
-    isDefaultBranch: false,
-  };
-  const activeRunStackedActionDeferredRef = { current: createDeferredPromise<never>() };
-
-  return {
-    activeRunStackedActionDeferredRef,
-    activeDraftThreadRef: { current: null as unknown },
-    defaultGitStatus,
-    hasServerThreadRef: { current: true },
-    invalidateGitQueriesSpy: vi.fn(() => Promise.resolve()),
-    gitStatusRef: { current: defaultGitStatus },
-    refreshGitStatusSpy: vi.fn(() => Promise.resolve(null)),
-    runStackedActionMutateAsyncSpy: vi.fn(() => activeRunStackedActionDeferredRef.current.promise),
-    setDraftThreadContextSpy: vi.fn(),
-    setThreadBranchSpy: vi.fn(),
-    toastAddSpy: vi.fn(() => "toast-1"),
-    toastCloseSpy: vi.fn(),
-    toastPromiseSpy: vi.fn(),
-    toastUpdateSpy: vi.fn(),
-  };
-});
-
-vi.mock("@tanstack/react-query", async () => {
-  const actual =
-    await vi.importActual<typeof import("@tanstack/react-query")>("@tanstack/react-query");
-
-  return {
-    ...actual,
-    useIsMutating: vi.fn(() => 0),
-    useMutation: vi.fn((options: { __kind?: string }) => {
-      if (options.__kind === "run-stacked-action") {
-        return {
-          mutateAsync: runStackedActionMutateAsyncSpy,
-          isPending: false,
-        };
-      }
-
-      if (options.__kind === "pull") {
-        return {
-          mutateAsync: vi.fn(),
-          isPending: false,
-        };
-      }
-
-      return {
-        mutate: vi.fn(),
-        mutateAsync: vi.fn(),
-        isPending: false,
-      };
-    }),
-    useQuery: vi.fn(() => ({ data: null, error: null })),
-    useQueryClient: vi.fn(() => ({})),
-  };
-});
+} = vi.hoisted(() => ({
+  activeRunStackedActionDeferredRef: { current: createDeferredPromise<never>() },
+  activeDraftThreadRef: { current: null as unknown },
+  hasServerThreadRef: { current: true },
+  invalidateSourceControlStateSpy: vi.fn(() => Promise.resolve()),
+  refreshVcsStatusSpy: vi.fn(() => Promise.resolve(null)),
+  runStackedActionSpy: vi.fn(() => activeRunStackedActionDeferredRef.current.promise),
+  setDraftThreadContextSpy: vi.fn(),
+  setThreadBranchSpy: vi.fn(),
+  toastAddSpy: vi.fn(() => "toast-1"),
+  toastCloseSpy: vi.fn(),
+  toastPromiseSpy: vi.fn(),
+  toastUpdateSpy: vi.fn(),
+}));
 
 vi.mock("~/components/ui/toast", () => ({
   toastManager: {
@@ -110,28 +57,63 @@ vi.mock("~/components/ui/toast", () => ({
     promise: toastPromiseSpy,
     update: toastUpdateSpy,
   },
+  stackedThreadToast: vi.fn((options: unknown) => options),
 }));
 
 vi.mock("~/editorPreferences", () => ({
   openInPreferredEditor: vi.fn(),
 }));
 
-vi.mock("~/lib/gitReactQuery", () => ({
-  gitInitMutationOptions: vi.fn(() => ({ __kind: "init" })),
-  gitMutationKeys: {
-    pull: vi.fn(() => ["pull"]),
-    runStackedAction: vi.fn(() => ["run-stacked-action"]),
-  },
-  gitPullMutationOptions: vi.fn(() => ({ __kind: "pull" })),
-  gitRunStackedActionMutationOptions: vi.fn(() => ({ __kind: "run-stacked-action" })),
-  invalidateGitQueries: invalidateGitQueriesSpy,
+vi.mock("~/lib/sourceControlActions", () => ({
+  invalidateSourceControlState: invalidateSourceControlStateSpy,
+  useGitStackedAction: vi.fn(() => ({
+    error: null,
+    isPending: false,
+    resetError: vi.fn(),
+    run: runStackedActionSpy,
+  })),
+  useSourceControlActionRunning: vi.fn(() => false),
+  useSourceControlPublishRepositoryAction: vi.fn(() => ({
+    error: null,
+    isPending: false,
+    resetError: vi.fn(),
+    run: vi.fn(),
+  })),
+  useVcsInitAction: vi.fn(() => ({
+    error: null,
+    isPending: false,
+    resetError: vi.fn(),
+    run: vi.fn(),
+  })),
+  useVcsPullAction: vi.fn(() => ({
+    error: null,
+    isPending: false,
+    resetError: vi.fn(),
+    run: vi.fn(),
+  })),
 }));
 
-vi.mock("~/lib/gitStatusState", () => ({
-  refreshGitStatus: refreshGitStatusSpy,
-  resetGitStatusStateForTests: () => undefined,
-  useGitStatus: vi.fn(() => ({
-    data: gitStatusRef.current,
+vi.mock("~/lib/vcsStatusState", () => ({
+  refreshVcsStatus: refreshVcsStatusSpy,
+  resetVcsStatusStateForTests: () => undefined,
+  useVcsStatus: vi.fn(() => ({
+    data: {
+      isRepo: true,
+      sourceControlProvider: {
+        kind: "github",
+        name: "GitHub",
+        baseUrl: "https://github.com",
+      },
+      hasPrimaryRemote: true,
+      isDefaultRef: false,
+      refName: BRANCH_NAME,
+      hasWorkingTreeChanges: false,
+      workingTree: { files: [], insertions: 0, deletions: 0 },
+      hasUpstream: true,
+      aheadCount: 1,
+      behindCount: 0,
+      pr: null,
+    },
     error: null,
     isPending: false,
   })),
@@ -287,7 +269,6 @@ describe("GitActionsControl thread-scoped progress toast", () => {
     vi.clearAllMocks();
     activeRunStackedActionDeferredRef.current = createDeferredPromise<never>();
     activeDraftThreadRef.current = null;
-    gitStatusRef.current = defaultGitStatus;
     hasServerThreadRef.current = true;
     document.body.innerHTML = "";
   });
@@ -381,14 +362,14 @@ describe("GitActionsControl thread-scoped progress toast", () => {
       visibilityState = "visible";
       document.dispatchEvent(new Event("visibilitychange"));
 
-      expect(refreshGitStatusSpy).not.toHaveBeenCalled();
+      expect(refreshVcsStatusSpy).not.toHaveBeenCalled();
 
       await vi.advanceTimersByTimeAsync(249);
-      expect(refreshGitStatusSpy).not.toHaveBeenCalled();
+      expect(refreshVcsStatusSpy).not.toHaveBeenCalled();
 
       await vi.advanceTimersByTimeAsync(1);
-      expect(refreshGitStatusSpy).toHaveBeenCalledTimes(1);
-      expect(refreshGitStatusSpy).toHaveBeenCalledWith({
+      expect(refreshVcsStatusSpy).toHaveBeenCalledTimes(1);
+      expect(refreshVcsStatusSpy).toHaveBeenCalledWith({
         environmentId: ENVIRONMENT_A,
         cwd: GIT_CWD,
       });
@@ -468,80 +449,6 @@ describe("GitActionsControl thread-scoped progress toast", () => {
       expect(setDraftThreadContextSpy).not.toHaveBeenCalled();
       expect(setThreadBranchSpy).not.toHaveBeenCalled();
     } finally {
-      await screen.unmount();
-      host.remove();
-    }
-  });
-
-  it("runs commit and push from the commit dialog dropdown with the provided message", async () => {
-    activeRunStackedActionDeferredRef.current = createDeferredPromise<never>();
-    gitStatusRef.current = {
-      ...defaultGitStatus,
-      hasWorkingTreeChanges: true,
-      workingTree: {
-        files: [{ path: "src/example.ts", insertions: 3, deletions: 1 }],
-        insertions: 3,
-        deletions: 1,
-      },
-      aheadCount: 0,
-    };
-
-    const host = document.createElement("div");
-    document.body.append(host);
-    const screen = await render(
-      <GitActionsControl
-        gitCwd={GIT_CWD}
-        activeThreadRef={scopeThreadRef(ENVIRONMENT_A, SHARED_THREAD_ID)}
-      />,
-      { container: host },
-    );
-
-    try {
-      const gitOptionsButton = document.querySelector<HTMLButtonElement>(
-        'button[aria-label="Git action options"]',
-      );
-      expect(gitOptionsButton, "Unable to find git action options button.").toBeTruthy();
-      gitOptionsButton?.click();
-      await Promise.resolve();
-
-      const commitMenuItem = Array.from(
-        document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
-      ).find((item) => item.textContent?.includes("Commit"));
-      expect(commitMenuItem, "Unable to find Commit menu item.").toBeTruthy();
-      commitMenuItem?.click();
-      await Promise.resolve();
-
-      const messageInput = document.querySelector<HTMLTextAreaElement>("textarea");
-      expect(messageInput, "Unable to find commit message textarea.").toBeTruthy();
-      if (!messageInput) return;
-      messageInput.value = "fix: restore commit push action";
-      messageInput.dispatchEvent(new Event("input", { bubbles: true }));
-      await Promise.resolve();
-
-      const moreCommitActionsButton = document.querySelector<HTMLButtonElement>(
-        'button[aria-label="More commit actions"]',
-      );
-      expect(moreCommitActionsButton, "Unable to find more commit actions button.").toBeTruthy();
-      moreCommitActionsButton?.click();
-      await Promise.resolve();
-
-      const commitAndPushItem = Array.from(
-        document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
-      ).find((item) => item.textContent?.includes("Commit and Push"));
-      expect(commitAndPushItem, "Unable to find Commit and Push menu item.").toBeTruthy();
-      commitAndPushItem?.click();
-      await Promise.resolve();
-
-      expect(runStackedActionMutateAsyncSpy).toHaveBeenCalledWith(
-        expect.objectContaining({
-          action: "commit_push",
-          commitMessage: "fix: restore commit push action",
-          filePaths: ["src/example.ts"],
-        }),
-      );
-    } finally {
-      activeRunStackedActionDeferredRef.current.reject(new Error("test cleanup"));
-      await Promise.resolve();
       await screen.unmount();
       host.remove();
     }

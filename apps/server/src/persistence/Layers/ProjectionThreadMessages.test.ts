@@ -1,13 +1,14 @@
 import { MessageId, ThreadId } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 
 import { ProjectionThreadMessageRepository } from "../Services/ProjectionThreadMessages.ts";
 import { ProjectionThreadMessageRepositoryLive } from "./ProjectionThreadMessages.ts";
 import { SqlitePersistenceMemory } from "./Sqlite.ts";
 
 const layer = it.layer(
-  ProjectionThreadMessageRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)) as any,
+  ProjectionThreadMessageRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
 );
 
 layer("ProjectionThreadMessageRepository", (it) => {

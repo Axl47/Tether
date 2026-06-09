@@ -5,7 +5,8 @@ import {
   OrchestrationSession,
   OrchestrationThread,
 } from "@t3tools/contracts";
-import { Effect, Schema } from "effect";
+import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 
 import { toProjectorDecodeError, type OrchestrationProjectorDecodeError } from "./Errors.ts";
 import {
@@ -14,14 +15,14 @@ import {
   ProjectDeletedPayload,
   ProjectMetaUpdatedPayload,
   ThreadActivityAppendedPayload,
-  ThreadContextWindowClearedPayload,
-  ThreadContextWindowSetPayload,
+  ThreadArchivedPayload,
   ThreadCreatedPayload,
   ThreadDeletedPayload,
   ThreadInteractionModeSetPayload,
   ThreadMetaUpdatedPayload,
   ThreadProposedPlanUpsertedPayload,
   ThreadRuntimeModeSetPayload,
+  ThreadUnarchivedPayload,
   ThreadRevertedPayload,
   ThreadSessionSetPayload,
   ThreadTurnDiffCompletedPayload,
@@ -37,14 +38,6 @@ function checkpointStatusToLatestTurnState(status: "ready" | "missing" | "error"
   return "completed" as const;
 }
 
-function sessionStatusToAbandonedLatestTurnState(
-  status: OrchestrationSession["status"],
-): "error" | "interrupted" | null {
-  if (status === "error") return "error";
-  if (status === "interrupted" || status === "stopped") return "interrupted";
-  return null;
-}
-
 function updateThread(
   threads: ReadonlyArray<OrchestrationThread>,
   threadId: ThreadId,
@@ -54,15 +47,14 @@ function updateThread(
 }
 
 function decodeForEvent<A>(
-  schema: Schema.Schema<A>,
+  schema: Schema.Decoder<A, never>,
   value: unknown,
   eventType: OrchestrationEvent["type"],
   field: string,
 ): Effect.Effect<A, OrchestrationProjectorDecodeError> {
-  return Effect.try({
-    try: () => Schema.decodeUnknownSync(schema as any)(value),
-    catch: (error) => toProjectorDecodeError(`${eventType}:${field}`)(error as Schema.SchemaError),
-  });
+  return Schema.decodeUnknownEffect(schema)(value).pipe(
+    Effect.mapError(toProjectorDecodeError(`${eventType}:${field}`)),
+  );
 }
 
 function retainThreadMessagesAfterRevert(
@@ -191,9 +183,6 @@ export function projectEvent(
             id: payload.projectId,
             title: payload.title,
             workspaceRoot: payload.workspaceRoot,
-            ...(payload.repositoryIdentity !== undefined
-              ? { repositoryIdentity: payload.repositoryIdentity }
-              : {}),
             defaultModelSelection: payload.defaultModelSelection,
             scripts: payload.scripts,
             createdAt: payload.createdAt,
@@ -223,9 +212,6 @@ export function projectEvent(
                   ...(payload.title !== undefined ? { title: payload.title } : {}),
                   ...(payload.workspaceRoot !== undefined
                     ? { workspaceRoot: payload.workspaceRoot }
-                    : {}),
-                  ...(payload.repositoryIdentity !== undefined
-                    ? { repositoryIdentity: payload.repositoryIdentity }
                     : {}),
                   ...(payload.defaultModelSelection !== undefined
                     ? { defaultModelSelection: payload.defaultModelSelection }
@@ -274,14 +260,11 @@ export function projectEvent(
             branch: payload.branch,
             worktreePath: payload.worktreePath,
             latestTurn: null,
-            archivedAt: null,
-            lastAutoRenameUserMessageId: null,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
+            archivedAt: null,
             deletedAt: null,
             messages: [],
-            proposedPlans: [],
-            contextWindow: null,
             activities: [],
             checkpoints: [],
             session: null,
@@ -309,6 +292,28 @@ export function projectEvent(
         })),
       );
 
+    case "thread.archived":
+      return decodeForEvent(ThreadArchivedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            archivedAt: payload.archivedAt,
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "thread.unarchived":
+      return decodeForEvent(ThreadUnarchivedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            archivedAt: null,
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
     case "thread.meta-updated":
       return decodeForEvent(ThreadMetaUpdatedPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => ({
@@ -320,9 +325,6 @@ export function projectEvent(
               : {}),
             ...(payload.branch !== undefined ? { branch: payload.branch } : {}),
             ...(payload.worktreePath !== undefined ? { worktreePath: payload.worktreePath } : {}),
-            ...(payload.lastAutoRenameUserMessageId !== undefined
-              ? { lastAutoRenameUserMessageId: payload.lastAutoRenameUserMessageId }
-              : {}),
             updatedAt: payload.updatedAt,
           }),
         })),
@@ -435,14 +437,6 @@ export function projectEvent(
           event.type,
           "session",
         );
-        const previousActiveTurnId = thread.session?.activeTurnId ?? null;
-        const abandonedLatestTurnState = sessionStatusToAbandonedLatestTurnState(session.status);
-        const shouldSettleLatestTurn =
-          abandonedLatestTurnState !== null &&
-          previousActiveTurnId !== null &&
-          session.activeTurnId === null &&
-          thread.latestTurn?.turnId === previousActiveTurnId &&
-          thread.latestTurn.completedAt === null;
 
         return {
           ...nextBase,
@@ -467,13 +461,7 @@ export function projectEvent(
                         ? thread.latestTurn.assistantMessageId
                         : null,
                   }
-                : shouldSettleLatestTurn
-                  ? {
-                      ...thread.latestTurn,
-                      state: abandonedLatestTurnState,
-                      completedAt: session.updatedAt,
-                    }
-                  : thread.latestTurn,
+                : thread.latestTurn,
             updatedAt: event.occurredAt,
           }),
         };
@@ -510,38 +498,6 @@ export function projectEvent(
           }),
         };
       });
-
-    case "thread.context-window-set":
-      return decodeForEvent(
-        ThreadContextWindowSetPayload,
-        event.payload,
-        event.type,
-        "payload",
-      ).pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          threads: updateThread(nextBase.threads, payload.threadId, {
-            contextWindow: payload.contextWindow,
-            updatedAt: event.occurredAt,
-          }),
-        })),
-      );
-
-    case "thread.context-window-cleared":
-      return decodeForEvent(
-        ThreadContextWindowClearedPayload,
-        event.payload,
-        event.type,
-        "payload",
-      ).pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          threads: updateThread(nextBase.threads, payload.threadId, {
-            contextWindow: null,
-            updatedAt: event.occurredAt,
-          }),
-        })),
-      );
 
     case "thread.turn-diff-completed":
       return Effect.gen(function* () {
@@ -655,7 +611,6 @@ export function projectEvent(
               messages,
               proposedPlans,
               activities,
-              contextWindow: null,
               latestTurn,
               updatedAt: event.occurredAt,
             }),

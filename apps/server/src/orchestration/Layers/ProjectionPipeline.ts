@@ -4,7 +4,12 @@ import {
   type OrchestrationEvent,
   ThreadId,
 } from "@t3tools/contracts";
-import { Effect, FileSystem, Layer, Option, Path, Stream } from "effect";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Path from "effect/Path";
+import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { toPersistenceSqlError, type ProjectionRepositoryError } from "../../persistence/Errors.ts";
@@ -330,7 +335,7 @@ const runAttachmentSideEffects = Effect.fn("runAttachmentSideEffects")(function*
   const attachmentsRootDir = serverConfig.attachmentsDir;
   const readAttachmentRootEntries = fileSystem
     .readDirectory(attachmentsRootDir, { recursive: false })
-    .pipe(Effect.catch(() => Effect.succeed([] as Array<string>)));
+    .pipe(Effect.orElseSucceed(() => [] as Array<string>));
 
   const removeDeletedThreadAttachmentEntry = Effect.fn("removeDeletedThreadAttachmentEntry")(
     function* (threadSegment: string, entry: string) {
@@ -392,9 +397,7 @@ const runAttachmentSideEffects = Effect.fn("runAttachmentSideEffects")(function*
     }
 
     const absolutePath = path.join(attachmentsRootDir, relativePath);
-    const fileInfo = yield* fileSystem
-      .stat(absolutePath)
-      .pipe(Effect.catch(() => Effect.succeed(null)));
+    const fileInfo = yield* fileSystem.stat(absolutePath).pipe(Effect.orElseSucceed(() => null));
     if (!fileInfo || fileInfo.type !== "File") {
       return;
     }
@@ -532,12 +535,15 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         projectionPendingApprovalRepository.listByThreadId({ threadId }),
       ]);
 
-      const latestUserMessageAt =
-        messages
-          .filter((message) => message.role === "user")
-          .map((message) => message.createdAt)
-          .toSorted()
-          .at(-1) ?? null;
+      let latestUserMessageAt: string | null = null;
+      for (const message of messages) {
+        if (
+          message.role === "user" &&
+          (latestUserMessageAt === null || message.createdAt > latestUserMessageAt)
+        ) {
+          latestUserMessageAt = message.createdAt;
+        }
+      }
 
       const pendingApprovalCount = pendingApprovals.filter(
         (approval) => approval.status === "pending",
@@ -571,9 +577,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             interactionMode: event.payload.interactionMode,
             branch: event.payload.branch,
             worktreePath: event.payload.worktreePath,
-            contextWindow: null,
             latestTurnId: null,
-            lastAutoRenameUserMessageId: null,
             createdAt: event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
             archivedAt: null,
@@ -632,11 +636,6 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             ...(event.payload.worktreePath !== undefined
               ? { worktreePath: event.payload.worktreePath }
               : {}),
-            ...(event.payload.lastAutoRenameUserMessageId !== undefined
-              ? {
-                  lastAutoRenameUserMessageId: event.payload.lastAutoRenameUserMessageId,
-                }
-              : {}),
             updatedAt: event.payload.updatedAt,
           });
           return;
@@ -668,36 +667,6 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             ...existingRow.value,
             interactionMode: event.payload.interactionMode,
             updatedAt: event.payload.updatedAt,
-          });
-          return;
-        }
-
-        case "thread.context-window-set": {
-          const existingRow = yield* projectionThreadRepository.getById({
-            threadId: event.payload.threadId,
-          });
-          if (Option.isNone(existingRow)) {
-            return;
-          }
-          yield* projectionThreadRepository.upsert({
-            ...existingRow.value,
-            contextWindow: event.payload.contextWindow,
-            updatedAt: event.occurredAt,
-          });
-          return;
-        }
-
-        case "thread.context-window-cleared": {
-          const existingRow = yield* projectionThreadRepository.getById({
-            threadId: event.payload.threadId,
-          });
-          if (Option.isNone(existingRow)) {
-            return;
-          }
-          yield* projectionThreadRepository.upsert({
-            ...existingRow.value,
-            contextWindow: null,
-            updatedAt: event.occurredAt,
           });
           return;
         }
@@ -776,10 +745,31 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           if (Option.isNone(existingRow)) {
             return;
           }
+
+          const retainedTurns = yield* projectionTurnRepository.listByThreadId({
+            threadId: event.payload.threadId,
+          });
+          let latestTurnId: ProjectionTurn["turnId"] = null;
+          let latestCheckpointTurnCount = -1;
+          for (let index = 0; index < retainedTurns.length; index += 1) {
+            const turn = retainedTurns[index];
+            if (
+              !turn ||
+              turn.turnId === null ||
+              turn.checkpointTurnCount === null ||
+              turn.checkpointTurnCount > event.payload.turnCount
+            ) {
+              continue;
+            }
+            if (turn.checkpointTurnCount > latestCheckpointTurnCount) {
+              latestCheckpointTurnCount = turn.checkpointTurnCount;
+              latestTurnId = turn.turnId;
+            }
+          }
+
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
-            contextWindow: null,
-            latestTurnId: null,
+            latestTurnId,
             updatedAt: event.occurredAt,
           });
           yield* refreshThreadShellSummary(event.payload.threadId);
@@ -983,6 +973,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         threadId: event.payload.threadId,
         status: event.payload.session.status,
         providerName: event.payload.session.providerName,
+        providerInstanceId: event.payload.session.providerInstanceId ?? null,
         runtimeMode: event.payload.session.runtimeMode,
         activeTurnId: event.payload.session.activeTurnId,
         lastError: event.payload.session.lastError,
@@ -1008,38 +999,6 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         case "thread.session-set": {
           const turnId = event.payload.session.activeTurnId;
           if (turnId === null || event.payload.session.status !== "running") {
-            if (
-              event.payload.session.status === "stopped" ||
-              event.payload.session.status === "interrupted" ||
-              event.payload.session.status === "error"
-            ) {
-              const existingTurns = yield* projectionTurnRepository.listByThreadId({
-                threadId: event.payload.threadId,
-              });
-              const runningTurn = existingTurns
-                .toReversed()
-                .find((row) => row.turnId !== null && row.state === "running");
-              if (runningTurn?.turnId) {
-                yield* projectionTurnRepository.upsertByTurnId({
-                  threadId: runningTurn.threadId,
-                  turnId: runningTurn.turnId,
-                  pendingMessageId: runningTurn.pendingMessageId,
-                  assistantMessageId: runningTurn.assistantMessageId,
-                  state: event.payload.session.status === "error" ? "error" : "interrupted",
-                  requestedAt: runningTurn.requestedAt,
-                  startedAt: runningTurn.startedAt ?? event.payload.session.updatedAt,
-                  completedAt: runningTurn.completedAt ?? event.payload.session.updatedAt,
-                  checkpointTurnCount: runningTurn.checkpointTurnCount,
-                  checkpointRef: runningTurn.checkpointRef,
-                  checkpointStatus: runningTurn.checkpointStatus,
-                  checkpointFiles: [...runningTurn.checkpointFiles],
-                });
-              }
-
-              yield* projectionTurnRepository.deletePendingTurnStartByThreadId({
-                threadId: event.payload.threadId,
-              });
-            }
             return;
           }
 
@@ -1061,6 +1020,16 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               pendingMessageId:
                 existingTurn.value.pendingMessageId ??
                 (Option.isSome(pendingTurnStart) ? pendingTurnStart.value.messageId : null),
+              sourceProposedPlanThreadId:
+                existingTurn.value.sourceProposedPlanThreadId ??
+                (Option.isSome(pendingTurnStart)
+                  ? pendingTurnStart.value.sourceProposedPlanThreadId
+                  : null),
+              sourceProposedPlanId:
+                existingTurn.value.sourceProposedPlanId ??
+                (Option.isSome(pendingTurnStart)
+                  ? pendingTurnStart.value.sourceProposedPlanId
+                  : null),
               startedAt:
                 existingTurn.value.startedAt ??
                 (Option.isSome(pendingTurnStart)
@@ -1078,6 +1047,12 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               threadId: event.payload.threadId,
               pendingMessageId: Option.isSome(pendingTurnStart)
                 ? pendingTurnStart.value.messageId
+                : null,
+              sourceProposedPlanThreadId: Option.isSome(pendingTurnStart)
+                ? pendingTurnStart.value.sourceProposedPlanThreadId
+                : null,
+              sourceProposedPlanId: Option.isSome(pendingTurnStart)
+                ? pendingTurnStart.value.sourceProposedPlanId
                 : null,
               assistantMessageId: null,
               state: "running",
@@ -1132,6 +1107,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             turnId: event.payload.turnId,
             threadId: event.payload.threadId,
             pendingMessageId: null,
+            sourceProposedPlanThreadId: null,
+            sourceProposedPlanId: null,
             assistantMessageId: event.payload.messageId,
             state: event.payload.streaming ? "running" : "completed",
             requestedAt: event.payload.createdAt,
@@ -1167,6 +1144,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             turnId: event.payload.turnId,
             threadId: event.payload.threadId,
             pendingMessageId: null,
+            sourceProposedPlanThreadId: null,
+            sourceProposedPlanId: null,
             assistantMessageId: null,
             state: "interrupted",
             requestedAt: event.payload.createdAt,
@@ -1211,6 +1190,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             turnId: event.payload.turnId,
             threadId: event.payload.threadId,
             pendingMessageId: null,
+            sourceProposedPlanThreadId: null,
+            sourceProposedPlanId: null,
             assistantMessageId: event.payload.assistantMessageId,
             state: nextState,
             requestedAt: event.payload.completedAt,

@@ -1,12 +1,9 @@
 import type {
   ProjectScript,
   ProjectScriptIcon,
-  ProjectScriptStep,
   ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
 import {
-  ArrowDownIcon,
-  ArrowUpIcon,
   BugIcon,
   ChevronDownIcon,
   FlaskConicalIcon,
@@ -15,9 +12,7 @@ import {
   PlayIcon,
   PlusIcon,
   SettingsIcon,
-  ZapIcon,
   WrenchIcon,
-  XIcon,
 } from "lucide-react";
 import React, { type FormEvent, type KeyboardEvent, useCallback, useMemo, useState } from "react";
 
@@ -25,14 +20,13 @@ import {
   keybindingValueForCommand,
   decodeProjectScriptKeybindingRule,
 } from "~/lib/projectScriptKeybindings";
+import { keybindingFromKeyboardEvent } from "~/components/settings/KeybindingsSettings.logic";
 import {
   commandForProjectScript,
   nextProjectScriptId,
   primaryProjectScript,
 } from "~/projectScripts";
-import { projectScriptSteps } from "~/lib/projectScriptExecution";
 import { shortcutLabelForCommand } from "~/keybindings";
-import { isMacPlatform } from "~/lib/utils";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -86,7 +80,7 @@ function ScriptIcon({
 
 export interface NewProjectScriptInput {
   name: string;
-  steps: ProjectScriptStep[];
+  command: string;
   icon: ProjectScriptIcon;
   runOnWorktreeCreate: boolean;
   keybinding: string | null;
@@ -96,69 +90,16 @@ interface ProjectScriptsControlProps {
   scripts: ProjectScript[];
   keybindings: ResolvedKeybindingsConfig;
   preferredScriptId?: string | null;
-  mode?: "toolbar" | "menu-button";
   onRunScript: (script: ProjectScript) => void;
   onAddScript: (input: NewProjectScriptInput) => Promise<void> | void;
   onUpdateScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void> | void;
   onDeleteScript: (scriptId: string) => Promise<void> | void;
 }
 
-function normalizeShortcutKeyToken(key: string): string | null {
-  const normalized = key.toLowerCase();
-  if (
-    normalized === "meta" ||
-    normalized === "control" ||
-    normalized === "ctrl" ||
-    normalized === "shift" ||
-    normalized === "alt" ||
-    normalized === "option"
-  ) {
-    return null;
-  }
-  if (normalized === " ") return "space";
-  if (normalized === "escape") return "esc";
-  if (normalized === "arrowup") return "arrowup";
-  if (normalized === "arrowdown") return "arrowdown";
-  if (normalized === "arrowleft") return "arrowleft";
-  if (normalized === "arrowright") return "arrowright";
-  if (normalized.length === 1) return normalized;
-  if (normalized.startsWith("f") && normalized.length <= 3) return normalized;
-  if (normalized === "enter" || normalized === "tab" || normalized === "backspace") {
-    return normalized;
-  }
-  if (normalized === "delete" || normalized === "home" || normalized === "end") {
-    return normalized;
-  }
-  if (normalized === "pageup" || normalized === "pagedown") return normalized;
-  return null;
-}
-
-function keybindingFromEvent(event: KeyboardEvent<HTMLInputElement>): string | null {
-  const keyToken = normalizeShortcutKeyToken(event.key);
-  if (!keyToken) return null;
-
-  const parts: string[] = [];
-  if (isMacPlatform(navigator.platform)) {
-    if (event.metaKey) parts.push("mod");
-    if (event.ctrlKey) parts.push("ctrl");
-  } else {
-    if (event.ctrlKey) parts.push("mod");
-    if (event.metaKey) parts.push("meta");
-  }
-  if (event.altKey) parts.push("alt");
-  if (event.shiftKey) parts.push("shift");
-  if (parts.length === 0) {
-    return null;
-  }
-  parts.push(keyToken);
-  return parts.join("+");
-}
-
 export default function ProjectScriptsControl({
   scripts,
   keybindings,
   preferredScriptId = null,
-  mode = "toolbar",
   onRunScript,
   onAddScript,
   onUpdateScript,
@@ -168,14 +109,13 @@ export default function ProjectScriptsControl({
   const [editingScriptId, setEditingScriptId] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [name, setName] = useState("");
-  const [steps, setSteps] = useState<ProjectScriptStep[]>([{ id: "step-1", command: "" }]);
+  const [command, setCommand] = useState("");
   const [icon, setIcon] = useState<ProjectScriptIcon>("play");
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [runOnWorktreeCreate, setRunOnWorktreeCreate] = useState(false);
   const [keybinding, setKeybinding] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
 
   const primaryScript = useMemo(() => {
     if (preferredScriptId) {
@@ -188,15 +128,6 @@ export default function ProjectScriptsControl({
   const dropdownItemClassName =
     "data-highlighted:bg-transparent data-highlighted:text-foreground hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground data-highlighted:hover:bg-accent data-highlighted:hover:text-accent-foreground data-highlighted:focus-visible:bg-accent data-highlighted:focus-visible:text-accent-foreground";
 
-  const nextStepId = useCallback((currentSteps: ProjectScriptStep[]): string => {
-    const taken = new Set(currentSteps.map((step) => step.id));
-    let index = currentSteps.length + 1;
-    while (taken.has(`step-${index}`)) {
-      index += 1;
-    }
-    return `step-${index}`;
-  }, []);
-
   const captureKeybinding = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Tab") return;
     event.preventDefault();
@@ -204,7 +135,7 @@ export default function ProjectScriptsControl({
       setKeybinding("");
       return;
     }
-    const next = keybindingFromEvent(event);
+    const next = keybindingFromKeyboardEvent(event, navigator.platform);
     if (!next) return;
     setKeybinding(next);
   };
@@ -212,20 +143,13 @@ export default function ProjectScriptsControl({
   const submitAddScript = async (event: FormEvent) => {
     event.preventDefault();
     const trimmedName = name.trim();
-    const trimmedSteps = steps.map((step) => ({
-      id: step.id,
-      command: step.command.trim(),
-    }));
+    const trimmedCommand = command.trim();
     if (trimmedName.length === 0) {
       setValidationError("Name is required.");
       return;
     }
-    if (trimmedSteps.length === 0 || trimmedSteps[0]?.command.length === 0) {
-      setValidationError("Primary command is required.");
-      return;
-    }
-    if (trimmedSteps.some((step) => step.command.length === 0)) {
-      setValidationError("Additional terminal commands cannot be empty.");
+    if (trimmedCommand.length === 0) {
+      setValidationError("Command is required.");
       return;
     }
 
@@ -243,7 +167,7 @@ export default function ProjectScriptsControl({
       });
       const payload = {
         name: trimmedName,
-        steps: trimmedSteps,
+        command: trimmedCommand,
         icon,
         runOnWorktreeCreate,
         keybinding: keybindingRule?.key ?? null,
@@ -260,34 +184,29 @@ export default function ProjectScriptsControl({
     }
   };
 
-  const openAddDialog = useCallback(() => {
+  const openAddDialog = () => {
     setEditingScriptId(null);
     setName("");
-    setSteps([{ id: "step-1", command: "" }]);
+    setCommand("");
     setIcon("play");
     setIconPickerOpen(false);
     setRunOnWorktreeCreate(false);
     setKeybinding("");
     setValidationError(null);
     setDialogOpen(true);
-  }, []);
+  };
 
-  const openEditDialog = useCallback(
-    (script: ProjectScript) => {
-      setEditingScriptId(script.id);
-      setName(script.name);
-      setSteps(projectScriptSteps(script));
-      setIcon(script.icon);
-      setIconPickerOpen(false);
-      setRunOnWorktreeCreate(script.runOnWorktreeCreate);
-      setKeybinding(
-        keybindingValueForCommand(keybindings, commandForProjectScript(script.id)) ?? "",
-      );
-      setValidationError(null);
-      setDialogOpen(true);
-    },
-    [keybindings],
-  );
+  const openEditDialog = (script: ProjectScript) => {
+    setEditingScriptId(script.id);
+    setName(script.name);
+    setCommand(script.command);
+    setIcon(script.icon);
+    setIconPickerOpen(false);
+    setRunOnWorktreeCreate(script.runOnWorktreeCreate);
+    setKeybinding(keybindingValueForCommand(keybindings, commandForProjectScript(script.id)) ?? "");
+    setValidationError(null);
+    setDialogOpen(true);
+  };
 
   const confirmDeleteScript = useCallback(() => {
     if (!editingScriptId) return;
@@ -296,142 +215,9 @@ export default function ProjectScriptsControl({
     void onDeleteScript(editingScriptId);
   }, [editingScriptId, onDeleteScript]);
 
-  const addStep = useCallback(() => {
-    setSteps((current) => {
-      if (current.length >= 4) return current;
-      return [...current, { id: nextStepId(current), command: "" }];
-    });
-  }, [nextStepId]);
-
-  const updateStepCommand = useCallback((stepId: string, command: string) => {
-    setSteps((current) =>
-      current.map((step) => (step.id === stepId ? { ...step, command } : step)),
-    );
-  }, []);
-
-  const moveStep = useCallback((stepId: string, direction: -1 | 1) => {
-    setSteps((current) => {
-      const index = current.findIndex((step) => step.id === stepId);
-      if (index < 0) return current;
-      const nextIndex = index + direction;
-      if (nextIndex < 0 || nextIndex >= current.length) return current;
-      const next = [...current];
-      const [step] = next.splice(index, 1);
-      if (!step) return current;
-      next.splice(nextIndex, 0, step);
-      return next;
-    });
-  }, []);
-
-  const removeStep = useCallback((stepId: string) => {
-    setSteps((current) => {
-      if (current.length <= 1) return current;
-      return current.filter((step) => step.id !== stepId);
-    });
-  }, []);
-
-  const runScriptFromMenu = useCallback(
-    (script: ProjectScript) => {
-      onRunScript(script);
-      queueMicrotask(() => setMenuOpen(false));
-    },
-    [onRunScript],
-  );
-
-  const openAddDialogFromMenu = useCallback(() => {
-    openAddDialog();
-    queueMicrotask(() => setMenuOpen(false));
-  }, [openAddDialog]);
-
-  const openEditDialogFromMenu = useCallback(
-    (script: ProjectScript) => {
-      openEditDialog(script);
-      queueMicrotask(() => setMenuOpen(false));
-    },
-    [openEditDialog],
-  );
-
-  const scriptsMenuContent = (
-    <>
-      {scripts.map((script) => {
-        const shortcutLabel = shortcutLabelForCommand(
-          keybindings,
-          commandForProjectScript(script.id),
-        );
-        return (
-          <MenuItem
-            key={script.id}
-            className={`group ${dropdownItemClassName}`}
-            closeOnClick={mode !== "menu-button"}
-            onClick={() => runScriptFromMenu(script)}
-          >
-            <ScriptIcon icon={script.icon} className="size-4" />
-            <span className="truncate">
-              {script.runOnWorktreeCreate ? `${script.name} (setup)` : script.name}
-            </span>
-            <span className="relative ms-auto flex h-6 min-w-6 items-center justify-end">
-              {shortcutLabel && (
-                <MenuShortcut className="ms-0 transition-opacity group-hover:opacity-0 group-focus-visible:opacity-0">
-                  {shortcutLabel}
-                </MenuShortcut>
-              )}
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                className="absolute right-0 top-1/2 size-6 -translate-y-1/2 opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto group-focus-visible:opacity-100 group-focus-visible:pointer-events-auto"
-                aria-label={`Edit ${script.name}`}
-                onPointerDown={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                }}
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  openEditDialogFromMenu(script);
-                }}
-              >
-                <SettingsIcon className="size-3.5" />
-              </Button>
-            </span>
-          </MenuItem>
-        );
-      })}
-      <MenuItem
-        className={dropdownItemClassName}
-        closeOnClick={mode !== "menu-button"}
-        onClick={openAddDialogFromMenu}
-      >
-        <PlusIcon className="size-4" />
-        Add action
-      </MenuItem>
-    </>
-  );
-
   return (
     <>
-      {mode === "menu-button" ? (
-        primaryScript ? (
-          <Menu highlightItemOnHover={false} open={menuOpen} onOpenChange={setMenuOpen}>
-            <MenuTrigger
-              render={<Button size="icon-xs" variant="outline" aria-label="Run actions" />}
-            >
-              <ZapIcon className="size-3.5" />
-            </MenuTrigger>
-            <MenuPopup align="end">{scriptsMenuContent}</MenuPopup>
-          </Menu>
-        ) : (
-          <Button
-            size="icon-xs"
-            variant="outline"
-            onClick={openAddDialog}
-            title="Add action"
-            aria-label="Add action"
-          >
-            <PlusIcon className="size-3.5" />
-          </Button>
-        )
-      ) : primaryScript ? (
+      {primaryScript ? (
         <Group aria-label="Project scripts">
           <Button
             size="xs"
@@ -440,30 +226,74 @@ export default function ProjectScriptsControl({
             title={`Run ${primaryScript.name}`}
           >
             <ScriptIcon icon={primaryScript.icon} />
-            <span className="sr-only @sm/header-actions:not-sr-only @sm/header-actions:ml-0.5">
+            <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
               {primaryScript.name}
             </span>
           </Button>
-          <GroupSeparator className="hidden @sm/header-actions:block" />
+          <GroupSeparator className="hidden @3xl/header-actions:block" />
           <Menu highlightItemOnHover={false}>
             <MenuTrigger
               render={<Button size="icon-xs" variant="outline" aria-label="Script actions" />}
             >
               <ChevronDownIcon className="size-4" />
             </MenuTrigger>
-            <MenuPopup align="end">{scriptsMenuContent}</MenuPopup>
+            <MenuPopup align="end">
+              {scripts.map((script) => {
+                const shortcutLabel = shortcutLabelForCommand(
+                  keybindings,
+                  commandForProjectScript(script.id),
+                );
+                return (
+                  <MenuItem
+                    key={script.id}
+                    className={`group ${dropdownItemClassName}`}
+                    onClick={() => onRunScript(script)}
+                  >
+                    <ScriptIcon icon={script.icon} className="size-4" />
+                    <span className="truncate">
+                      {script.runOnWorktreeCreate ? `${script.name} (setup)` : script.name}
+                    </span>
+                    <span className="relative ms-auto flex h-6 min-w-6 items-center justify-end">
+                      {shortcutLabel && (
+                        <MenuShortcut className="ms-0 transition-opacity group-hover:opacity-0 group-focus-visible:opacity-0">
+                          {shortcutLabel}
+                        </MenuShortcut>
+                      )}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        className="absolute right-0 top-1/2 size-6 -translate-y-1/2 opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto group-focus-visible:opacity-100 group-focus-visible:pointer-events-auto"
+                        aria-label={`Edit ${script.name}`}
+                        onPointerDown={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                        }}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          openEditDialog(script);
+                        }}
+                      >
+                        <SettingsIcon className="size-3.5" />
+                      </Button>
+                    </span>
+                  </MenuItem>
+                );
+              })}
+              <MenuItem className={dropdownItemClassName} onClick={openAddDialog}>
+                <PlusIcon className="size-4" />
+                Add action
+              </MenuItem>
+            </MenuPopup>
           </Menu>
         </Group>
       ) : (
-        <Button
-          size="xs"
-          variant="outline"
-          onClick={openAddDialog}
-          title="Add action"
-          aria-label="Add action"
-        >
+        <Button size="xs" variant="outline" onClick={openAddDialog} title="Add action">
           <PlusIcon className="size-3.5" />
-          <span className="sr-only">Add action</span>
+          <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
+            Add action
+          </span>
         </Button>
       )}
 
@@ -478,7 +308,7 @@ export default function ProjectScriptsControl({
           if (open) return;
           setEditingScriptId(null);
           setName("");
-          setSteps([{ id: "step-1", command: "" }]);
+          setCommand("");
           setIcon("play");
           setRunOnWorktreeCreate(false);
           setKeybinding("");
@@ -560,76 +390,13 @@ export default function ProjectScriptsControl({
                 </p>
               </div>
               <div className="space-y-1.5">
-                <div className="flex items-center justify-between gap-2">
-                  <Label>Commands</Label>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="xs"
-                    onClick={addStep}
-                    disabled={steps.length >= 4}
-                  >
-                    <PlusIcon className="size-3.5" />
-                    Add terminal
-                  </Button>
-                </div>
-                <div className="space-y-3">
-                  {steps.map((step, index) => {
-                    const stepLabel =
-                      index === 0 ? "Primary command" : "Additional terminal command";
-                    return (
-                      <div
-                        key={step.id}
-                        className="space-y-1.5 rounded-md border border-border/70 p-3"
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <Label htmlFor={`script-command-${step.id}`}>{stepLabel}</Label>
-                          <div className="flex items-center gap-1">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-xs"
-                              aria-label={`Move ${stepLabel.toLowerCase()} up`}
-                              onClick={() => moveStep(step.id, -1)}
-                              disabled={index === 0}
-                            >
-                              <ArrowUpIcon className="size-3.5" />
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-xs"
-                              aria-label={`Move ${stepLabel.toLowerCase()} down`}
-                              onClick={() => moveStep(step.id, 1)}
-                              disabled={index === steps.length - 1}
-                            >
-                              <ArrowDownIcon className="size-3.5" />
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-xs"
-                              aria-label={`Remove ${stepLabel.toLowerCase()}`}
-                              onClick={() => removeStep(step.id)}
-                              disabled={steps.length === 1}
-                            >
-                              <XIcon className="size-3.5" />
-                            </Button>
-                          </div>
-                        </div>
-                        <Textarea
-                          id={`script-command-${step.id}`}
-                          placeholder={index === 0 ? "bun test" : "bun run api"}
-                          value={step.command}
-                          onChange={(event) => updateStepCommand(step.id, event.target.value)}
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Additional terminal commands open in new integrated terminal tabs.
-                </p>
+                <Label htmlFor="script-command">Command</Label>
+                <Textarea
+                  id="script-command"
+                  placeholder="bun test"
+                  value={command}
+                  onChange={(event) => setCommand(event.target.value)}
+                />
               </div>
               <label className="flex items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2 text-sm">
                 <span>Run automatically on worktree creation</span>
