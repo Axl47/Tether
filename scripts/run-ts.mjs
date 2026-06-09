@@ -4,10 +4,17 @@ import { accessSync, constants } from "node:fs";
 import { delimiter, join } from "node:path";
 import { spawnSync } from "node:child_process";
 
-const [, , scriptPath, ...scriptArgs] = process.argv;
+const args = process.argv.slice(2);
+const runtimeArgs = [];
+
+if (args[0] === "--watch") {
+  runtimeArgs.push(args.shift());
+}
+
+const [scriptPath, ...scriptArgs] = args;
 
 if (!scriptPath) {
-  console.error("Usage: node scripts/run-ts.mjs <script.ts> [...args]");
+  console.error("Usage: node scripts/run-ts.mjs [--watch] <script.ts> [...args]");
   process.exit(1);
 }
 
@@ -72,12 +79,12 @@ function run(command, args) {
 }
 
 if (nodeCanRunTypeScript()) {
-  run(process.execPath, [scriptPath, ...scriptArgs]);
+  run(process.execPath, [...runtimeArgs, scriptPath, ...scriptArgs]);
 }
 
 const bun = findBun();
 if (bun) {
-  run(bun, [scriptPath, ...scriptArgs]);
+  run(bun, [...runtimeArgs, scriptPath, ...scriptArgs]);
 }
 
 console.error(
